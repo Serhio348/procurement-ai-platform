@@ -24,6 +24,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 
 ## Документы
 
+- [**Инструкция по разработке**](AGENTS.md) — начните отсюда, если продолжаете работу над проектом
 - [Этап 0 — архитектура](docs/architecture/STAGE-0.md)
 - [Этап 1 — структура репозитория и базовые пакеты](docs/architecture/STAGE-1.md)
 

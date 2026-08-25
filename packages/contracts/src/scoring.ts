@@ -85,11 +85,15 @@ export const ScoringFormula = z.object({
     high: z.number().min(0),
     critical: z.number().min(0),
   }),
-  thresholds: z.object({
-    reject: z.number().min(0).max(100),
-    review: z.number().min(0).max(100),
-    accept: z.number().min(0).max(100),
-  }),
+  /** `accept` must not be below `review`; everything under `review` is rejected. */
+  thresholds: z
+    .object({
+      review: z.number().min(0).max(100),
+      accept: z.number().min(0).max(100),
+    })
+    .refine((t) => t.accept >= t.review, {
+      message: "accept threshold must be greater than or equal to review threshold",
+    }),
   /** Aggregate confidence below this escalates instead of deciding. */
   minConfidence: Confidence,
 });

@@ -1,7 +1,8 @@
 # Local infrastructure
 
 The compose file targets Docker Engine on Ubuntu 24.04 and also works with
-Docker Desktop for development.
+Docker Desktop for development. A full Ubuntu VM walkthrough is in
+[`docs/ops/ubuntu-server.md`](../docs/ops/ubuntu-server.md).
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d

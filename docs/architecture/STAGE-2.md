@@ -54,6 +54,7 @@ infra/docker-compose.yml
 infra/README.md
 packages/db/package.json
 packages/db/tsconfig.json
+packages/db/drizzle.config.ts
 packages/db/drizzle/0000_spooky_sauron.sql
 packages/db/drizzle/meta/*
 packages/db/src/client.ts

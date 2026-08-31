@@ -77,7 +77,10 @@ module.exports = {
       name: "no-orphans",
       severity: "warn",
       comment: "Unreachable module - probably dead code.",
-      from: { orphan: true, pathNot: ["\\.d\\.ts$", "(^|/)tsconfig\\.json$"] },
+      from: {
+        orphan: true,
+        pathNot: ["\\.d\\.ts$", "(^|/)tsconfig\\.json$", "(^|/)drizzle\\.config\\.ts$"],
+      },
       to: {},
     },
   ],

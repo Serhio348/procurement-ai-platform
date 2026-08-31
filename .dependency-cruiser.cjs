@@ -46,7 +46,8 @@ module.exports = {
         pathNot: [
           "^packages/db/src",
           "^packages/contracts",
-          "^node_modules/",
+          "(^|/)node_modules/",
+          "^(node:)?(url|path|fs)$",
         ],
       },
     },

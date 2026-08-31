@@ -1,0 +1,28 @@
+{
+  "name": "@procurement/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PostgreSQL schema, migrations, repositories, and idempotent bootstrap data.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:migrate": "tsx src/migrate.ts",
+    "db:bootstrap": "tsx src/bootstrap.ts"
+  },
+  "dependencies": {
+    "@procurement/contracts": "*",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

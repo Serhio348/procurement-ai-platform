@@ -1,0 +1,141 @@
+import { ProcedureCard } from "@procurement/contracts";
+import { eq, sql } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { applyBootstrap } from "./bootstrap.js";
+import { createDatabase, type Database } from "./client.js";
+import { migrateDatabase } from "./migrate.js";
+import { createRepositories } from "./repositories.js";
+import { domainProfiles, procurements, seedRuns } from "./schema.js";
+
+const testDatabaseUrl = process.env["TEST_DATABASE_URL"];
+const integration = describe.skipIf(testDatabaseUrl === undefined);
+
+integration("PostgreSQL migrations and invariants", () => {
+  let db: Database;
+  let pool: ReturnType<typeof createDatabase>["pool"];
+
+  beforeAll(async () => {
+    if (testDatabaseUrl === undefined) throw new Error("TEST_DATABASE_URL is required");
+    await migrateDatabase(testDatabaseUrl);
+    ({ db, pool } = createDatabase(testDatabaseUrl));
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  it("applies bootstrap once and keeps exactly one editable equipment profile", async () => {
+    await applyBootstrap(db);
+    const secondApplication = await applyBootstrap(db);
+
+    const profiles = await db.select().from(domainProfiles);
+    const runs = await db.select().from(seedRuns);
+
+    expect(secondApplication).toBe(false);
+    expect(profiles.filter((row) => row.slug === "electrical_equipment")).toHaveLength(1);
+    expect(runs.filter((row) => row.seedId === "electrical_equipment.v1")).toHaveLength(1);
+  });
+
+  it("does not overwrite specialist edits on later bootstrap runs", async () => {
+    await db
+      .update(domainProfiles)
+      .set({ name: "Изменённый специалистом профиль" })
+      .where(eq(domainProfiles.slug, "electrical_equipment"));
+
+    await applyBootstrap(db);
+    const rows = await db
+      .select({ name: domainProfiles.name })
+      .from(domainProfiles)
+      .where(eq(domainProfiles.slug, "electrical_equipment"));
+
+    expect(rows[0]?.name).toBe("Изменённый специалистом профиль");
+  });
+
+  it("upserts a procurement by source and record id without duplicates", async () => {
+    const repositories = createRepositories(db);
+    const card = ProcedureCard.parse({
+      sourceId: "integration_source",
+      sourceProcurementId: "record-1",
+      url: "https://example.test/procurements/record-1",
+      title: "Integration test procurement",
+      kind: "other" as const,
+      status: "unknown" as const,
+      pageFamily: "other" as const,
+      externalIds: [],
+      parties: [],
+      lots: [],
+      rawFields: {},
+      fetchedAt: "2026-08-31T19:00:00.000Z",
+    });
+
+    const first = await repositories.procurements.upsertCard(card);
+    const second = await repositories.procurements.upsertCard(ProcedureCard.parse({
+      ...card,
+      title: "Updated integration test procurement",
+    }));
+    const rows = await db
+      .select()
+      .from(procurements)
+      .where(
+        sql`${procurements.sourceId} = 'integration_source' and ${procurements.sourceRecordId} = 'record-1'`,
+      );
+
+    expect(second.id).toBe(first.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.title).toBe("Updated integration test procurement");
+  });
+
+  it("rejects updates to append-only change events", async () => {
+    const procurementRows = await db
+      .select({ id: procurements.id })
+      .from(procurements)
+      .where(sql`${procurements.sourceId} = 'integration_source'`)
+      .limit(1);
+    const procurementId = procurementRows[0]?.id;
+    if (procurementId === undefined) throw new Error("integration procurement missing");
+
+    await db.execute(sql`
+      insert into change_events
+        (event_key, procurement_id, kind, previous, current, detected_at)
+      values
+        ('integration:event-1', ${procurementId}, 'status_changed', 'unknown', 'announced', now())
+      on conflict do nothing
+    `);
+
+    await expect(
+      db.execute(sql`
+        update change_events
+        set current = 'completed'
+        where procurement_id = ${procurementId}
+          and event_key = 'integration:event-1'
+      `),
+    ).rejects.toThrow();
+
+    const unchanged = await db.execute<{ current: string }>(sql`
+      select current
+      from change_events
+      where procurement_id = ${procurementId}
+        and event_key = 'integration:event-1'
+    `);
+    expect(unchanged.rows[0]?.current).toBe("announced");
+  });
+
+  it("rejects a fact that is committed without evidence", async () => {
+    const procurementRows = await db
+      .select({ id: procurements.id })
+      .from(procurements)
+      .where(sql`${procurements.sourceId} = 'integration_source'`)
+      .limit(1);
+    const procurementId = procurementRows[0]?.id;
+    if (procurementId === undefined) throw new Error("integration procurement missing");
+
+    await expect(
+      db.execute(sql`
+        insert into facts
+          (procurement_id, key, value, confidence, extracted_by, extracted_at)
+        values
+          (${procurementId}, 'commercial.advance_percent', '30'::jsonb, 0.9, 'integration', now())
+      `),
+    ).rejects.toThrow();
+  });
+});

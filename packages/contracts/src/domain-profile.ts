@@ -4,9 +4,9 @@ import { IsoDateTime } from "./common.js";
 import { CompanyId, DomainProfileId, UserId } from "./ids.js";
 
 /**
- * A domain profile is data, not code. Water treatment, pumps and dosing are
- * rows in this shape - never separate agent classes. The specialist owns this
- * object end to end through the web UI.
+ * A domain profile is data, not code. Search topics are rows in this shape,
+ * never separate agent classes. The specialist owns this object end to end
+ * through the web UI.
  */
 
 export const DomainConstraint = z.object({
@@ -26,16 +26,12 @@ export const DomainCriterion = z.object({
 });
 export type DomainCriterion = z.infer<typeof DomainCriterion>;
 
+/**
+ * Investigation thresholds for this profile. Score weights live only on
+ * `ScoringFormula` and are looked up by `formulaId`.
+ */
 export const DomainScoringRules = z.object({
-  /** Which formula version computes the final score for this domain. */
   formulaId: z.string().min(1),
-  weights: z.object({
-    technical: z.number().min(0),
-    commercial: z.number().min(0),
-    deadline: z.number().min(0),
-    risk: z.number().min(0),
-    companyMatch: z.number().min(0),
-  }),
   /** Below this the case is discarded without deep investigation. */
   minRelevanceToInvestigate: z.number().min(0).max(1),
   /** Below this a human is asked instead of the system deciding. */
@@ -74,6 +70,8 @@ export const DomainProfile = z.object({
   instructions: z.string().max(8000).default(""),
 
   keywords: z.array(z.string().min(1)).default([]),
+  /** Applied after source search; never sent to the platform as a query. */
+  excludeKeywords: z.array(z.string().min(1)).default([]),
   semanticConcepts: z.array(z.string().min(1)).default([]),
   positiveCriteria: z.array(DomainCriterion).default([]),
   negativeCriteria: z.array(DomainCriterion).default([]),

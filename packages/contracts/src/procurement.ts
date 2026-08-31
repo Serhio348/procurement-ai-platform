@@ -1,11 +1,23 @@
 import { z } from "zod";
-import { Confidence, IsoDateTime, Money, Sha256 } from "./common.js";
+import {
+  Confidence,
+  IsoDateTime,
+  Money,
+  PlatformAmount,
+  PlatformInstant,
+  Sha256,
+} from "./common.js";
 import {
   ChangeEventId,
+  ClarificationId,
+  ContactId,
   DocumentId,
   DocumentVersionId,
   LotId,
+  PartyId,
+  PositionId,
   ProcurementId,
+  RawArtifactId,
   SourceId,
   SourceProcurementId,
 } from "./ids.js";
@@ -32,6 +44,43 @@ export const ProcedureStatus = z.enum([
 ]);
 export type ProcedureStatus = z.infer<typeof ProcedureStatus>;
 
+/** URL family on goszakupki.by and similar sites. Other sources use `other`. */
+export const PageFamily = z.enum(["auction", "marketing", "request", "etrade", "other"]);
+export type PageFamily = z.infer<typeof PageFamily>;
+
+export const ExternalIdKind = z.enum(["internal", "auc", "gias", "tenders_is", "url", "other"]);
+export type ExternalIdKind = z.infer<typeof ExternalIdKind>;
+
+export const ExternalIdentifier = z.object({
+  kind: ExternalIdKind,
+  value: z.string().min(1),
+});
+export type ExternalIdentifier = z.infer<typeof ExternalIdentifier>;
+
+export const PartyRole = z.enum(["buyer", "procuring_organization", "organizer", "operator"]);
+export type PartyRole = z.infer<typeof PartyRole>;
+
+export const PartyContact = z.object({
+  id: ContactId.optional(),
+  name: z.string().optional(),
+  role: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+  /** Original contact line as printed on the card. */
+  raw: z.string().min(1),
+});
+export type PartyContact = z.infer<typeof PartyContact>;
+
+export const Party = z.object({
+  id: PartyId.optional(),
+  role: PartyRole,
+  name: z.string().min(1),
+  registrationNumber: z.string().optional(),
+  address: z.string().optional(),
+  contacts: z.array(PartyContact).default([]),
+});
+export type Party = z.infer<typeof Party>;
+
 export const Organization = z.object({
   name: z.string().min(1),
   /** УНП in Belarus; other platforms may use a different registry code. */
@@ -41,17 +90,35 @@ export const Organization = z.object({
 });
 export type Organization = z.infer<typeof Organization>;
 
+export const LotPosition = z.object({
+  id: PositionId,
+  lotId: LotId,
+  externalNumber: z.string().optional(),
+  title: z.string().min(1),
+  quantity: z.number().nonnegative().optional(),
+  unit: z.string().optional(),
+});
+export type LotPosition = z.infer<typeof LotPosition>;
+
 export const Lot = z.object({
   id: LotId,
   procurementId: ProcurementId,
   number: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
+  status: z.string().optional(),
   startingPrice: Money.optional(),
+  amount: PlatformAmount.optional(),
   quantity: z.number().optional(),
   unit: z.string().optional(),
   deliveryPlace: z.string().optional(),
   deliveryTerm: z.string().optional(),
+  funding: z.string().optional(),
+  paymentTermsRaw: z.string().optional(),
+  bidSecurity: z.string().optional(),
+  contractSecurity: z.string().optional(),
+  okrbCode: z.string().optional(),
+  positions: z.array(LotPosition).default([]),
 });
 export type Lot = z.infer<typeof Lot>;
 
@@ -63,16 +130,23 @@ export type Lot = z.infer<typeof Lot>;
 export const ProcedureCard = z.object({
   sourceId: SourceId,
   sourceProcurementId: SourceProcurementId,
+  externalIds: z.array(ExternalIdentifier).default([]),
   url: z.string().url(),
   title: z.string().min(1),
+  pageFamily: PageFamily.default("other"),
   kind: ProcedureKind.default("other"),
   status: ProcedureStatus.default("unknown"),
+  /** Verbatim status label from the page. */
+  sourceStatus: z.string().optional(),
+  parties: z.array(Party).default([]),
   buyer: Organization.optional(),
   startingPrice: Money.optional(),
-  publishedAt: IsoDateTime.optional(),
-  bidsDeadlineAt: IsoDateTime.optional(),
-  auctionAt: IsoDateTime.optional(),
+  amount: PlatformAmount.optional(),
+  publishedAt: PlatformInstant.optional(),
+  bidsDeadline: PlatformInstant.optional(),
+  auctionAt: PlatformInstant.optional(),
   deliveryDeadline: z.string().optional(),
+  lots: z.array(Lot).default([]),
   /** Raw platform fields kept verbatim for provenance and later re-parsing. */
   rawFields: z.record(z.string(), z.string()).default({}),
   fetchedAt: IsoDateTime,
@@ -82,6 +156,7 @@ export type ProcedureCard = z.infer<typeof ProcedureCard>;
 export const SearchQuery = z.object({
   sourceId: SourceId,
   keywords: z.array(z.string().min(1)).default([]),
+  excludeKeywords: z.array(z.string().min(1)).default([]),
   publishedFrom: IsoDateTime.optional(),
   publishedTo: IsoDateTime.optional(),
   kinds: z.array(ProcedureKind).default([]),
@@ -96,10 +171,13 @@ export const SearchHit = z.object({
   sourceProcurementId: SourceProcurementId,
   url: z.string().url(),
   title: z.string().min(1),
+  pageFamily: PageFamily.optional(),
+  sourceStatus: z.string().optional(),
   buyerName: z.string().optional(),
   startingPrice: Money.optional(),
-  publishedAt: IsoDateTime.optional(),
-  bidsDeadlineAt: IsoDateTime.optional(),
+  amount: PlatformAmount.optional(),
+  publishedAt: PlatformInstant.optional(),
+  bidsDeadline: PlatformInstant.optional(),
 });
 export type SearchHit = z.infer<typeof SearchHit>;
 
@@ -114,14 +192,26 @@ export const DocumentStatus = z.enum([
 ]);
 export type DocumentStatus = z.infer<typeof DocumentStatus>;
 
+export const DocumentLifecycle = z.enum(["active", "deleted"]);
+export type DocumentLifecycle = z.infer<typeof DocumentLifecycle>;
+
 export const ProcurementDocument = z.object({
   id: DocumentId,
   procurementId: ProcurementId,
   name: z.string().min(1),
   sourceUrl: z.string().url(),
   mimeType: z.string().min(1),
+  /**
+   * Positional file key on the source page. Locator only - never used as a
+   * stable document identity.
+   */
+  sourceFileKey: z.string().optional(),
+  metadataUrl: z.string().url().optional(),
+  downloadUrl: z.string().url().optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
   currentVersionId: DocumentVersionId.optional(),
   status: DocumentStatus.default("discovered"),
+  lifecycle: DocumentLifecycle.default("active"),
   discoveredAt: IsoDateTime,
 });
 export type ProcurementDocument = z.infer<typeof ProcurementDocument>;
@@ -145,6 +235,32 @@ export const DocumentVersion = z.object({
 });
 export type DocumentVersion = z.infer<typeof DocumentVersion>;
 
+export const RawArtifactKind = z.enum(["html", "json", "binary_meta"]);
+export type RawArtifactKind = z.infer<typeof RawArtifactKind>;
+
+export const RawArtifact = z.object({
+  id: RawArtifactId,
+  procurementId: ProcurementId,
+  kind: RawArtifactKind,
+  hash: Sha256,
+  storageKey: z.string().min(1),
+  contentType: z.string().min(1),
+  pageFamily: PageFamily.optional(),
+  capturedAt: IsoDateTime,
+});
+export type RawArtifact = z.infer<typeof RawArtifact>;
+
+export const Clarification = z.object({
+  id: ClarificationId,
+  procurementId: ProcurementId,
+  question: z.string().min(1),
+  answer: z.string().optional(),
+  askedAt: IsoDateTime.optional(),
+  answeredAt: IsoDateTime.optional(),
+  sourceUrl: z.string().url().optional(),
+});
+export type Clarification = z.infer<typeof Clarification>;
+
 export const ChangeKind = z.enum([
   "status_changed",
   "price_changed",
@@ -153,6 +269,8 @@ export const ChangeKind = z.enum([
   "document_updated",
   "document_removed",
   "lot_changed",
+  "clarification_added",
+  "clarification_answered",
   "other",
 ]);
 export type ChangeKind = z.infer<typeof ChangeKind>;
@@ -176,6 +294,8 @@ export const InvestigationStage = z.enum([
   "discovered",
   "classified",
   "card_fetched",
+  "waiting_human",
+  "inactive",
   "documents_downloaded",
   "documents_extracted",
   "commercial_analysed",

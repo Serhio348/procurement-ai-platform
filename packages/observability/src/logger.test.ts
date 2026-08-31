@@ -77,11 +77,11 @@ describe("secret redaction", () => {
 
     logger.info("tool call", {
       toolName: "procurement.search",
-      args: { query: "водоподготовка", auth: { token: "super-secret" } },
+      args: { query: "keyword_x", auth: { token: "super-secret" } },
     });
 
     const args = records[0]?.["args"] as { query: string; auth: { token: string } };
-    expect(args.query).toBe("водоподготовка");
+    expect(args.query).toBe("keyword_x");
     expect(args.auth.token).toBe("[redacted]");
   });
 

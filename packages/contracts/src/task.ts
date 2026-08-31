@@ -59,7 +59,16 @@ export const Task = z.object({
 export type Task = z.infer<typeof Task>;
 
 /** Options offered to the specialist when a case is escalated. */
-export const HumanDecisionKind = z.enum(["approve", "reject", "investigate", "monitor", "ignore"]);
+export const HumanDecisionKind = z.enum([
+  "approve",
+  "reject",
+  "investigate",
+  "monitor",
+  "ignore",
+  "treat_as_active",
+  "skip",
+  "review_later",
+]);
 export type HumanDecisionKind = z.infer<typeof HumanDecisionKind>;
 
 export const HumanReviewRequest = z.object({

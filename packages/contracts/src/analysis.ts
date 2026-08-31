@@ -53,13 +53,13 @@ export const AuctionInfo = z.object({
 export type AuctionInfo = z.infer<typeof AuctionInfo>;
 
 export const TechnicalAnalysis = z.object({
-  equipment: z.array(z.string()).default([]),
+  equipment: z.array(Sourced(z.string())).default([]),
   capacity: Sourced(z.string()).optional(),
-  specifications: z.array(z.string()).default([]),
-  scopeOfSupply: z.array(z.string()).default([]),
+  specifications: z.array(Sourced(z.string())).default([]),
+  scopeOfSupply: z.array(Sourced(z.string())).default([]),
   installationRequired: Sourced(z.boolean()).optional(),
   commissioningRequired: Sourced(z.boolean()).optional(),
   serviceRequired: Sourced(z.boolean()).optional(),
-  qualificationRequirements: z.array(z.string()).default([]),
+  qualificationRequirements: z.array(Sourced(z.string())).default([]),
 });
 export type TechnicalAnalysis = z.infer<typeof TechnicalAnalysis>;

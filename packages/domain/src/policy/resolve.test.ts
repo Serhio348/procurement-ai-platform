@@ -80,26 +80,26 @@ describe("unresolvable conflicts", () => {
 
 describe("independent rules coexist", () => {
   it("keeps unrelated permanent intents alive side by side", () => {
-    const waterTreatment = rule("w", "permanent_intent", "search.water_treatment", true);
-    const pumps = rule("p", "permanent_intent", "search.pumps", true);
+    const domainA = rule("a", "permanent_intent", "search.domain_a", true);
+    const domainB = rule("b", "permanent_intent", "search.domain_b", true);
 
-    const result = resolveRuleSet([waterTreatment, pumps]);
+    const result = resolveRuleSet([domainA, domainB]);
 
     expect(result.needsHuman).toBe(false);
-    expect(result.effective.get("search.water_treatment")?.value).toBe(true);
-    expect(result.effective.get("search.pumps")?.value).toBe(true);
+    expect(result.effective.get("search.domain_a")?.value).toBe(true);
+    expect(result.effective.get("search.domain_b")?.value).toBe(true);
   });
 
   it("isolates a conflict to its own key", () => {
     const result = resolveRuleSet([
-      rule("w", "permanent_intent", "search.water_treatment", true),
+      rule("d", "permanent_intent", "search.domain_a", true),
       rule("a", "domain", "advance.max_percent", 30),
       rule("b", "domain", "advance.max_percent", 50),
     ]);
 
     expect(result.needsHuman).toBe(true);
     expect(result.conflicts.map((c) => c.key)).toEqual(["advance.max_percent"]);
-    expect(result.effective.get("search.water_treatment")?.value).toBe(true);
+    expect(result.effective.get("search.domain_a")?.value).toBe(true);
     expect(result.effective.has("advance.max_percent")).toBe(false);
   });
 

@@ -48,7 +48,7 @@ export type Intent = z.infer<typeof Intent>;
 
 /**
  * Output of the intent compiler. Several intents may come from one message
- * ("search water treatment, but skip household systems" is two).
+ * ("search this domain, but skip household systems" is two).
  */
 export const IntentCompilation = z.object({
   intents: z.array(

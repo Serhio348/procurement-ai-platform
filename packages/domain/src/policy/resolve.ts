@@ -102,7 +102,7 @@ export function resolveRule(key: string, rules: readonly ScopedRule[]): RuleReso
 
 /**
  * Resolve a whole rule set. Rules touching different keys never conflict, so
- * "always search water treatment" and "also search pumps" both survive.
+ * "always search domain_a" and "also search domain_b" both survive.
  */
 export function resolveRuleSet(rules: readonly ScopedRule[]): RuleSetResolution {
   const grouped = new Map<string, ScopedRule[]>();

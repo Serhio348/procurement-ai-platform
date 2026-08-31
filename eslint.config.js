@@ -50,4 +50,58 @@ export default tseslint.config(
     files: ["packages/observability/**/*.ts"],
     rules: { "no-console": "off" },
   },
+  {
+    files: ["packages/db/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: ["fastify", "bullmq", "playwright", "openai", "apps/*", "mcp/*", "workers/*"],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/application/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: ["playwright", "fastify", "bullmq"],
+        },
+      ],
+    },
+  },
+  {
+    files: ["mcp/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@procurement/db",
+              message: "MCP adapters must not read the database.",
+            },
+            {
+              name: "@procurement/application",
+              message: "MCP adapters receive a SearchQuery, not application use cases.",
+            },
+          ],
+          patterns: ["@procurement/db", "@procurement/application", "apps/*", "workers/*"],
+        },
+      ],
+    },
+  },
+  {
+    files: ["workers/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: ["apps/*", "playwright"],
+        },
+      ],
+    },
+  },
 );

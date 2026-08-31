@@ -169,4 +169,6 @@ npm audit    0 vulnerabilities
 
 ## Следующий этап
 
-**Этап 2 — Database / Domain model:** схема PostgreSQL и миграции под уже зафиксированные контракты. Ключевые инварианты в БД: уникальность `(source, source_procurement_id)`, версии документов по хэшу, неизменяемая история решений.
+**Этап 1.1** уточнил контракты под goszakupki.by и формат seed; см. [`STAGE-1.1.md`](STAGE-1.1.md).
+
+**Этап 2 — Database / Domain model:** схема PostgreSQL и миграции под уже зафиксированные контракты. Ключевые инварианты в БД: уникальность `(source, source_procurement_id)`, версии документов по хэшу, неизменяемая история решений. Seed `electrical_equipment.v1` применяется однократно.

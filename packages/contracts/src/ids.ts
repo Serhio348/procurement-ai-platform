@@ -27,6 +27,33 @@ export type ProcurementId = z.infer<typeof ProcurementId>;
 export const LotId = z.string().uuid().brand<"LotId">();
 export type LotId = z.infer<typeof LotId>;
 
+export const PositionId = z.string().uuid().brand<"PositionId">();
+export type PositionId = z.infer<typeof PositionId>;
+
+export const PartyId = z.string().uuid().brand<"PartyId">();
+export type PartyId = z.infer<typeof PartyId>;
+
+export const ContactId = z.string().uuid().brand<"ContactId">();
+export type ContactId = z.infer<typeof ContactId>;
+
+export const RawArtifactId = z.string().uuid().brand<"RawArtifactId">();
+export type RawArtifactId = z.infer<typeof RawArtifactId>;
+
+export const ClarificationId = z.string().uuid().brand<"ClarificationId">();
+export type ClarificationId = z.infer<typeof ClarificationId>;
+
+export const JobRunId = z.string().uuid().brand<"JobRunId">();
+export type JobRunId = z.infer<typeof JobRunId>;
+
+export const RelevanceAssessmentId = z.string().uuid().brand<"RelevanceAssessmentId">();
+export type RelevanceAssessmentId = z.infer<typeof RelevanceAssessmentId>;
+
+export const ActivityAssessmentId = z.string().uuid().brand<"ActivityAssessmentId">();
+export type ActivityAssessmentId = z.infer<typeof ActivityAssessmentId>;
+
+export const SeedRunId = z.string().min(1).brand<"SeedRunId">();
+export type SeedRunId = z.infer<typeof SeedRunId>;
+
 export const DocumentId = z.string().uuid().brand<"DocumentId">();
 export type DocumentId = z.infer<typeof DocumentId>;
 

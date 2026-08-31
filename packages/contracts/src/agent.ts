@@ -32,6 +32,7 @@ export const MinimalAgentContext = z.object({
     purpose: true,
     instructions: true,
     keywords: true,
+    excludeKeywords: true,
     semanticConcepts: true,
     positiveCriteria: true,
     negativeCriteria: true,

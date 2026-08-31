@@ -1,8 +1,36 @@
 import { z } from "zod";
-import { DocumentId, DocumentVersionId, EvidenceId, FactId, ProcurementId } from "./ids.js";
+import {
+  DocumentId,
+  DocumentVersionId,
+  EvidenceId,
+  FactId,
+  ProcurementId,
+  RawArtifactId,
+} from "./ids.js";
 
 export const IsoDateTime = z.string().datetime({ offset: true });
 export type IsoDateTime = z.infer<typeof IsoDateTime>;
+
+/** Calendar date with no time of day. Never invent a clock time for these. */
+export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "ISO date YYYY-MM-DD");
+export type IsoDate = z.infer<typeof IsoDate>;
+
+/**
+ * Instant as published by a platform. Date-only values keep timezone for
+ * "end of local day" comparisons and must not be coerced into midnight UTC.
+ */
+export const PlatformInstant = z.discriminatedUnion("precision", [
+  z.object({
+    precision: z.literal("date"),
+    date: IsoDate,
+    timeZone: z.string().min(1),
+  }),
+  z.object({
+    precision: z.literal("date_time"),
+    at: IsoDateTime,
+  }),
+]);
+export type PlatformInstant = z.infer<typeof PlatformInstant>;
 
 /** Model-reported certainty. Never used directly as a score. */
 export const Confidence = z.number().min(0).max(1);
@@ -16,6 +44,18 @@ export const Money = z.object({
   currency: CurrencyCode,
 });
 export type Money = z.infer<typeof Money>;
+
+/**
+ * Sum as printed on a platform card. The numeric amount may be absent; the
+ * original wording is always kept so a missing figure is not invented.
+ */
+export const PlatformAmount = z.object({
+  kind: z.enum(["limit", "indicative"]),
+  amount: z.number().nonnegative().nullable(),
+  currency: CurrencyCode.optional(),
+  raw: z.string().min(1),
+});
+export type PlatformAmount = z.infer<typeof PlatformAmount>;
 
 export const Sha256 = z.string().regex(/^[a-f0-9]{64}$/, "lowercase sha256 hex digest");
 export type Sha256 = z.infer<typeof Sha256>;
@@ -42,6 +82,17 @@ export const EvidenceLocation = z.discriminatedUnion("kind", [
     procurementId: ProcurementId,
     /** Field on the platform card the value was read from. */
     field: z.string().min(1),
+    url: z.string().url(),
+  }),
+  z.object({
+    kind: z.literal("html_snippet"),
+    procurementId: ProcurementId,
+    rawArtifactId: RawArtifactId.optional(),
+    field: z.string().optional(),
+    /** CSS or XPath selector when the adapter has a stable one. */
+    selector: z.string().optional(),
+    /** 1-based line in the captured HTML text. */
+    line: z.number().int().positive().optional(),
     url: z.string().url(),
   }),
 ]);

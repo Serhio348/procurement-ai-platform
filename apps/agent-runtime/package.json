@@ -1,0 +1,27 @@
+{
+  "name": "@procurement/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Supervisor planning runtime and model adapters for specialized procurement agents.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@procurement/contracts": "0.1.0",
+    "@procurement/domain": "0.1.0",
+    "@procurement/observability": "0.1.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2"
+  }
+}

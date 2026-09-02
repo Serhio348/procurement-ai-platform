@@ -10,7 +10,7 @@ import {
   TaskId,
   ToolCallId,
 } from "./ids.js";
-import { Intent } from "./intent.js";
+import { Intent, ScopedRule } from "./intent.js";
 import { ProcurementCaseHeader } from "./procurement.js";
 
 /**
@@ -121,24 +121,47 @@ export const AgentRunRecord = z.object({
 export type AgentRunRecord = z.infer<typeof AgentRunRecord>;
 
 /**
+ * Structured input to the Supervisor. Raw ingress compilation and context
+ * compilation are separate stages; the planner receives only validated state.
+ */
+export const SupervisorRequest = z.object({
+  requestId: RequestId,
+  intents: z.array(Intent).min(1),
+  domainProfiles: z.array(DomainProfile).default([]),
+  scopedRules: z.array(ScopedRule).default([]),
+  procurement: ProcurementCaseHeader.optional(),
+});
+export type SupervisorRequest = z.infer<typeof SupervisorRequest>;
+
+/**
  * What the supervisor is allowed to produce. It plans and delegates; it never
  * returns scraped data or documents of its own.
  */
-export const SupervisorPlan = z.object({
-  intentSummary: z.string().min(1),
-  selectedDomainProfileIds: z.array(DomainProfileId).default([]),
-  steps: z
-    .array(
-      z.object({
-        capability: CapabilityId,
-        reason: z.string().min(1),
-        domainProfileId: DomainProfileId.optional(),
-        procurementId: ProcurementId.optional(),
-      }),
-    )
-    .default([]),
-  needsHuman: z.boolean().default(false),
-  humanQuestion: z.string().optional(),
-  confidence: Confidence,
-});
+export const SupervisorPlan = z
+  .object({
+    intentSummary: z.string().min(1),
+    selectedDomainProfileIds: z.array(DomainProfileId).default([]),
+    steps: z
+      .array(
+        z.object({
+          capability: CapabilityId,
+          reason: z.string().min(1),
+          domainProfileId: DomainProfileId.optional(),
+          procurementId: ProcurementId.optional(),
+        }),
+      )
+      .default([]),
+    needsHuman: z.boolean().default(false),
+    humanQuestion: z.string().min(1).optional(),
+    confidence: Confidence,
+  })
+  .superRefine((plan, context) => {
+    if (plan.needsHuman && plan.humanQuestion === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["humanQuestion"],
+        message: "humanQuestion is required when needsHuman is true",
+      });
+    }
+  });
 export type SupervisorPlan = z.infer<typeof SupervisorPlan>;

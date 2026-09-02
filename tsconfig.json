@@ -6,6 +6,7 @@
     { "path": "./packages/domain" },
     { "path": "./packages/mcp-client" },
     { "path": "./packages/observability" },
-    { "path": "./mcp/procurement" }
+    { "path": "./mcp/procurement" },
+    { "path": "./apps/agent-runtime" }
   ]
 }

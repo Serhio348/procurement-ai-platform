@@ -90,19 +90,21 @@ export const Organization = z.object({
 });
 export type Organization = z.infer<typeof Organization>;
 
-export const LotPosition = z.object({
-  id: PositionId,
-  lotId: LotId,
+export const SourceLotPosition = z.object({
   externalNumber: z.string().optional(),
   title: z.string().min(1),
   quantity: z.number().nonnegative().optional(),
   unit: z.string().optional(),
 });
+export type SourceLotPosition = z.infer<typeof SourceLotPosition>;
+
+export const LotPosition = SourceLotPosition.extend({
+  id: PositionId,
+  lotId: LotId,
+});
 export type LotPosition = z.infer<typeof LotPosition>;
 
-export const Lot = z.object({
-  id: LotId,
-  procurementId: ProcurementId,
+export const SourceLot = z.object({
   number: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
@@ -118,6 +120,13 @@ export const Lot = z.object({
   bidSecurity: z.string().optional(),
   contractSecurity: z.string().optional(),
   okrbCode: z.string().optional(),
+  positions: z.array(SourceLotPosition).default([]),
+});
+export type SourceLot = z.infer<typeof SourceLot>;
+
+export const Lot = SourceLot.omit({ positions: true }).extend({
+  id: LotId,
+  procurementId: ProcurementId,
   positions: z.array(LotPosition).default([]),
 });
 export type Lot = z.infer<typeof Lot>;
@@ -146,7 +155,7 @@ export const ProcedureCard = z.object({
   bidsDeadline: PlatformInstant.optional(),
   auctionAt: PlatformInstant.optional(),
   deliveryDeadline: z.string().optional(),
-  lots: z.array(Lot).default([]),
+  lots: z.array(SourceLot).default([]),
   /** Raw platform fields kept verbatim for provenance and later re-parsing. */
   rawFields: z.record(z.string(), z.string()).default({}),
   fetchedAt: IsoDateTime,
@@ -195,9 +204,7 @@ export type DocumentStatus = z.infer<typeof DocumentStatus>;
 export const DocumentLifecycle = z.enum(["active", "deleted"]);
 export type DocumentLifecycle = z.infer<typeof DocumentLifecycle>;
 
-export const ProcurementDocument = z.object({
-  id: DocumentId,
-  procurementId: ProcurementId,
+export const SourceDocument = z.object({
   name: z.string().min(1),
   sourceUrl: z.string().url(),
   mimeType: z.string().min(1),
@@ -209,10 +216,16 @@ export const ProcurementDocument = z.object({
   metadataUrl: z.string().url().optional(),
   downloadUrl: z.string().url().optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
-  currentVersionId: DocumentVersionId.optional(),
-  status: DocumentStatus.default("discovered"),
   lifecycle: DocumentLifecycle.default("active"),
   discoveredAt: IsoDateTime,
+});
+export type SourceDocument = z.infer<typeof SourceDocument>;
+
+export const ProcurementDocument = SourceDocument.extend({
+  id: DocumentId,
+  procurementId: ProcurementId,
+  currentVersionId: DocumentVersionId.optional(),
+  status: DocumentStatus.default("discovered"),
 });
 export type ProcurementDocument = z.infer<typeof ProcurementDocument>;
 
@@ -250,14 +263,18 @@ export const RawArtifact = z.object({
 });
 export type RawArtifact = z.infer<typeof RawArtifact>;
 
-export const Clarification = z.object({
-  id: ClarificationId,
-  procurementId: ProcurementId,
+export const SourceClarification = z.object({
   question: z.string().min(1),
   answer: z.string().optional(),
   askedAt: IsoDateTime.optional(),
   answeredAt: IsoDateTime.optional(),
   sourceUrl: z.string().url().optional(),
+});
+export type SourceClarification = z.infer<typeof SourceClarification>;
+
+export const Clarification = SourceClarification.extend({
+  id: ClarificationId,
+  procurementId: ProcurementId,
 });
 export type Clarification = z.infer<typeof Clarification>;
 
@@ -275,18 +292,26 @@ export const ChangeKind = z.enum([
 ]);
 export type ChangeKind = z.infer<typeof ChangeKind>;
 
-export const ChangeEvent = z.object({
-  id: ChangeEventId,
-  procurementId: ProcurementId,
+const ChangeDetails = z.object({
   kind: ChangeKind,
   field: z.string().optional(),
   previous: z.string().nullable(),
   current: z.string().nullable(),
+  detectedAt: IsoDateTime,
+  urgent: z.boolean().default(false),
+});
+
+export const SourceChange = ChangeDetails.extend({
+  sourceFileKey: z.string().optional(),
+});
+export type SourceChange = z.infer<typeof SourceChange>;
+
+export const ChangeEvent = ChangeDetails.extend({
+  id: ChangeEventId,
+  procurementId: ProcurementId,
   documentId: DocumentId.optional(),
   previousVersionId: DocumentVersionId.optional(),
   currentVersionId: DocumentVersionId.optional(),
-  detectedAt: IsoDateTime,
-  urgent: z.boolean().default(false),
 });
 export type ChangeEvent = z.infer<typeof ChangeEvent>;
 

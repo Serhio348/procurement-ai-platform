@@ -2,7 +2,7 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** Этап 2 завершён — контракты, PostgreSQL, Redis и MinIO. Агентов, MCP-серверов и адаптеров площадок пока нет.
+**Статус:** Этап 3 завершён — контракты, инфраструктура, типизированный Procurement MCP и fixture-источник. Агентов и live-адаптеров площадок пока нет.
 
 ## Принцип
 
@@ -29,6 +29,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 0 — архитектура](docs/architecture/STAGE-0.md)
 - [Этап 1 — структура репозитория и базовые пакеты](docs/architecture/STAGE-1.md)
 - [Этап 2 — инфраструктура и PostgreSQL](docs/architecture/STAGE-2.md)
+- [Этап 3 — Procurement MCP](docs/architecture/STAGE-3.md)
 
 ## Пакеты
 
@@ -37,6 +38,8 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/contracts` | Zod-схемы: идентификаторы, Domain Profile, Intent, Task, Procurement Case, контракты агентов |
 | `@procurement/domain` | Чистая логика: детерминированный расчёт score, разрешение конфликтов правил |
 | `@procurement/observability` | Структурный лог с correlation ids |
+| `@procurement/mcp-client` | Типизированные MCP-вызовы, timeout/error mapping и Tool Policy Gate |
+| `@procurement/mcp-procurement` | Source-neutral Procurement MCP и fixture-режим |
 
 ## Разработка
 
@@ -65,5 +68,6 @@ PROCUREMENT_SOURCE_MODE=fixture
 
 ## Следующий шаг
 
-Следующий этап — Procurement MCP. На чистой Ubuntu 24.04 инфраструктуру
-поднимают по [инструкции сервера](docs/ops/ubuntu-server.md).
+Следующий этап — адаптер `goszakupki.by`; для него нужны сохранённые HTML-образцы
+четырёх семейств страниц. На чистой Ubuntu 24.04 инфраструктуру поднимают по
+[инструкции сервера](docs/ops/ubuntu-server.md).

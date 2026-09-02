@@ -60,6 +60,13 @@ module.exports = {
       to: { path: "(^packages/db|^packages/application|^apps/|^workers/)" },
     },
     {
+      name: "mcp-client-does-not-import-implementations",
+      severity: "error",
+      comment: "The typed MCP client depends on contracts, not concrete servers or persistence.",
+      from: { path: "^packages/mcp-client/src" },
+      to: { path: "(^packages/db|^packages/application|^mcp/|^apps/|^workers/)" },
+    },
+    {
       name: "workers-are-not-ui",
       severity: "error",
       comment: "Workers enqueue and process jobs; they must not import web UI code.",

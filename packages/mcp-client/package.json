@@ -1,0 +1,24 @@
+{
+  "name": "@procurement/mcp-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed MCP calls, timeout/error mapping, and code-enforced tool policy.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@procurement/contracts": "*",
+    "@procurement/observability": "*",
+    "zod": "^4.5.4"
+  }
+}

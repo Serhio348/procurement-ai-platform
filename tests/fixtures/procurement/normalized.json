@@ -1,0 +1,139 @@
+{
+  "sourceId": "fixture",
+  "records": [
+    {
+      "card": {
+        "sourceId": "fixture",
+        "sourceProcurementId": "auction-001",
+        "externalIds": [{ "kind": "auc", "value": "AUC-001" }],
+        "url": "https://example.test/auction/001",
+        "title": "Комплектная трансформаторная подстанция",
+        "pageFamily": "auction",
+        "kind": "electronic_auction",
+        "status": "accepting_bids",
+        "sourceStatus": "Прием предложений",
+        "buyer": {
+          "name": "Покупатель А",
+          "registrationNumber": "100000001"
+        },
+        "amount": {
+          "kind": "limit",
+          "amount": 125000,
+          "currency": "BYN",
+          "raw": "125 000,00 BYN"
+        },
+        "publishedAt": {
+          "precision": "date_time",
+          "at": "2026-08-20T09:00:00+03:00"
+        },
+        "bidsDeadline": {
+          "precision": "date_time",
+          "at": "2026-09-20T17:00:00+03:00"
+        },
+        "lots": [
+          {
+            "number": "1",
+            "title": "КТП 10/0,4 кВ",
+            "amount": {
+              "kind": "limit",
+              "amount": 125000,
+              "currency": "BYN",
+              "raw": "125 000,00 BYN"
+            },
+            "positions": [
+              {
+                "externalNumber": "1",
+                "title": "Подстанция комплектная",
+                "quantity": 1,
+                "unit": "компл."
+              }
+            ]
+          }
+        ],
+        "rawFields": {
+          "Предмет закупки": "Комплектная трансформаторная подстанция",
+          "Состояние": "Прием предложений"
+        },
+        "fetchedAt": "2026-09-01T10:00:00+03:00"
+      },
+      "documents": [
+        {
+          "name": "Техническое задание.pdf",
+          "sourceUrl": "https://example.test/files/spec-001.pdf",
+          "mimeType": "application/pdf",
+          "sourceFileKey": "spec-001",
+          "status": "discovered",
+          "lifecycle": "active",
+          "discoveredAt": "2026-09-01T10:00:00+03:00"
+        }
+      ],
+      "history": [
+        {
+          "question": "Допускается ли эквивалент?",
+          "answer": "Да, при соответствии техническим требованиям.",
+          "askedAt": "2026-08-25T12:00:00+03:00",
+          "answeredAt": "2026-08-26T09:00:00+03:00",
+          "sourceUrl": "https://example.test/auction/001/history"
+        }
+      ],
+      "changes": [
+        {
+          "kind": "deadline_changed",
+          "field": "bidsDeadline",
+          "previous": "2026-09-15",
+          "current": "2026-09-20",
+          "detectedAt": "2026-08-28T11:00:00+03:00",
+          "urgent": true
+        }
+      ]
+    },
+    {
+      "card": {
+        "sourceId": "fixture",
+        "sourceProcurementId": "marketing-001",
+        "url": "https://example.test/marketing/001",
+        "title": "Трансформаторы силовые",
+        "pageFamily": "marketing",
+        "kind": "request_for_quotations",
+        "status": "completed",
+        "sourceStatus": "Завершена",
+        "publishedAt": {
+          "precision": "date",
+          "date": "2026-07-01",
+          "timeZone": "Europe/Minsk"
+        },
+        "rawFields": {},
+        "fetchedAt": "2026-09-01T10:00:00+03:00"
+      }
+    },
+    {
+      "card": {
+        "sourceId": "fixture",
+        "sourceProcurementId": "request-001",
+        "url": "https://example.test/request/001",
+        "title": "Ремонт трансформаторной подстанции",
+        "pageFamily": "request",
+        "kind": "competitive_negotiation",
+        "status": "announced",
+        "sourceStatus": "Объявлена",
+        "rawFields": {
+          "Описание": "Текущий ремонт существующего оборудования"
+        },
+        "fetchedAt": "2026-09-01T10:00:00+03:00"
+      }
+    },
+    {
+      "card": {
+        "sourceId": "fixture",
+        "sourceProcurementId": "etrade-001",
+        "url": "https://example.test/etrade/001",
+        "title": "Кабель силовой",
+        "pageFamily": "etrade",
+        "kind": "other",
+        "status": "unknown",
+        "rawFields": {},
+        "fetchedAt": "2026-09-01T10:00:00+03:00"
+      }
+    }
+  ]
+}

@@ -94,6 +94,23 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/mcp-client/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            "@procurement/db",
+            "@procurement/application",
+            "mcp/*",
+            "apps/*",
+            "workers/*",
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["workers/**/*.ts"],
     rules: {
       "no-restricted-imports": [

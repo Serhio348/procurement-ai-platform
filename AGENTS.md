@@ -20,6 +20,8 @@
 
 - [`docs/architecture/STAGE-0.md`](docs/architecture/STAGE-0.md) — архитектура, доменная модель, план этапов
 - [`docs/architecture/STAGE-1.md`](docs/architecture/STAGE-1.md) — что уже реализовано и почему именно так
+- [`docs/architecture/STAGE-2.md`](docs/architecture/STAGE-2.md) — PostgreSQL, Redis и MinIO
+- [`docs/architecture/STAGE-3.md`](docs/architecture/STAGE-3.md) — Procurement MCP и fixture boundary
 
 ---
 
@@ -55,8 +57,10 @@ packages/
   contracts/       Zod-схемы. Общий словарь данных. Зависит только от zod
   domain/          Чистая логика: расчёт score, разрешение конфликтов. Зависит только от contracts
   observability/   Структурный лог с correlation ids. Без зависимостей
+  db/              PostgreSQL schema, migrations и repositories
+  mcp-client/      Typed MCP client и Tool Policy Gate
 apps/              (пусто) web, api, agent-runtime, telegram-bot
-mcp/               (пусто) серверы инструментов
+mcp/procurement/   Source-neutral Procurement MCP, fixture mode
 workers/           (пусто) фоновые задачи
 docs/architecture/ Документы этапов
 ```
@@ -133,8 +137,10 @@ docs/architecture/ Документы этапов
 
 - Этап 0 — архитектура
 - Этап 1 — каркас монорепозитория, `contracts`, `domain`, `observability`, 38 тестов
+- Этап 2 — PostgreSQL, Redis, MinIO, миграции и repositories
+- Этап 3 — typed MCP client, Tool Policy Gate, Procurement MCP и fixture source
 
-Не начато: база данных, MCP-серверы, адаптеры площадок, агенты, веб-интерфейс, Telegram.
+Не начато: live-адаптеры площадок, агенты, веб-интерфейс, Telegram.
 
 ### План этапов
 

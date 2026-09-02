@@ -13,11 +13,13 @@ import {
   ProcedureCard,
   ProcurementDocument,
   SearchQuery,
+  SourceDocument,
+  SourceLot,
 } from "./procurement.js";
 import { Risk } from "./scoring.js";
 import { DomainProfileSeed } from "./seed.js";
 import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
-import { ProcurementSearchRequest } from "./source-port.js";
+import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const now = "2026-08-25T09:00:00.000Z";
@@ -307,6 +309,44 @@ describe("source port envelopes", () => {
     });
     expect(parsed.excludeKeywords).toEqual(["noise_term"]);
     expect("domainProfile" in parsed).toBe(false);
+  });
+
+  it("rejects profile data crossing the source-neutral boundary", () => {
+    const parsed = ProcurementSearchRequest.safeParse({
+      sourceId: "goszakupki_by",
+      domainProfile: { slug: "domain_a" },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("keeps normalized and original source status together", () => {
+    const parsed = ProcurementGetStatusResponse.parse({
+      status: "unknown",
+      sourceStatus: "Неизвестная подпись площадки",
+      fetchedAt: now,
+    });
+
+    expect(parsed.status).toBe("unknown");
+    expect(parsed.sourceStatus).toBe("Неизвестная подпись площадки");
+  });
+
+  it("does not require internal database ids from a source adapter", () => {
+    expect(
+      SourceLot.parse({
+        number: "1",
+        title: "Source lot",
+        positions: [{ title: "Source position" }],
+      }),
+    ).not.toHaveProperty("procurementId");
+    expect(
+      SourceDocument.parse({
+        name: "spec.pdf",
+        sourceUrl: "https://example.test/spec.pdf",
+        mimeType: "application/pdf",
+        discoveredAt: now,
+      }),
+    ).not.toHaveProperty("id");
   });
 });
 

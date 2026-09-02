@@ -25,9 +25,33 @@ The default normalized fixture is
 `tests/fixtures/procurement/normalized.json`. Override it with
 `PROCUREMENT_FIXTURE_PATH`.
 
-The fixture transport is deterministic and performs no network calls. It is not
-a parser for `goszakupki.by`; real page parsing remains blocked until verified
-HTML samples are available for Stage 4.
+The fixture transport is deterministic and performs no network calls.
+
+## Live goszakupki.by mode
+
+```bash
+PROCUREMENT_SOURCE_MODE=live npm run mcp:procurement
+```
+
+The live adapter searches the public tender list and parses `auction`,
+`marketing`, `request`, `etrade`, and `single-source` cards. Its source-native
+identifier includes the route family, for example `request/3632989`; the
+visible `auc...` value is returned as an external identifier.
+
+The HTTP client enforces a request rate, timeout, response-size limit,
+same-origin URLs, anti-bot detection, and a small circuit breaker. Before
+opening `/tenders/posted`, it obtains an anonymous session cookie from the home
+page and refreshes that session once after a login redirect. No account or
+third-party aggregator is used. The client also combines Node and
+operating-system CA stores because the site does not currently send a complete
+certificate chain. TLS verification stays enabled.
+
+Optional live contract check:
+
+```powershell
+$env:RUN_GOSZAKUPKI_LIVE_TESTS="1"
+npm test -- mcp/procurement/src/goszakupki-by.live.test.ts
+```
 
 The process uses MCP stdio. Standard output is reserved for protocol frames;
 structured logs go to standard error.

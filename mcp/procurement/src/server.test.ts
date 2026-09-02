@@ -5,7 +5,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createLogger, type LogRecord } from "@procurement/observability";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FixtureProcurementSource } from "./fixture-source.js";
+import { GoszakupkiBySource } from "./goszakupki-by-source.js";
 import { createProcurementMcpServer } from "./server.js";
+import { SourceAccessError } from "./source-registry.js";
 
 describe("Procurement MCP", () => {
   let client: Client;
@@ -19,9 +21,16 @@ describe("Procurement MCP", () => {
     const source = new FixtureProcurementSource(
       JSON.parse(await readFile(fixturePath, "utf8")) as unknown,
     );
+    const liveSource = new GoszakupkiBySource({
+      client: {
+        get: async () => {
+          throw new SourceAccessError("goszakupki_by", "simulated outage");
+        },
+      },
+    });
     records = [];
     server = createProcurementMcpServer({
-      sources: [source],
+      sources: [source, liveSource],
       logger: createLogger({ sink: (record) => records.push(record) }),
     });
     client = new Client({ name: "procurement-test", version: "0.1.0" });
@@ -145,5 +154,15 @@ describe("Procurement MCP", () => {
       expect.objectContaining({ type: "text", text: expect.stringContaining("not found") }),
     ]);
     expect(result._meta).toMatchObject({ errorKind: "not_found" });
+  });
+
+  it("maps an unavailable live source to the public MCP error taxonomy", async () => {
+    const result = await client.callTool({
+      name: "procurement.search",
+      arguments: { sourceId: "goszakupki_by", keywords: ["трансформатор"] },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result._meta).toMatchObject({ errorKind: "source_unavailable" });
   });
 });

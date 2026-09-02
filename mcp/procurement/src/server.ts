@@ -17,6 +17,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ZodError } from "zod";
 import {
   ProcurementSourceRegistry,
+  SourceAccessError,
   SourceRecordNotFoundError,
   SourceUnavailableError,
 } from "./source-registry.js";
@@ -205,7 +206,9 @@ function classifyError(
   error: unknown,
 ): "not_found" | "source_unavailable" | "invalid_request" | "internal" {
   if (error instanceof SourceRecordNotFoundError) return "not_found";
-  if (error instanceof SourceUnavailableError) return "source_unavailable";
+  if (error instanceof SourceUnavailableError || error instanceof SourceAccessError) {
+    return "source_unavailable";
+  }
   if (error instanceof ZodError) return "invalid_request";
   return "internal";
 }

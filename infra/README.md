@@ -14,5 +14,6 @@ npm run db:bootstrap
 PostgreSQL, Redis, and MinIO bind to loopback only. Application containers
 added in later stages will use the `backend` network directly.
 
-`PROCUREMENT_SOURCE_MODE=fixture` remains the safe default. Anonymous live
-search is enabled explicitly only where `goszakupki.by` is reachable.
+`PROCUREMENT_SOURCE_MODE=fixture` remains the safe default. Live search and card
+reads are enabled explicitly only where `goszakupki.by` is reachable. The
+adapter bootstraps the anonymous cookie session required by the public listing.

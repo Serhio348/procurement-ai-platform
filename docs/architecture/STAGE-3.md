@@ -182,5 +182,5 @@ PROCUREMENT_SOURCE_MODE=fixture npm run mcp:procurement
 
 ## 15. Следующий этап
 
-Этап 4 — `GoszakupkiByAdapter`. Он начинается после получения сохранённых и
-анонимизированных HTML-страниц поиска и карточек всех четырёх семейств.
+Этап 4 — `GoszakupkiByAdapter`; фактическое решение описано в
+[`STAGE-4.md`](STAGE-4.md).

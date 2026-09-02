@@ -7,6 +7,16 @@ export class SourceUnavailableError extends Error {
   }
 }
 
+export class SourceAccessError extends Error {
+  constructor(
+    readonly sourceId: string,
+    readonly reason: string,
+  ) {
+    super(`Procurement source ${sourceId} is unavailable: ${reason}`);
+    this.name = "SourceAccessError";
+  }
+}
+
 export class SourceRecordNotFoundError extends Error {
   constructor(
     readonly sourceId: string,

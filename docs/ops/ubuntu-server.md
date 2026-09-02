@@ -189,10 +189,10 @@ docker compose -f infra/docker-compose.yml down -v
 
 ## 9. Что пока нельзя проверить на этой ВМ
 
-- поиск на `goszakupki.by`
 - веб-интерфейс
 - Telegram-уведомления
 - вход пользователя в платформу
 
-Это появится на следующих этапах. Live-поиск потребует белорусский IP;
-для разработки остаётся `PROCUREMENT_SOURCE_MODE=fixture`.
+Source-native поиск и публичные карточки этапа 4 можно проверить с белорусского
+адреса через `RUN_GOSZAKUPKI_LIVE_TESTS=1`; для обычной разработки остаётся
+`PROCUREMENT_SOURCE_MODE=fixture`.

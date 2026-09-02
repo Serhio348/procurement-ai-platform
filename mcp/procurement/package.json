@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Source-neutral Procurement MCP server with deterministic fixture mode.",
+  "description": "Source-neutral Procurement MCP with fixture and goszakupki.by card sources.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -20,6 +20,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@procurement/contracts": "*",
     "@procurement/observability": "*",
+    "cheerio": "^1.2.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {

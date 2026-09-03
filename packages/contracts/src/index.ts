@@ -10,6 +10,7 @@ export * from "./domain-search.js";
 export * from "./ids.js";
 export * from "./intent.js";
 export * from "./job.js";
+export * from "./monitoring.js";
 export * from "./procurement.js";
 export * from "./scoring.js";
 export * from "./seed.js";

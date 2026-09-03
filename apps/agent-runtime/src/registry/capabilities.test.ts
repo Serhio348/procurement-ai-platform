@@ -14,5 +14,7 @@ describe("capabilityRegistry", () => {
     expect(capabilityRegistry.commercial_terms.allowedTools).toContain("documents.search");
     expect(capabilityRegistry.commercial_terms.forbiddenTools).toContain("procurement.search");
     expect(capabilityRegistry.commercial_terms.forbiddenTools).toContain("telegram.send");
+    expect(capabilityRegistry.monitoring.allowedTools).toContain("procurement.get_status");
+    expect(capabilityRegistry.monitoring.forbiddenTools).toContain("telegram.send");
   });
 });

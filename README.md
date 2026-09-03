@@ -2,8 +2,8 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 9 завершён — CommercialTermsAgent извлекает оплату и аванс
-как факты с цитатой со страницы и не ставит оценку 0–100. Веб-интерфейса пока нет.
+**Статус:** этап 10 завершён — MonitoringAgent сравнивает снимки закупки по
+правилам Domain Profile и не шлёт Telegram. Веб-интерфейса пока нет.
 
 ## Принцип
 
@@ -37,6 +37,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 7 — DomainSearchAgent](docs/architecture/STAGE-7.md)
 - [Этап 8 — Document MCP и DocumentAgent](docs/architecture/STAGE-8.md)
 - [Этап 9 — CommercialTermsAgent](docs/architecture/STAGE-9.md)
+- [Этап 10 — MonitoringAgent](docs/architecture/STAGE-10.md)
 
 ## Пакеты
 
@@ -48,7 +49,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/mcp-client` | Типизированные MCP-вызовы, timeout/error mapping и Tool Policy Gate |
 | `@procurement/mcp-procurement` | Source-neutral Procurement MCP, fixture и live-карточки goszakupki.by |
 | `@procurement/mcp-documents` | Documents MCP: blob по sha256, fixture extract/OCR |
-| `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent |
+| `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent |
 
 ## Разработка
 
@@ -86,5 +87,5 @@ PROCUREMENT_SOURCE_MODE=live
 
 ## Следующий шаг
 
-Следующий плановый этап — мониторинг изменений закупки. На чистой Ubuntu 24.04 инфраструктуру поднимают по
+Следующий плановый этап — отчёты. На чистой Ubuntu 24.04 инфраструктуру поднимают по
 [инструкции сервера](docs/ops/ubuntu-server.md).

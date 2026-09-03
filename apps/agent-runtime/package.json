@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Supervisor, context compilation, DomainSearchAgent, DocumentAgent and CommercialTermsAgent runtime.",
+  "description": "Supervisor, context compilation, search, document ingest, commercial terms and monitoring runtime.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

@@ -22,6 +22,7 @@ import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
 import { ContextCompilation, SupervisorPlan } from "./agent.js";
 import { CommercialClaim } from "./commercial-terms.js";
 import { DocumentsExtractTextResponse } from "./documents.js";
+import { MonitoringSnapshot } from "./monitoring.js";
 import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
@@ -448,6 +449,23 @@ describe("commercial claim", () => {
       page: 1,
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("monitoring snapshot", () => {
+  it("keeps document hashes so an update cannot silently replace the previous version", () => {
+    const parsed = MonitoringSnapshot.parse({
+      status: "accepting_bids",
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://example.test/files/spec-001.pdf",
+          hash: "a".repeat(64),
+        },
+      ],
+      fetchedAt: now,
+    });
+    expect(parsed.documents[0]?.hash).toHaveLength(64);
   });
 });
 

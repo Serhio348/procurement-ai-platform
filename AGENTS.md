@@ -28,6 +28,7 @@
 - [`docs/architecture/STAGE-7.md`](docs/architecture/STAGE-7.md) — DomainSearchAgent
 - [`docs/architecture/STAGE-8.md`](docs/architecture/STAGE-8.md) — Document MCP и DocumentAgent
 - [`docs/architecture/STAGE-9.md`](docs/architecture/STAGE-9.md) — CommercialTermsAgent
+- [`docs/architecture/STAGE-10.md`](docs/architecture/STAGE-10.md) — MonitoringAgent
 
 ---
 
@@ -66,7 +67,7 @@ packages/
   db/              PostgreSQL schema, migrations и repositories
   mcp-client/      Typed MCP client и Tool Policy Gate
 apps/
-  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent
+  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent
 mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
 mcp/documents/     Documents MCP: hash, extract, OCR-сигнал
 workers/           (пусто) фоновые задачи
@@ -154,8 +155,9 @@ docs/architecture/ Документы этапов
 - Этап 7 — DomainSearchAgent: поиск и классификация по Domain Profile
 - Этап 8 — Document MCP и DocumentAgent: hash, extract, эскалация плохого OCR
 - Этап 9 — CommercialTermsAgent: факты оплаты и аванса только с цитатой со страницы
+- Этап 10 — MonitoringAgent: diff статуса, сроков и документов по правилам профиля
 
-Не начато: мониторинг, веб-интерфейс, Telegram.
+Не начато: отчёты, веб-интерфейс, Telegram.
 
 ### План этапов
 

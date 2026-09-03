@@ -262,6 +262,7 @@ function profileSlice(
     positiveCriteria: profile.positiveCriteria,
     negativeCriteria: profile.negativeCriteria,
     constraints: profile.constraints,
+    monitoringRules: profile.monitoringRules,
   };
 }
 

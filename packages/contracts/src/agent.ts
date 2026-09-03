@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CapabilityId, McpToolName } from "./capability.js";
 import { Confidence, Evidence, Fact, IsoDateTime } from "./common.js";
 import { CompiledDocumentRef } from "./documents.js";
-import { DomainProfile } from "./domain-profile.js";
+import { DomainMonitoringRule, DomainProfile } from "./domain-profile.js";
 import {
   AgentRunId,
   DomainProfileId,
@@ -38,7 +38,11 @@ export const MinimalAgentContext = z.object({
     positiveCriteria: true,
     negativeCriteria: true,
     constraints: true,
-  }).optional(),
+  })
+    .extend({
+      monitoringRules: z.array(DomainMonitoringRule).default([]),
+    })
+    .optional(),
   /** Already merged through the policy hierarchy. */
   constraints: z.array(z.object({ scope: z.string(), statement: z.string() })).default([]),
   procurement: ProcurementCaseHeader.optional(),

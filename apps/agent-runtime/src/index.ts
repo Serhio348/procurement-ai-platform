@@ -2,6 +2,7 @@ export * from "./agents/commercial-terms/agent.js";
 export * from "./agents/commercial-terms/factory.js";
 export * from "./agents/commercial-terms/model-port.js";
 export * from "./agents/document-ingest/agent.js";
+export * from "./agents/monitoring/agent.js";
 export * from "./agents/domain-search/agent.js";
 export * from "./agents/domain-search/factory.js";
 export * from "./agents/domain-search/model-port.js";

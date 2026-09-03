@@ -48,6 +48,7 @@ describe("ContextCompiler", () => {
       "procurement.search",
       "procurement.get",
       "procurement.get_lots",
+      "procurement.get_status",
     ]);
     expect(result.context.allowedTools).not.toContain("telegram.send");
     expect(result.context.estimatedTokens).toBeGreaterThan(0);
@@ -282,6 +283,39 @@ describe("ContextCompiler", () => {
       expect.arrayContaining(["documents.search", "documents.get_page"]),
     );
     expect(result.context.allowedTools).not.toContain("procurement.search");
+    expect(result.context.allowedTools).not.toContain("telegram.send");
+  });
+
+  it("gives monitoring the profile watch list and never telegram", () => {
+    const equipment = equipmentProfile();
+    const procurement = caseHeader();
+    const compiler = new ContextCompiler();
+
+    const result = compiler.compile(
+      request({
+        capability: "monitoring",
+        domainProfileId: equipment.id,
+        procurementId: procurement.id,
+        procurement,
+        intents: [searchIntent(equipment.id)],
+        domainProfiles: [equipment],
+      }),
+    );
+
+    expect(result.status).toBe("compiled");
+    if (result.status !== "compiled") return;
+    expect(result.context.domainProfile?.monitoringRules.map((rule) => rule.watch)).toEqual([
+      "status",
+      "documents",
+      "deadlines",
+    ]);
+    expect(result.context.allowedTools).toEqual(
+      expect.arrayContaining([
+        "procurement.get_status",
+        "procurement.get_changes",
+        "procurement.get_documents",
+      ]),
+    );
     expect(result.context.allowedTools).not.toContain("telegram.send");
   });
 

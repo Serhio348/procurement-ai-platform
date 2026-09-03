@@ -4,6 +4,7 @@ export * from "./commercial/cheap-extract.js";
 export * from "./commercial/provenance.js";
 export * from "./documents/ocr-gate.js";
 export * from "./documents/versioning.js";
+export * from "./monitoring/diff.js";
 export * from "./policy/resolve.js";
 export * from "./scoring/components.js";
 export * from "./scoring/engine.js";

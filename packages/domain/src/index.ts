@@ -1,4 +1,7 @@
 export * from "./activity/gate.js";
+export * from "./commercial/assemble.js";
+export * from "./commercial/cheap-extract.js";
+export * from "./commercial/provenance.js";
 export * from "./documents/ocr-gate.js";
 export * from "./documents/versioning.js";
 export * from "./policy/resolve.js";

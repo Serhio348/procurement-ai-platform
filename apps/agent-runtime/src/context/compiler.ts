@@ -104,6 +104,7 @@ export class ContextCompiler {
         ? { domainProfile: profileSlice(profile) }
         : {}),
       ...(requirements.has("procurement") && procurement !== undefined ? { procurement } : {}),
+      ...(requirements.has("documents") ? { documents: request.documents } : {}),
       relevantHistory: requirements.has("relevant_history")
         ? selectHistory(
             request.relevantHistory,

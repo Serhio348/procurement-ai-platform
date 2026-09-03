@@ -255,6 +255,36 @@ describe("ContextCompiler", () => {
     expect(result.context.allowedTools).not.toContain("files.delete");
   });
 
+  it("gives commercial_terms ingested document hashes and never search tools", () => {
+    const equipment = equipmentProfile();
+    const procurement = caseHeader();
+    const compiler = new ContextCompiler();
+    const hash = "a".repeat(64);
+
+    const result = compiler.compile(
+      request({
+        capability: "commercial_terms",
+        domainProfileId: equipment.id,
+        procurementId: procurement.id,
+        procurement,
+        documents: [{ hash, name: "Техническое задание.pdf", status: "extracted" }],
+        intents: [searchIntent(equipment.id)],
+        domainProfiles: [equipment],
+      }),
+    );
+
+    expect(result.status).toBe("compiled");
+    if (result.status !== "compiled") return;
+    expect(result.context.documents).toEqual([
+      { hash, name: "Техническое задание.pdf", status: "extracted" },
+    ]);
+    expect(result.context.allowedTools).toEqual(
+      expect.arrayContaining(["documents.search", "documents.get_page"]),
+    );
+    expect(result.context.allowedTools).not.toContain("procurement.search");
+    expect(result.context.allowedTools).not.toContain("telegram.send");
+  });
+
   it("does not compile when the profile forbids the capability", () => {
     const equipment = equipmentProfile();
     const compiler = new ContextCompiler();
@@ -357,6 +387,7 @@ function request(
     intents: [],
     domainProfiles: [],
     scopedRules: [],
+    documents: [],
     relevantHistory: [],
     systemForbiddenTools: [],
     ...input,

@@ -68,6 +68,7 @@ export const electricalEquipmentSeedV1 = DomainProfileSeed.parse({
     "files.put",
     "files.get",
     "files.exists",
+    "memory.get",
     "notification.send",
     "telegram.send",
   ],

@@ -60,7 +60,7 @@ export const capabilityRegistry: Readonly<Record<CapabilityId, AgentDefinition>>
     role: "Commercial Terms Agent",
     responsibility: "Извлекать подтверждённые условия оплаты, поставки и обеспечения.",
     allowedTools: ["documents.search", "documents.get_page", "memory.get"],
-    forbiddenTools: [...destructiveTools, "notification.send", "telegram.send"],
+    forbiddenTools: [...destructiveTools, "notification.send", "telegram.send", "procurement.search"],
     contextRequirements: [
       "event",
       "intent",

@@ -154,6 +154,14 @@ export const DocumentsListResponse = z.object({
 });
 export type DocumentsListResponse = z.infer<typeof DocumentsListResponse>;
 
+/** Slice the Context Compiler may hand to document-aware agents. */
+export const CompiledDocumentRef = z.object({
+  hash: Sha256,
+  name: z.string().min(1),
+  status: ExtractionStatus,
+});
+export type CompiledDocumentRef = z.infer<typeof CompiledDocumentRef>;
+
 export const DocumentIngestInput = z.object({
   sourceId: SourceId.optional(),
   sourceProcurementId: SourceProcurementId.optional(),

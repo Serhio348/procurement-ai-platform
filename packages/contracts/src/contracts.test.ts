@@ -20,6 +20,7 @@ import { Risk } from "./scoring.js";
 import { DomainProfileSeed } from "./seed.js";
 import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
 import { ContextCompilation, SupervisorPlan } from "./agent.js";
+import { CommercialClaim } from "./commercial-terms.js";
 import { DocumentsExtractTextResponse } from "./documents.js";
 import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
@@ -436,3 +437,17 @@ describe("document extraction", () => {
     expect(parsed.confidence).toBeLessThan(0.75);
   });
 });
+
+describe("commercial claim", () => {
+  it("rejects a claim without a verbatim quote", () => {
+    const parsed = CommercialClaim.safeParse({
+      key: "commercial.advance_percent",
+      value: 30,
+      confidence: 0.9,
+      hash: "a".repeat(64),
+      page: 1,
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+

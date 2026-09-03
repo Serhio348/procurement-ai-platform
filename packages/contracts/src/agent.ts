@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CapabilityId, McpToolName } from "./capability.js";
 import { Confidence, Evidence, Fact, IsoDateTime } from "./common.js";
+import { CompiledDocumentRef } from "./documents.js";
 import { DomainProfile } from "./domain-profile.js";
 import {
   AgentRunId,
@@ -41,6 +42,8 @@ export const MinimalAgentContext = z.object({
   /** Already merged through the policy hierarchy. */
   constraints: z.array(z.object({ scope: z.string(), statement: z.string() })).default([]),
   procurement: ProcurementCaseHeader.optional(),
+  /** Already ingested blobs this capability is allowed to read. */
+  documents: z.array(CompiledDocumentRef).optional(),
   /** Recent decisions and facts scoped to this case or domain only. */
   relevantHistory: z
     .array(z.object({ at: IsoDateTime, summary: z.string().min(1) }))
@@ -78,6 +81,7 @@ export const ContextCompileRequest = z.object({
   domainProfiles: z.array(DomainProfile).default([]),
   scopedRules: z.array(ScopedRule).default([]),
   procurement: ProcurementCaseHeader.optional(),
+  documents: z.array(CompiledDocumentRef).default([]),
   relevantHistory: z.array(ContextHistoryItem).default([]),
   systemForbiddenTools: z.array(McpToolName).default([]),
 });

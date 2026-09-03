@@ -2,8 +2,8 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 6 завершён — Context Compiler собирает минимальный контекст
-агента без вызова модели. Агентов-исполнителей и веб-интерфейса пока нет.
+**Статус:** этап 7 завершён — DomainSearchAgent ищет закупки по профилю и
+классифицирует найденное. Веб-интерфейса пока нет.
 
 ## Принцип
 
@@ -34,6 +34,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 4 — адаптер goszakupki.by](docs/architecture/STAGE-4.md)
 - [Этап 5 — Supervisor](docs/architecture/STAGE-5.md)
 - [Этап 6 — Context Compiler](docs/architecture/STAGE-6.md)
+- [Этап 7 — DomainSearchAgent](docs/architecture/STAGE-7.md)
 
 ## Пакеты
 
@@ -44,7 +45,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/observability` | Структурный лог с correlation ids |
 | `@procurement/mcp-client` | Типизированные MCP-вызовы, timeout/error mapping и Tool Policy Gate |
 | `@procurement/mcp-procurement` | Source-neutral Procurement MCP, fixture и live-карточки goszakupki.by |
-| `@procurement/agent-runtime` | Supervisor и Context Compiler: план и `MinimalAgentContext` без вызова MCP |
+| `@procurement/agent-runtime` | Supervisor, Context Compiler и DomainSearchAgent |
 
 ## Разработка
 
@@ -82,5 +83,5 @@ PROCUREMENT_SOURCE_MODE=live
 
 ## Следующий шаг
 
-Следующий плановый этап — DomainSearchAgent. На чистой Ubuntu 24.04 инфраструктуру поднимают по
+Следующий плановый этап — Document MCP и DocumentAgent. На чистой Ubuntu 24.04 инфраструктуру поднимают по
 [инструкции сервера](docs/ops/ubuntu-server.md).

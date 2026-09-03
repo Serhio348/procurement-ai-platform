@@ -20,6 +20,7 @@ import { Risk } from "./scoring.js";
 import { DomainProfileSeed } from "./seed.js";
 import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
 import { ContextCompilation, SupervisorPlan } from "./agent.js";
+import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -399,6 +400,23 @@ describe("supervisor plan", () => {
 describe("context compilation", () => {
   it("rejects an escalation without a human question", () => {
     const parsed = ContextCompilation.safeParse({ status: "needs_human" });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("domain search candidate", () => {
+  it("stores a verdict instead of a 0-100 model score", () => {
+    const parsed = DomainSearchCandidate.safeParse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/1",
+      url: "https://goszakupki.by/auction/view/1",
+      title: "КТПБ",
+      verdict: 87,
+      confidence: 0.9,
+      reason: "Похоже",
+      needDeeper: true,
+      classifiedBy: "model",
+    });
     expect(parsed.success).toBe(false);
   });
 });

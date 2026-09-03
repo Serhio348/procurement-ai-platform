@@ -25,6 +25,7 @@
 - [`docs/architecture/STAGE-4.md`](docs/architecture/STAGE-4.md) — адаптер goszakupki.by
 - [`docs/architecture/STAGE-5.md`](docs/architecture/STAGE-5.md) — Supervisor
 - [`docs/architecture/STAGE-6.md`](docs/architecture/STAGE-6.md) — Context Compiler
+- [`docs/architecture/STAGE-7.md`](docs/architecture/STAGE-7.md) — DomainSearchAgent
 
 ---
 
@@ -63,7 +64,7 @@ packages/
   db/              PostgreSQL schema, migrations и repositories
   mcp-client/      Typed MCP client и Tool Policy Gate
 apps/
-  agent-runtime/   Supervisor и Context Compiler: план и MinimalAgentContext, без вызова MCP
+  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent
 mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
 workers/           (пусто) фоновые задачи
 docs/architecture/ Документы этапов
@@ -147,8 +148,9 @@ docs/architecture/ Документы этапов
   HTML-маршрутов
 - Этап 5 — Supervisor: план из структурированных intents через DeepSeek API
 - Этап 6 — Context Compiler: `MinimalAgentContext` для шага плана
+- Этап 7 — DomainSearchAgent: поиск и классификация по Domain Profile
 
-Не начато: исполняющие агенты, веб-интерфейс, Telegram.
+Не начато: DocumentAgent, веб-интерфейс, Telegram.
 
 ### План этапов
 

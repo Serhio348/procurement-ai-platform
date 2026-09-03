@@ -4,6 +4,7 @@ export * from "./assessment.js";
 export * from "./capability.js";
 export * from "./common.js";
 export * from "./domain-profile.js";
+export * from "./domain-search.js";
 export * from "./ids.js";
 export * from "./intent.js";
 export * from "./job.js";

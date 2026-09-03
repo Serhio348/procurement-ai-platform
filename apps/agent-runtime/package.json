@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Supervisor planning, context compilation, and model adapters for specialized procurement agents.",
+  "description": "Supervisor, context compilation, and DomainSearchAgent runtime for procurement work.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

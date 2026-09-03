@@ -1,0 +1,52 @@
+{
+  "items": [
+    {
+      "sourceUrl": "https://example.test/files/spec-001.pdf",
+      "file": "spec-001.txt",
+      "contentType": "application/pdf",
+      "extraction": {
+        "status": "extracted",
+        "text": "Техническое задание\nКомплектная трансформаторная подстанция.\nАванс 30 процентов.\n",
+        "pages": [
+          {
+            "page": 1,
+            "text": "Техническое задание\nКомплектная трансформаторная подстанция.\nАванс 30 процентов.\n",
+            "ocrApplied": false,
+            "confidence": 1
+          }
+        ],
+        "tables": [
+          {
+            "page": 1,
+            "rows": [
+              ["Показатель", "Значение"],
+              ["Аванс", "30%"]
+            ]
+          }
+        ],
+        "ocrApplied": false,
+        "confidence": 1
+      }
+    },
+    {
+      "sourceUrl": "https://example.test/files/scan-low.tiff",
+      "file": "scan-low.txt",
+      "contentType": "image/tiff",
+      "extraction": {
+        "status": "ocr_low_confidence",
+        "text": "ав нс 45",
+        "pages": [
+          {
+            "page": 1,
+            "text": "ав нс 45",
+            "ocrApplied": true,
+            "confidence": 0.31
+          }
+        ],
+        "tables": [],
+        "ocrApplied": true,
+        "confidence": 0.31
+      }
+    }
+  ]
+}

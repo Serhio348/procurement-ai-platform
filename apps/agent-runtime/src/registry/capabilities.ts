@@ -42,6 +42,8 @@ export const capabilityRegistry: Readonly<Record<CapabilityId, AgentDefinition>>
       "documents.extract_text",
       "documents.extract_tables",
       "documents.ocr",
+      "documents.search",
+      "documents.get_page",
       "files.put",
       "files.get",
       "files.exists",

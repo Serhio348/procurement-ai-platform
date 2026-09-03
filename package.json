@@ -27,7 +27,8 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "db:migrate": "npm run db:migrate -w @procurement/db",
     "db:bootstrap": "npm run db:bootstrap -w @procurement/db",
-    "mcp:procurement": "npm run start -w @procurement/mcp-procurement"
+    "mcp:procurement": "npm run start -w @procurement/mcp-procurement",
+    "mcp:documents": "npm run start -w @procurement/mcp-documents"
   },
   "repository": {
     "type": "git",

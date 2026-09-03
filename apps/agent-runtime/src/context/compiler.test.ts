@@ -221,6 +221,40 @@ describe("ContextCompiler", () => {
     expect(result.context.estimatedTokens).toBeLessThanOrEqual(900);
   });
 
+  it("keeps extract and OCR tools for document_ingest after the profile intersection", () => {
+    const equipment = equipmentProfile();
+    const procurement = caseHeader();
+    const compiler = new ContextCompiler();
+
+    const result = compiler.compile(
+      request({
+        capability: "document_ingest",
+        domainProfileId: equipment.id,
+        procurementId: procurement.id,
+        procurement,
+        intents: [searchIntent(equipment.id)],
+        domainProfiles: [equipment],
+      }),
+    );
+
+    expect(result.status).toBe("compiled");
+    if (result.status !== "compiled") return;
+    expect(result.context.allowedTools).toEqual(
+      expect.arrayContaining([
+        "procurement.get_documents",
+        "documents.download",
+        "documents.extract_text",
+        "documents.extract_tables",
+        "documents.ocr",
+        "files.put",
+        "files.get",
+        "files.exists",
+      ]),
+    );
+    expect(result.context.allowedTools).not.toContain("telegram.send");
+    expect(result.context.allowedTools).not.toContain("files.delete");
+  });
+
   it("does not compile when the profile forbids the capability", () => {
     const equipment = equipmentProfile();
     const compiler = new ContextCompiler();

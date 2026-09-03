@@ -1,3 +1,4 @@
+export * from "./agents/document-ingest/agent.js";
 export * from "./agents/domain-search/agent.js";
 export * from "./agents/domain-search/factory.js";
 export * from "./agents/domain-search/model-port.js";

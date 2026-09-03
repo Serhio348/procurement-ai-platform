@@ -20,6 +20,7 @@ import { Risk } from "./scoring.js";
 import { DomainProfileSeed } from "./seed.js";
 import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
 import { ContextCompilation, SupervisorPlan } from "./agent.js";
+import { DocumentsExtractTextResponse } from "./documents.js";
 import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
@@ -418,5 +419,20 @@ describe("domain search candidate", () => {
       classifiedBy: "model",
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("document extraction", () => {
+  it("keeps OCR confidence on 0..1 and names a low-confidence scan explicitly", () => {
+    const parsed = DocumentsExtractTextResponse.parse({
+      hash: "a".repeat(64),
+      status: "ocr_low_confidence",
+      text: "ав нс",
+      ocrApplied: true,
+      confidence: 0.31,
+      pages: [{ page: 1, text: "ав нс", ocrApplied: true, confidence: 0.31 }],
+    });
+    expect(parsed.status).toBe("ocr_low_confidence");
+    expect(parsed.confidence).toBeLessThan(0.75);
   });
 });

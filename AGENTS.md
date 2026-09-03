@@ -26,6 +26,7 @@
 - [`docs/architecture/STAGE-5.md`](docs/architecture/STAGE-5.md) — Supervisor
 - [`docs/architecture/STAGE-6.md`](docs/architecture/STAGE-6.md) — Context Compiler
 - [`docs/architecture/STAGE-7.md`](docs/architecture/STAGE-7.md) — DomainSearchAgent
+- [`docs/architecture/STAGE-8.md`](docs/architecture/STAGE-8.md) — Document MCP и DocumentAgent
 
 ---
 
@@ -64,8 +65,9 @@ packages/
   db/              PostgreSQL schema, migrations и repositories
   mcp-client/      Typed MCP client и Tool Policy Gate
 apps/
-  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent
+  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent
 mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
+mcp/documents/     Documents MCP: hash, extract, OCR-сигнал
 workers/           (пусто) фоновые задачи
 docs/architecture/ Документы этапов
 ```
@@ -149,8 +151,9 @@ docs/architecture/ Документы этапов
 - Этап 5 — Supervisor: план из структурированных intents через DeepSeek API
 - Этап 6 — Context Compiler: `MinimalAgentContext` для шага плана
 - Этап 7 — DomainSearchAgent: поиск и классификация по Domain Profile
+- Этап 8 — Document MCP и DocumentAgent: hash, extract, эскалация плохого OCR
 
-Не начато: DocumentAgent, веб-интерфейс, Telegram.
+Не начато: CommercialTermsAgent, веб-интерфейс, Telegram.
 
 ### План этапов
 

@@ -3,6 +3,7 @@ export * from "./analysis.js";
 export * from "./assessment.js";
 export * from "./capability.js";
 export * from "./common.js";
+export * from "./documents.js";
 export * from "./domain-profile.js";
 export * from "./domain-search.js";
 export * from "./ids.js";

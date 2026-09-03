@@ -1,0 +1,28 @@
+{
+  "name": "@procurement/mcp-notifications",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Notifications MCP: in-app inbox and telegram.send behind a sender port.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@procurement/contracts": "*",
+    "@procurement/observability": "*",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2"
+  }
+}

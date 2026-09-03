@@ -30,6 +30,7 @@
 - [`docs/architecture/STAGE-9.md`](docs/architecture/STAGE-9.md) — CommercialTermsAgent
 - [`docs/architecture/STAGE-10.md`](docs/architecture/STAGE-10.md) — MonitoringAgent
 - [`docs/architecture/STAGE-11.md`](docs/architecture/STAGE-11.md) — ReportAgent
+- [`docs/architecture/STAGE-12.md`](docs/architecture/STAGE-12.md) — NotificationAgent
 
 ---
 
@@ -68,9 +69,10 @@ packages/
   db/              PostgreSQL schema, migrations и repositories
   mcp-client/      Typed MCP client и Tool Policy Gate
 apps/
-  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent
+  agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent, NotificationAgent
 mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
 mcp/documents/     Documents MCP: hash, extract, OCR-сигнал
+mcp/notifications/ Notifications MCP: inbox и telegram.send
 workers/           (пусто) фоновые задачи
 docs/architecture/ Документы этапов
 ```
@@ -158,8 +160,9 @@ docs/architecture/ Документы этапов
 - Этап 9 — CommercialTermsAgent: факты оплаты и аванса только с цитатой со страницы
 - Этап 10 — MonitoringAgent: diff статуса, сроков и документов по правилам профиля
 - Этап 11 — ReportAgent: markdown-отчёт из проверенных фактов, без выдуманной оценки
+- Этап 12 — NotificationAgent: inbox и telegram.send уже сформированного текста
 
-Не начато: веб-интерфейс, Telegram.
+Не начато: веб-интерфейс, входящий Telegram-бот.
 
 ### План этапов
 
@@ -175,11 +178,12 @@ docs/architecture/ Документы этапов
 | 9 | CommercialTermsAgent | да |
 | 10 | Мониторинг | да |
 | 11 | Отчёты | да |
-| 12 | Веб-интерфейс | да |
-| 13 | Telegram | да |
-| 14 | Наблюдаемость | да |
-| 15 | Усиление безопасности | да |
-| 16 | Сквозное тестирование | частично |
+| 12 | NotificationAgent | да |
+| 13 | Веб-интерфейс | да |
+| 14 | Входящий Telegram | да |
+| 15 | Наблюдаемость | да |
+| 16 | Усиление безопасности | да |
+| 17 | Сквозное тестирование | частично |
 
 ---
 

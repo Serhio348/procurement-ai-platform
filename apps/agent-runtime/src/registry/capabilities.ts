@@ -9,6 +9,16 @@ const destructiveTools = [
   "files.delete",
 ] as const satisfies readonly McpToolName[];
 
+const procurementTools = [
+  "procurement.search",
+  "procurement.get",
+  "procurement.get_lots",
+  "procurement.get_status",
+  "procurement.get_history",
+  "procurement.get_documents",
+  "procurement.get_changes",
+] as const satisfies readonly McpToolName[];
+
 function definition(input: AgentDefinition): AgentDefinition {
   return AgentDefinition.parse(input);
 }
@@ -146,9 +156,9 @@ export const capabilityRegistry: Readonly<Record<CapabilityId, AgentDefinition>>
   notification: definition({
     capability: "notification",
     role: "Notification Agent",
-    responsibility: "Подготавливать и отправлять разрешённые уведомления специалисту.",
+    responsibility: "Доставлять уже сформированные отчёты и ChangeEvent специалисту.",
     allowedTools: ["notification.send", "telegram.send"],
-    forbiddenTools: [...destructiveTools, "memory.put"],
+    forbiddenTools: [...destructiveTools, "memory.put", ...procurementTools, "documents.download"],
     contextRequirements: ["event", "intent", "procurement", "relevant_history"],
     minConfidence: 0.85,
     maxContextTokens: 1500,

@@ -28,7 +28,8 @@
     "db:migrate": "npm run db:migrate -w @procurement/db",
     "db:bootstrap": "npm run db:bootstrap -w @procurement/db",
     "mcp:procurement": "npm run start -w @procurement/mcp-procurement",
-    "mcp:documents": "npm run start -w @procurement/mcp-documents"
+    "mcp:documents": "npm run start -w @procurement/mcp-documents",
+    "mcp:notifications": "npm run start -w @procurement/mcp-notifications"
   },
   "repository": {
     "type": "git",

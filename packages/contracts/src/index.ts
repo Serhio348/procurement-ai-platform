@@ -11,6 +11,7 @@ export * from "./ids.js";
 export * from "./intent.js";
 export * from "./job.js";
 export * from "./monitoring.js";
+export * from "./notification.js";
 export * from "./procurement.js";
 export * from "./report.js";
 export * from "./scoring.js";

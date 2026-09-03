@@ -2,8 +2,9 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 11 завершён — ReportAgent собирает markdown из проверенных
-фактов и не ставит оценку. Веб-интерфейса пока нет.
+**Статус:** этап 12 завершён — NotificationAgent доставляет уже сформированный
+отчёт и ChangeEvent в inbox; Telegram только для срочного. Веб-интерфейса
+пока нет.
 
 ## Принцип
 
@@ -39,6 +40,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 9 — CommercialTermsAgent](docs/architecture/STAGE-9.md)
 - [Этап 10 — MonitoringAgent](docs/architecture/STAGE-10.md)
 - [Этап 11 — ReportAgent](docs/architecture/STAGE-11.md)
+- [Этап 12 — NotificationAgent](docs/architecture/STAGE-12.md)
 
 ## Пакеты
 
@@ -50,7 +52,8 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/mcp-client` | Типизированные MCP-вызовы, timeout/error mapping и Tool Policy Gate |
 | `@procurement/mcp-procurement` | Source-neutral Procurement MCP, fixture и live-карточки goszakupki.by |
 | `@procurement/mcp-documents` | Documents MCP: blob по sha256, fixture extract/OCR |
-| `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent |
+| `@procurement/mcp-notifications` | Notifications MCP: inbox и telegram.send |
+| `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent, NotificationAgent |
 
 ## Разработка
 

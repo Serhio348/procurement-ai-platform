@@ -5,6 +5,8 @@ export * from "./commercial/provenance.js";
 export * from "./documents/ocr-gate.js";
 export * from "./documents/versioning.js";
 export * from "./monitoring/diff.js";
+export * from "./notification/message.js";
+export * from "./notification/route.js";
 export * from "./policy/resolve.js";
 export * from "./report/compile.js";
 export * from "./scoring/components.js";

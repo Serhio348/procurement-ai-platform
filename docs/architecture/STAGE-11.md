@@ -113,5 +113,6 @@ docs/architecture/STAGE-11.md
 
 ## 12. Следующий этап
 
-Этап 12 — веб-интерфейс. Параллельно можно NotificationAgent: доставить уже
-собранный отчёт и ChangeEvent специалисту (UI inbox / Telegram).
+Этап 12 — NotificationAgent: доставить уже собранный отчёт и ChangeEvent
+специалисту (inbox / Telegram). Реализовано, см.
+[`STAGE-12.md`](STAGE-12.md).

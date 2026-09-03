@@ -8,6 +8,7 @@
     { "path": "./packages/observability" },
     { "path": "./mcp/procurement" },
     { "path": "./mcp/documents" },
+    { "path": "./mcp/notifications" },
     { "path": "./apps/agent-runtime" }
   ]
 }

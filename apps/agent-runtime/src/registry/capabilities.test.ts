@@ -18,5 +18,11 @@ describe("capabilityRegistry", () => {
     expect(capabilityRegistry.monitoring.forbiddenTools).toContain("telegram.send");
     expect(capabilityRegistry.report.allowedTools).toContain("files.put");
     expect(capabilityRegistry.report.forbiddenTools).toContain("telegram.send");
+    expect(capabilityRegistry.notification.allowedTools).toEqual([
+      "notification.send",
+      "telegram.send",
+    ]);
+    expect(capabilityRegistry.notification.forbiddenTools).toContain("procurement.search");
+    expect(capabilityRegistry.notification.forbiddenTools).toContain("documents.download");
   });
 });

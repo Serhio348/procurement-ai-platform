@@ -23,6 +23,7 @@ import { ContextCompilation, SupervisorPlan } from "./agent.js";
 import { CommercialClaim } from "./commercial-terms.js";
 import { DocumentsExtractTextResponse } from "./documents.js";
 import { MonitoringSnapshot } from "./monitoring.js";
+import { NotificationSendRequest, TelegramSendRequest } from "./notification.js";
 import { ReportOutput } from "./report.js";
 import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
@@ -478,6 +479,26 @@ describe("procurement report", () => {
       sections: [],
       missing: [],
       generatedAt: now,
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("notification delivery contracts", () => {
+  it("rejects an empty inbox body so a blank ping cannot pass as a send", () => {
+    const parsed = NotificationSendRequest.safeParse({
+      title: "Изменение",
+      body: "",
+      dedupeKey: "case-1:status",
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects telegram text longer than the Bot API limit", () => {
+    const parsed = TelegramSendRequest.safeParse({
+      chatId: "42",
+      text: "я".repeat(4097),
+      dedupeKey: "case-1:status",
     });
     expect(parsed.success).toBe(false);
   });

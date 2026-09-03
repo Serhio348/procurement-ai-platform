@@ -23,6 +23,7 @@ import { ContextCompilation, SupervisorPlan } from "./agent.js";
 import { CommercialClaim } from "./commercial-terms.js";
 import { DocumentsExtractTextResponse } from "./documents.js";
 import { MonitoringSnapshot } from "./monitoring.js";
+import { ReportOutput } from "./report.js";
 import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
@@ -466,6 +467,19 @@ describe("monitoring snapshot", () => {
       fetchedAt: now,
     });
     expect(parsed.documents[0]?.hash).toHaveLength(64);
+  });
+});
+
+describe("procurement report", () => {
+  it("requires at least one section so an empty dump cannot pass as a report", () => {
+    const parsed = ReportOutput.safeParse({
+      title: "КТПБ",
+      markdown: "# КТПБ",
+      sections: [],
+      missing: [],
+      generatedAt: now,
+    });
+    expect(parsed.success).toBe(false);
   });
 });
 

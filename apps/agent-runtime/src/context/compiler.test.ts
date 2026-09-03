@@ -319,6 +319,29 @@ describe("ContextCompiler", () => {
     expect(result.context.allowedTools).not.toContain("telegram.send");
   });
 
+  it("gives report file storage and never telegram", () => {
+    const equipment = equipmentProfile();
+    const procurement = caseHeader();
+    const compiler = new ContextCompiler();
+
+    const result = compiler.compile(
+      request({
+        capability: "report",
+        domainProfileId: equipment.id,
+        procurementId: procurement.id,
+        procurement,
+        intents: [searchIntent(equipment.id)],
+        domainProfiles: [equipment],
+      }),
+    );
+
+    expect(result.status).toBe("compiled");
+    if (result.status !== "compiled") return;
+    expect(result.context.allowedTools).toEqual(expect.arrayContaining(["files.put"]));
+    expect(result.context.allowedTools).not.toContain("telegram.send");
+    expect(result.context.allowedTools).not.toContain("procurement.search");
+  });
+
   it("does not compile when the profile forbids the capability", () => {
     const equipment = equipmentProfile();
     const compiler = new ContextCompiler();

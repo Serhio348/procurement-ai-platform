@@ -51,6 +51,7 @@ export const electricalEquipmentSeedV1 = DomainProfileSeed.parse({
     "document_ingest",
     "commercial_terms",
     "monitoring",
+    "report",
     "notification",
   ],
   associatedMcpTools: [

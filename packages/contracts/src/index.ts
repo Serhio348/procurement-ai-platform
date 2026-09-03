@@ -12,6 +12,7 @@ export * from "./intent.js";
 export * from "./job.js";
 export * from "./monitoring.js";
 export * from "./procurement.js";
+export * from "./report.js";
 export * from "./scoring.js";
 export * from "./seed.js";
 export * from "./seed/electrical-equipment.v1.js";

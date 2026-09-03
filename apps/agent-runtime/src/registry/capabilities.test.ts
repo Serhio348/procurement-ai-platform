@@ -16,5 +16,7 @@ describe("capabilityRegistry", () => {
     expect(capabilityRegistry.commercial_terms.forbiddenTools).toContain("telegram.send");
     expect(capabilityRegistry.monitoring.allowedTools).toContain("procurement.get_status");
     expect(capabilityRegistry.monitoring.forbiddenTools).toContain("telegram.send");
+    expect(capabilityRegistry.report.allowedTools).toContain("files.put");
+    expect(capabilityRegistry.report.forbiddenTools).toContain("telegram.send");
   });
 });

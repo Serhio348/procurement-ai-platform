@@ -159,12 +159,7 @@ export const capabilityRegistry: Readonly<Record<CapabilityId, AgentDefinition>>
     capability: "report",
     role: "Report Agent",
     responsibility: "Собирать проверенные результаты агентов в понятный отчёт.",
-    allowedTools: [
-      "documents.search",
-      "documents.get_page",
-      "memory.get",
-      "knowledge.search",
-    ],
+    allowedTools: ["memory.get", "files.put"],
     forbiddenTools: [...destructiveTools, "notification.send", "telegram.send", "memory.put"],
     contextRequirements: [
       "event",
@@ -172,9 +167,7 @@ export const capabilityRegistry: Readonly<Record<CapabilityId, AgentDefinition>>
       "domain_profile",
       "constraints",
       "procurement",
-      "documents",
       "relevant_history",
-      "company_knowledge",
     ],
     minConfidence: 0.85,
     maxContextTokens: 4000,

@@ -84,7 +84,7 @@ module.exports = {
       name: "agent-runtime-does-not-import-adapters",
       severity: "error",
       comment:
-        "Supervisor and future agents may use contracts, domain and observability. They must not import MCP servers or the database.",
+        "Supervisor, Context Compiler and future agents may use contracts, domain, observability and the typed MCP client. They must not import MCP servers or the database.",
       from: { path: "^apps/agent-runtime/src" },
       to: { path: "(^mcp/|^packages/db)" },
     },

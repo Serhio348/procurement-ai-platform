@@ -140,3 +140,4 @@ HTTP API не добавлен. Семь MCP tools не изменились. Su
 ## 12. Следующий этап
 
 Этап 6 — Context Compiler: сборка `MinimalAgentContext` для шага плана.
+Реализовано, см. [`STAGE-6.md`](STAGE-6.md).

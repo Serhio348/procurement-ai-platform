@@ -35,4 +35,14 @@ describe("ToolPolicyGate", () => {
       reason: "not_allowed_by_agent",
     });
   });
+
+  it("lists only tools that survive agent, profile and denylist checks", () => {
+    const gate = new ToolPolicyGate({
+      agentAllowedTools: ["procurement.search", "procurement.get", "telegram.send"],
+      agentForbiddenTools: ["telegram.send"],
+      profileAllowedTools: ["procurement.search", "telegram.send"],
+    });
+
+    expect(gate.allowedTools()).toEqual(["procurement.search"]);
+  });
 });

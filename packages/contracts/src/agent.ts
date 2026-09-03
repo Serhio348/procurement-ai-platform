@@ -52,6 +52,49 @@ export const MinimalAgentContext = z.object({
 });
 export type MinimalAgentContext = z.infer<typeof MinimalAgentContext>;
 
+/**
+ * History rows supplied to the compiler. Only items matching the current
+ * procurement or profile are copied into MinimalAgentContext.
+ */
+export const ContextHistoryItem = z.object({
+  at: IsoDateTime,
+  summary: z.string().min(1),
+  procurementId: ProcurementId.optional(),
+  domainProfileId: DomainProfileId.optional(),
+});
+export type ContextHistoryItem = z.infer<typeof ContextHistoryItem>;
+
+/**
+ * Deterministic input to the Context Compiler. The caller already selected
+ * the plan step; the compiler never asks a model what to include.
+ */
+export const ContextCompileRequest = z.object({
+  requestId: RequestId,
+  event: MinimalAgentContext.shape.event,
+  capability: CapabilityId,
+  domainProfileId: DomainProfileId.optional(),
+  procurementId: ProcurementId.optional(),
+  intents: z.array(Intent).default([]),
+  domainProfiles: z.array(DomainProfile).default([]),
+  scopedRules: z.array(ScopedRule).default([]),
+  procurement: ProcurementCaseHeader.optional(),
+  relevantHistory: z.array(ContextHistoryItem).default([]),
+  systemForbiddenTools: z.array(McpToolName).default([]),
+});
+export type ContextCompileRequest = z.infer<typeof ContextCompileRequest>;
+
+export const ContextCompilation = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("compiled"),
+    context: MinimalAgentContext,
+  }),
+  z.object({
+    status: z.literal("needs_human"),
+    humanQuestion: z.string().min(1),
+  }),
+]);
+export type ContextCompilation = z.infer<typeof ContextCompilation>;
+
 export const AgentRunInput = z.object({
   runId: AgentRunId,
   requestId: RequestId,

@@ -22,6 +22,9 @@
 - [`docs/architecture/STAGE-1.md`](docs/architecture/STAGE-1.md) — что уже реализовано и почему именно так
 - [`docs/architecture/STAGE-2.md`](docs/architecture/STAGE-2.md) — PostgreSQL, Redis и MinIO
 - [`docs/architecture/STAGE-3.md`](docs/architecture/STAGE-3.md) — Procurement MCP и fixture boundary
+- [`docs/architecture/STAGE-4.md`](docs/architecture/STAGE-4.md) — адаптер goszakupki.by
+- [`docs/architecture/STAGE-5.md`](docs/architecture/STAGE-5.md) — Supervisor
+- [`docs/architecture/STAGE-6.md`](docs/architecture/STAGE-6.md) — Context Compiler
 
 ---
 
@@ -60,7 +63,7 @@ packages/
   db/              PostgreSQL schema, migrations и repositories
   mcp-client/      Typed MCP client и Tool Policy Gate
 apps/
-  agent-runtime/   Supervisor: план из intents, без MCP и без score
+  agent-runtime/   Supervisor и Context Compiler: план и MinimalAgentContext, без вызова MCP
 mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
 workers/           (пусто) фоновые задачи
 docs/architecture/ Документы этапов
@@ -143,8 +146,9 @@ docs/architecture/ Документы этапов
 - Этап 4 — анонимный source-native поиск, live-карточки `goszakupki.by` и пять
   HTML-маршрутов
 - Этап 5 — Supervisor: план из структурированных intents через DeepSeek API
+- Этап 6 — Context Compiler: `MinimalAgentContext` для шага плана
 
-Не начато: Context Compiler, исполняющие агенты, веб-интерфейс, Telegram.
+Не начато: исполняющие агенты, веб-интерфейс, Telegram.
 
 ### План этапов
 

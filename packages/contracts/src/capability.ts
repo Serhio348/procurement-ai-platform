@@ -89,6 +89,8 @@ export const AgentDefinition = z.object({
   ),
   /** Runs below this confidence are escalated instead of accepted. */
   minConfidence: z.number().min(0).max(1),
+  /** Hard ceiling for compiled context. Constraints are never silently dropped. */
+  maxContextTokens: z.number().int().positive(),
   timeoutMs: z.number().int().positive(),
   maxRetries: z.number().int().nonnegative(),
 });

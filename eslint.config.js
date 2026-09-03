@@ -119,7 +119,7 @@ export default tseslint.config(
           paths: [
             {
               name: "@procurement/db",
-              message: "Supervisor planning must not read the database.",
+              message: "Agent runtime must not read the database.",
             },
           ],
           patterns: ["@procurement/db", "mcp/*", "playwright", "fastify", "bullmq"],

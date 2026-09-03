@@ -1,3 +1,4 @@
+export * from "./context/compiler.js";
 export * from "./llm/openai-compatible-supervisor-model.js";
 export * from "./registry/capabilities.js";
 export * from "./supervisor/factory.js";

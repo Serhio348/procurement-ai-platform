@@ -19,7 +19,7 @@ import {
 import { Risk } from "./scoring.js";
 import { DomainProfileSeed } from "./seed.js";
 import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
-import { SupervisorPlan } from "./agent.js";
+import { ContextCompilation, SupervisorPlan } from "./agent.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -392,6 +392,13 @@ describe("supervisor plan", () => {
       needsHuman: true,
       confidence: 0.4,
     });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("context compilation", () => {
+  it("rejects an escalation without a human question", () => {
+    const parsed = ContextCompilation.safeParse({ status: "needs_human" });
     expect(parsed.success).toBe(false);
   });
 });

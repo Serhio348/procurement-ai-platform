@@ -69,4 +69,9 @@ export class ToolPolicyGate {
       throw new ToolPolicyDeniedError(toolName, decision.reason);
     }
   }
+
+  /** The allowlist an agent may actually invoke, in closed-enum order. */
+  allowedTools(): McpToolNameValue[] {
+    return McpToolName.options.filter((toolName) => this.decide(toolName).allowed);
+  }
 }

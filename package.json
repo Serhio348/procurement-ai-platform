@@ -15,10 +15,10 @@
   ],
   "scripts": {
     "build": "tsc --build",
-    "typecheck": "tsc --build --force",
+    "typecheck": "tsc --build --force && npm run typecheck -w @procurement/web",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run",
+    "test": "vitest run && npm test -w @procurement/web",
     "test:watch": "vitest",
     "arch": "depcruise packages mcp apps --config .dependency-cruiser.cjs",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run arch",
@@ -29,7 +29,8 @@
     "db:bootstrap": "npm run db:bootstrap -w @procurement/db",
     "mcp:procurement": "npm run start -w @procurement/mcp-procurement",
     "mcp:documents": "npm run start -w @procurement/mcp-documents",
-    "mcp:notifications": "npm run start -w @procurement/mcp-notifications"
+    "mcp:notifications": "npm run start -w @procurement/mcp-notifications",
+    "web": "concurrently -k -n api,web -c blue,green \"npm run start -w @procurement/api\" \"npm run dev -w @procurement/web\""
   },
   "repository": {
     "type": "git",
@@ -41,9 +42,13 @@
     "@types/node": "^22.10.2",
     "dependency-cruiser": "^16.9.0",
     "eslint": "^9.17.0",
+    "concurrently": "^9.1.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "vite": "6.3.5"
   }
 }

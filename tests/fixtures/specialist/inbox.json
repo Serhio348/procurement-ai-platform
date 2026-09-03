@@ -1,0 +1,55 @@
+{
+  "items": [
+    {
+      "procurement": {
+        "title": "Поставка КТПБ",
+        "status": "cancelled",
+        "url": "https://goszakupki.by/auction/view/001",
+        "sourceProcurementId": "auction/001"
+      },
+      "change": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "procurementId": "00000000-0000-4000-8000-000000000020",
+        "kind": "status_changed",
+        "previous": "accepting_bids",
+        "current": "cancelled",
+        "detectedAt": "2026-09-03T08:15:00.000Z",
+        "urgent": true
+      }
+    },
+    {
+      "procurement": {
+        "title": "НКУ и щитовое оборудование",
+        "status": "accepting_bids",
+        "url": "https://goszakupki.by/auction/view/002",
+        "sourceProcurementId": "auction/002"
+      },
+      "change": {
+        "id": "00000000-0000-4000-8000-000000000102",
+        "procurementId": "00000000-0000-4000-8000-000000000021",
+        "kind": "document_updated",
+        "previous": "ТЗ.pdf",
+        "current": "ТЗ.pdf",
+        "detectedAt": "2026-09-03T09:40:00.000Z",
+        "urgent": true
+      }
+    },
+    {
+      "procurement": {
+        "title": "Бытовой щиток",
+        "status": "announced",
+        "url": "https://goszakupki.by/auction/view/003",
+        "sourceProcurementId": "auction/003"
+      },
+      "change": {
+        "id": "00000000-0000-4000-8000-000000000103",
+        "procurementId": "00000000-0000-4000-8000-000000000022",
+        "kind": "price_changed",
+        "previous": "10000",
+        "current": "9000",
+        "detectedAt": "2026-09-03T10:00:00.000Z",
+        "urgent": false
+      }
+    }
+  ]
+}

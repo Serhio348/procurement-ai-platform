@@ -16,6 +16,7 @@ export * from "./procurement.js";
 export * from "./report.js";
 export * from "./scoring.js";
 export * from "./seed.js";
+export * from "./specialist.js";
 export * from "./seed/electrical-equipment.v1.js";
 export * from "./source-port.js";
 export * from "./task.js";

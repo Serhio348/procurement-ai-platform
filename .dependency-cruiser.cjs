@@ -89,12 +89,35 @@ module.exports = {
       to: { path: "(^mcp/|^packages/db)" },
     },
     {
+      name: "web-does-not-import-runtime",
+      severity: "error",
+      comment:
+        "The specialist UI may use contracts and domain. It must not import MCP servers, the database, or the agent runtime.",
+      from: { path: "^apps/web" },
+      to: { path: "(^mcp/|^packages/db|^apps/agent-runtime|^apps/api|^workers/)" },
+    },
+    {
+      name: "api-does-not-import-ui-or-mcp",
+      severity: "error",
+      comment: "The specialist API uses contracts and domain. It must not import the web app or MCP servers.",
+      from: { path: "^apps/api" },
+      to: { path: "(^mcp/|^apps/web|^apps/agent-runtime|^workers/)" },
+    },
+    {
       name: "no-orphans",
       severity: "warn",
       comment: "Unreachable module - probably dead code.",
       from: {
         orphan: true,
-        pathNot: ["\\.d\\.ts$", "(^|/)tsconfig\\.json$", "(^|/)drizzle\\.config\\.ts$"],
+        pathNot: [
+          "\\.d\\.ts$",
+          "(^|/)tsconfig\\.json$",
+          "(^|/)drizzle\\.config\\.ts$",
+          "(^|/)vite\\.config\\.ts$",
+          "(^|/)vitest\\.config\\.ts$",
+          "^apps/web/src/main\\.tsx$",
+          "^apps/api/src/main\\.ts$",
+        ],
       },
       to: {},
     },
@@ -107,7 +130,7 @@ module.exports = {
     enhancedResolveOptions: {
       exportsFields: ["exports"],
       conditionNames: ["import", "require", "node", "default", "types"],
-      extensions: [".ts", ".js", ".json"],
+      extensions: [".ts", ".tsx", ".js", ".json"],
     },
     reporterOptions: {
       text: { highlightFocused: true },

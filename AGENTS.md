@@ -31,6 +31,9 @@
 - [`docs/architecture/STAGE-10.md`](docs/architecture/STAGE-10.md) — MonitoringAgent
 - [`docs/architecture/STAGE-11.md`](docs/architecture/STAGE-11.md) — ReportAgent
 - [`docs/architecture/STAGE-12.md`](docs/architecture/STAGE-12.md) — NotificationAgent
+- [`docs/architecture/STAGE-13.md`](docs/architecture/STAGE-13.md) — веб-интерфейс (inbox)
+- [`docs/architecture/STAGE-14.md`](docs/architecture/STAGE-14.md) — живой inbox через HTTP API
+- [`docs/architecture/STAGE-15.md`](docs/architecture/STAGE-15.md) — список закупок и карточка кейса
 
 ---
 
@@ -54,6 +57,7 @@ npm run verify
 | `npm run test:watch` | Vitest в режиме наблюдения |
 | `npm run arch` | dependency-cruiser: проверка слоёв |
 | `npm run build` | Сборка пакетов в `dist/` |
+| `npm run web` | API + Vite: консоль специалиста |
 
 `npm run verify` должен проходить **до** коммита. Если он падает — работа не закончена.
 
@@ -70,6 +74,8 @@ packages/
   mcp-client/      Typed MCP client и Tool Policy Gate
 apps/
   agent-runtime/   Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent, NotificationAgent
+  api/             Fastify: inbox и карточки закупок для консоли
+  web/             Консоль специалиста: inbox и список закупок
 mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
 mcp/documents/     Documents MCP: hash, extract, OCR-сигнал
 mcp/notifications/ Notifications MCP: inbox и telegram.send
@@ -161,8 +167,11 @@ docs/architecture/ Документы этапов
 - Этап 10 — MonitoringAgent: diff статуса, сроков и документов по правилам профиля
 - Этап 11 — ReportAgent: markdown-отчёт из проверенных фактов, без выдуманной оценки
 - Этап 12 — NotificationAgent: inbox и telegram.send уже сформированного текста
+- Этап 13 — веб-интерфейс: inbox срочных ChangeEvent, без чата и без логина
+- Этап 14 — живой inbox через Fastify API
+- Этап 15 — список закупок и карточка кейса
 
-Не начато: веб-интерфейс, входящий Telegram-бот.
+Не начато: PostgreSQL outbox для inbox, редактор профиля, входящий Telegram-бот.
 
 ### План этапов
 
@@ -179,11 +188,13 @@ docs/architecture/ Документы этапов
 | 10 | Мониторинг | да |
 | 11 | Отчёты | да |
 | 12 | NotificationAgent | да |
-| 13 | Веб-интерфейс | да |
-| 14 | Входящий Telegram | да |
-| 15 | Наблюдаемость | да |
-| 16 | Усиление безопасности | да |
-| 17 | Сквозное тестирование | частично |
+| 13 | Веб-интерфейс (inbox) | да |
+| 14 | Живой inbox через HTTP API | да |
+| 15 | Список закупок и карточка кейса | да |
+| 16 | Входящий Telegram | да |
+| 17 | Наблюдаемость | да |
+| 18 | Усиление безопасности | да |
+| 19 | Сквозное тестирование | частично |
 
 ---
 

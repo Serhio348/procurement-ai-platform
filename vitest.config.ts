@@ -15,7 +15,8 @@ export default defineConfig({
   test: {
     include: [
       "packages/**/*.test.ts",
-      "apps/**/*.test.ts",
+      "apps/agent-runtime/**/*.test.ts",
+      "apps/api/**/*.test.ts",
       "mcp/**/*.test.ts",
       "workers/**/*.test.ts",
     ],

@@ -2,9 +2,8 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 12 завершён — NotificationAgent доставляет уже сформированный
-отчёт и ChangeEvent в inbox; Telegram только для срочного. Веб-интерфейса
-пока нет.
+**Статус:** этап 15 — консоль специалиста читает inbox и список закупок с
+Fastify API. Каталог в памяти процесса; PostgreSQL outbox ещё не подключён.
 
 ## Принцип
 
@@ -41,6 +40,9 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 10 — MonitoringAgent](docs/architecture/STAGE-10.md)
 - [Этап 11 — ReportAgent](docs/architecture/STAGE-11.md)
 - [Этап 12 — NotificationAgent](docs/architecture/STAGE-12.md)
+- [Этап 13 — веб-интерфейс](docs/architecture/STAGE-13.md)
+- [Этап 14 — живой inbox через HTTP API](docs/architecture/STAGE-14.md)
+- [Этап 15 — список закупок и карточка кейса](docs/architecture/STAGE-15.md)
 
 ## Пакеты
 
@@ -54,13 +56,15 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/mcp-documents` | Documents MCP: blob по sha256, fixture extract/OCR |
 | `@procurement/mcp-notifications` | Notifications MCP: inbox и telegram.send |
 | `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent, NotificationAgent |
+| `@procurement/api` | Fastify: inbox срочных изменений и карточки закупок |
+| `@procurement/web` | Консоль специалиста: inbox и список закупок |
 
 ## Разработка
 
 ```bash
 npm install
 npm run verify   # типы, линт, тесты, архитектурные зависимости
-npm test
+npm run web      # API (3001) + консоль специалиста (Vite 5173)
 ```
 
 Требуется Node.js 22 или новее.

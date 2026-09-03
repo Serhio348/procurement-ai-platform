@@ -12,3 +12,4 @@ export * from "./report/compile.js";
 export * from "./scoring/components.js";
 export * from "./scoring/engine.js";
 export * from "./search/cheap-classify.js";
+export * from "./specialist/catalog.js";

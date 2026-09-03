@@ -118,7 +118,9 @@ Live: `NOTIFICATION_TELEGRAM_MODE=live`, `TELEGRAM_BOT_TOKEN`,
 3. **Нет email.** STAGE-0 допускал email; MVP — inbox + telegram.
 4. **Нет входящего бота.** Только `sendMessage`. Подписка, /start, диалог —
    не этот этап.
-5. **UI inbox ещё нет.** Запись есть в MCP; экрана специалиста нет.
+5. **UI inbox на этапе 13 — fixture.** Живая лента из MCP/PostgreSQL ещё не
+   подключена.
+
 
 ## 11. Критерии приёмки
 
@@ -131,5 +133,5 @@ Live: `NOTIFICATION_TELEGRAM_MODE=live`, `TELEGRAM_BOT_TOKEN`,
 
 ## 12. Следующий этап
 
-Этап 13 — веб-интерфейс: специалист видит inbox, отчёт и ChangeEvent.
-Входящий Telegram-бот остаётся отдельным наращиванием.
+Этап 13 — веб-интерфейс: специалист видит inbox срочных ChangeEvent.
+Реализовано, см. [`STAGE-13.md`](STAGE-13.md).

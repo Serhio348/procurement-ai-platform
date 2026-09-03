@@ -1,0 +1,29 @@
+{
+  "name": "@procurement/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Specialist HTTP API: inbox events and procurement cards. Fixture catalog by default.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@procurement/contracts": "0.1.0",
+    "@procurement/domain": "0.1.0",
+    "@procurement/observability": "0.1.0",
+    "fastify": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2"
+  }
+}

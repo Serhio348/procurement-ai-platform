@@ -15,7 +15,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "**/*.tsx"],
     rules: {
       "@typescript-eslint/consistent-type-imports": "error",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
@@ -105,6 +105,48 @@ export default tseslint.config(
             "mcp/*",
             "apps/*",
             "workers/*",
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/api/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@procurement/db",
+              message: "This slice uses an in-memory specialist catalog, not PostgreSQL.",
+            },
+          ],
+          patterns: ["@procurement/db", "mcp/*", "apps/web", "playwright", "bullmq"],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/web/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@procurement/db",
+              message: "The web console reads the specialist HTTP API, not the database.",
+            },
+          ],
+          patterns: [
+            "@procurement/db",
+            "mcp/*",
+            "apps/agent-runtime",
+            "apps/api",
+            "playwright",
+            "fastify",
+            "bullmq",
           ],
         },
       ],

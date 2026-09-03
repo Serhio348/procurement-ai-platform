@@ -7,6 +7,7 @@ import {
   type AgentRunInput as AgentRunInputValue,
   type AgentRunOutput as AgentRunOutputValue,
   type CapabilityId,
+  type InboxFixtureItem,
   type NotificationDelivery,
   type NotificationSkipped,
 } from "@procurement/contracts";
@@ -20,22 +21,26 @@ import {
 } from "@procurement/mcp-client";
 import { silentLogger, type Logger } from "@procurement/observability";
 import { capabilityRegistry } from "../../registry/capabilities.js";
+import type { SpecialistInboxEvents } from "./inbox-events.js";
 
 export interface NotificationAgentOptions {
   caller: McpToolCaller;
   registry?: Readonly<Record<CapabilityId, AgentDefinition>>;
   logger?: Logger;
+  inboxEvents?: SpecialistInboxEvents;
 }
 
 export class NotificationAgent {
   readonly #caller: McpToolCaller;
   readonly #registry: Readonly<Record<CapabilityId, AgentDefinition>>;
   readonly #logger: Logger;
+  readonly #inboxEvents: SpecialistInboxEvents | undefined;
 
   constructor(options: NotificationAgentOptions) {
     this.#caller = options.caller;
     this.#registry = options.registry ?? capabilityRegistry;
     this.#logger = options.logger ?? silentLogger;
+    this.#inboxEvents = options.inboxEvents ?? undefined;
   }
 
   async run(rawInput: unknown): Promise<AgentRunOutputValue> {
@@ -159,6 +164,24 @@ export class NotificationAgent {
         deliveryCount: deliveries.length,
         skippedCount: skipped.length,
       });
+      if (this.#inboxEvents !== undefined && procurement !== undefined) {
+        for (const change of payload.changes) {
+          const item: InboxFixtureItem = {
+            procurement: {
+              title: procurement.title,
+              status: procurement.status,
+              url: procurement.url,
+              sourceProcurementId: procurement.sourceProcurementId,
+            },
+            change,
+          };
+          try {
+            await this.#inboxEvents.record(item);
+          } catch (error) {
+            logger.error("Specialist inbox projection failed", error);
+          }
+        }
+      }
       return AgentRunOutput.parse({
         runId: input.runId,
         status: "success",

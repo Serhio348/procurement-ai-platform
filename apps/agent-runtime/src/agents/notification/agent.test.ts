@@ -91,6 +91,78 @@ describe("NotificationAgent", () => {
     expect(tools).not.toContain("documents.download");
   });
 
+  it("projects an urgent ChangeEvent to the specialist inbox API after MCP delivery", async () => {
+    const tools: McpToolName[] = [];
+    const recorded: unknown[] = [];
+    const agent = new NotificationAgent({
+      caller: recordingCaller(tools),
+      inboxEvents: {
+        async record(item) {
+          recorded.push(item);
+        },
+      },
+    });
+
+    await agent.run(
+      runInput({
+        input: {
+          telegramChatIds: ["42"],
+          changes: [
+            ChangeEvent.parse({
+              id: uuid(3),
+              procurementId: uuid(20),
+              kind: "status_changed",
+              previous: "accepting_bids",
+              current: "cancelled",
+              detectedAt: now,
+              urgent: true,
+            }),
+          ],
+        },
+      }),
+    );
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      procurement: { title: "Поставка КТПБ", sourceProcurementId: "auction/001" },
+      change: { current: "cancelled" },
+    });
+  });
+
+  it("still reports MCP success when specialist inbox projection fails", async () => {
+    const tools: McpToolName[] = [];
+    const agent = new NotificationAgent({
+      caller: recordingCaller(tools),
+      inboxEvents: {
+        async record() {
+          throw new Error("api down");
+        },
+      },
+    });
+
+    const result = await agent.run(
+      runInput({
+        input: {
+          telegramChatIds: ["42"],
+          changes: [
+            ChangeEvent.parse({
+              id: uuid(3),
+              procurementId: uuid(20),
+              kind: "status_changed",
+              previous: "accepting_bids",
+              current: "cancelled",
+              detectedAt: now,
+              urgent: true,
+            }),
+          ],
+        },
+      }),
+    );
+
+    expect(result.status).toBe("success");
+    expect(tools).toContain("notification.send");
+  });
+
   it("asks a human when there is neither a formed body nor a change to render", async () => {
     const tools: McpToolName[] = [];
     const agent = new NotificationAgent({ caller: recordingCaller(tools) });

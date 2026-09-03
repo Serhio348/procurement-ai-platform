@@ -4,6 +4,7 @@ export * from "./agents/commercial-terms/model-port.js";
 export * from "./agents/document-ingest/agent.js";
 export * from "./agents/monitoring/agent.js";
 export * from "./agents/notification/agent.js";
+export * from "./agents/notification/inbox-events.js";
 export * from "./agents/report/agent.js";
 export * from "./agents/domain-search/agent.js";
 export * from "./agents/domain-search/factory.js";

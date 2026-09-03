@@ -20,7 +20,7 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "arch": "depcruise packages mcp --config .dependency-cruiser.cjs",
+    "arch": "depcruise packages mcp apps --config .dependency-cruiser.cjs",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run arch",
     "clean": "tsc --build --clean",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",

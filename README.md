@@ -2,8 +2,8 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 4 завершён — анонимный поиск и чтение публичных карточек
-`goszakupki.by`. Агентов пока нет.
+**Статус:** этап 5 завершён — Supervisor составляет проверенный план, не вызывая
+инструменты. Агентов-исполнителей и веб-интерфейса пока нет.
 
 ## Принцип
 
@@ -32,6 +32,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 2 — инфраструктура и PostgreSQL](docs/architecture/STAGE-2.md)
 - [Этап 3 — Procurement MCP](docs/architecture/STAGE-3.md)
 - [Этап 4 — адаптер goszakupki.by](docs/architecture/STAGE-4.md)
+- [Этап 5 — Supervisor](docs/architecture/STAGE-5.md)
 
 ## Пакеты
 
@@ -42,6 +43,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/observability` | Структурный лог с correlation ids |
 | `@procurement/mcp-client` | Типизированные MCP-вызовы, timeout/error mapping и Tool Policy Gate |
 | `@procurement/mcp-procurement` | Source-neutral Procurement MCP, fixture и live-карточки goszakupki.by |
+| `@procurement/agent-runtime` | Supervisor: OpenAI-совместимый план без вызова MCP |
 
 ## Разработка
 
@@ -79,5 +81,5 @@ PROCUREMENT_SOURCE_MODE=live
 
 ## Следующий шаг
 
-Следующий плановый этап — Supervisor. На чистой Ubuntu 24.04 инфраструктуру поднимают по
+Следующий плановый этап — Context Compiler. На чистой Ubuntu 24.04 инфраструктуру поднимают по
 [инструкции сервера](docs/ops/ubuntu-server.md).

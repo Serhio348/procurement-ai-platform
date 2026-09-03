@@ -19,6 +19,7 @@ import {
 import { Risk } from "./scoring.js";
 import { DomainProfileSeed } from "./seed.js";
 import { electricalEquipmentSeedV1 } from "./seed/electrical-equipment.v1.js";
+import { SupervisorPlan } from "./agent.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -381,5 +382,16 @@ describe("search query", () => {
   it("defaults exclude keywords to an empty list", () => {
     const parsed = SearchQuery.parse({ sourceId: "goszakupki_by" });
     expect(parsed.excludeKeywords).toEqual([]);
+  });
+});
+
+describe("supervisor plan", () => {
+  it("requires a Russian human question when the plan is escalated", () => {
+    const parsed = SupervisorPlan.safeParse({
+      intentSummary: "Найти закупки подстанций",
+      needsHuman: true,
+      confidence: 0.4,
+    });
+    expect(parsed.success).toBe(false);
   });
 });

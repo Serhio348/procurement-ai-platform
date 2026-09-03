@@ -111,6 +111,23 @@ export default tseslint.config(
     },
   },
   {
+    files: ["apps/agent-runtime/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@procurement/db",
+              message: "Supervisor planning must not read the database.",
+            },
+          ],
+          patterns: ["@procurement/db", "mcp/*", "playwright", "fastify", "bullmq"],
+        },
+      ],
+    },
+  },
+  {
     files: ["workers/**/*.ts"],
     rules: {
       "no-restricted-imports": [

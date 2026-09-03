@@ -81,6 +81,14 @@ module.exports = {
       to: { path: "(^mcp/|^apps/)" },
     },
     {
+      name: "agent-runtime-does-not-import-adapters",
+      severity: "error",
+      comment:
+        "Supervisor and future agents may use contracts, domain and observability. They must not import MCP servers or the database.",
+      from: { path: "^apps/agent-runtime/src" },
+      to: { path: "(^mcp/|^packages/db)" },
+    },
+    {
       name: "no-orphans",
       severity: "warn",
       comment: "Unreachable module - probably dead code.",

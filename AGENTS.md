@@ -59,8 +59,9 @@ packages/
   observability/   Структурный лог с correlation ids. Без зависимостей
   db/              PostgreSQL schema, migrations и repositories
   mcp-client/      Typed MCP client и Tool Policy Gate
-apps/              (пусто) web, api, agent-runtime, telegram-bot
-mcp/procurement/   Source-neutral Procurement MCP, fixture mode
+apps/
+  agent-runtime/   Supervisor: план из intents, без MCP и без score
+mcp/procurement/   Source-neutral Procurement MCP, fixture и live goszakupki.by
 workers/           (пусто) фоновые задачи
 docs/architecture/ Документы этапов
 ```
@@ -141,8 +142,9 @@ docs/architecture/ Документы этапов
 - Этап 3 — typed MCP client, Tool Policy Gate, Procurement MCP и fixture source
 - Этап 4 — анонимный source-native поиск, live-карточки `goszakupki.by` и пять
   HTML-маршрутов
+- Этап 5 — Supervisor: план из структурированных intents через DeepSeek API
 
-Не начато: агенты, веб-интерфейс, Telegram.
+Не начато: Context Compiler, исполняющие агенты, веб-интерфейс, Telegram.
 
 ### План этапов
 

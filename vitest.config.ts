@@ -22,7 +22,7 @@ export default defineConfig({
     environment: "node",
     coverage: {
       reporter: ["text", "lcov"],
-      include: ["packages/**/src/**"],
+      include: ["packages/**/src/**", "apps/**/src/**"],
     },
   },
 });

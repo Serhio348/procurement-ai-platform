@@ -34,6 +34,9 @@
 - [`docs/architecture/STAGE-13.md`](docs/architecture/STAGE-13.md) — веб-интерфейс (inbox)
 - [`docs/architecture/STAGE-14.md`](docs/architecture/STAGE-14.md) — живой inbox через HTTP API
 - [`docs/architecture/STAGE-15.md`](docs/architecture/STAGE-15.md) — список закупок и карточка кейса
+- [`docs/architecture/STAGE-16.md`](docs/architecture/STAGE-16.md) — живой прогон одной закупки
+- [`docs/architecture/STAGE-17.md`](docs/architecture/STAGE-17.md) — распознавание live-PDF
+- [`docs/architecture/STAGE-18.md`](docs/architecture/STAGE-18.md) — отбор файлов и vision сканов конкурса
 
 ---
 
@@ -170,8 +173,13 @@ docs/architecture/ Документы этапов
 - Этап 13 — веб-интерфейс: inbox срочных ChangeEvent, без чата и без логина
 - Этап 14 — живой inbox через Fastify API
 - Этап 15 — список закупок и карточка кейса
+- Этап 16 — живой прогон одной закупки с goszakupki.by
+- Этап 17 — распознавание live-PDF (слой + OCR скана)
+- Этап 18 — не сканировать альбомы проекта; конкурсные сканы — DeepSeek vision
 
-Не начато: PostgreSQL outbox для inbox, редактор профиля, входящий Telegram-бот.
+Не начато: задача поиска из UI,
+PostgreSQL outbox для inbox, редактор профиля, входящий Telegram-бот.
+OCR / vision электрических схем и чертежей — отдельная фича (не этапы 17–18).
 
 ### План этапов
 
@@ -195,6 +203,12 @@ docs/architecture/ Документы этапов
 | 17 | Наблюдаемость | да |
 | 18 | Усиление безопасности | да |
 | 19 | Сквозное тестирование | частично |
+
+Нумерация файлов `STAGE-N.md` после этапа 14 сдвинута под консоль:
+15 — список закупок, 16 — живой прогон и локальные PDF, 17 — распознавание
+PDF, 18 — отбор вложений и vision сканов конкурса. Строки «входящий Telegram /
+наблюдаемость / безопасность / e2e» в таблице — очередь работ, не следующие
+свободные номера документов.
 
 ---
 

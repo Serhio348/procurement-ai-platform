@@ -2,8 +2,8 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 15 — консоль специалиста читает inbox и список закупок с
-Fastify API. Каталог в памяти процесса; PostgreSQL outbox ещё не подключён.
+**Статус:** этап 18 — консоль показывает живой кейс; альбомы проекта не
+OCR-ятся, конкурсные сканы читает DeepSeek vision (Tesseract — запасной путь).
 
 ## Принцип
 
@@ -43,6 +43,9 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 13 — веб-интерфейс](docs/architecture/STAGE-13.md)
 - [Этап 14 — живой inbox через HTTP API](docs/architecture/STAGE-14.md)
 - [Этап 15 — список закупок и карточка кейса](docs/architecture/STAGE-15.md)
+- [Этап 16 — живой прогон одной закупки](docs/architecture/STAGE-16.md)
+- [Этап 17 — распознавание live-PDF](docs/architecture/STAGE-17.md)
+- [Этап 18 — отбор файлов и vision сканов конкурса](docs/architecture/STAGE-18.md)
 
 ## Пакеты
 
@@ -65,6 +68,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 npm install
 npm run verify   # типы, линт, тесты, архитектурные зависимости
 npm run web      # API (3001) + консоль специалиста (Vite 5173)
+npm run capture:live-case  # живой кейс + PDF в data/blobs (нужна сеть РБ)
 ```
 
 Требуется Node.js 22 или новее.

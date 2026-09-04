@@ -27,9 +27,12 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "db:migrate": "npm run db:migrate -w @procurement/db",
     "db:bootstrap": "npm run db:bootstrap -w @procurement/db",
+    "capture:live-case": "npm run capture-case -w @procurement/mcp-procurement",
+    "compare:extractors": "npm run compare-extractors -w @procurement/mcp-documents",
     "mcp:procurement": "npm run start -w @procurement/mcp-procurement",
     "mcp:documents": "npm run start -w @procurement/mcp-documents",
     "mcp:notifications": "npm run start -w @procurement/mcp-notifications",
+    "dev": "npm run web",
     "web": "concurrently -k -n api,web -c blue,green \"npm run start -w @procurement/api\" \"npm run dev -w @procurement/web\""
   },
   "repository": {

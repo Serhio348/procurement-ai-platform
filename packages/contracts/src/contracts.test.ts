@@ -439,6 +439,18 @@ describe("document extraction", () => {
     expect(parsed.status).toBe("ocr_low_confidence");
     expect(parsed.confidence).toBeLessThan(0.75);
   });
+
+  it("names a skipped project album so commercial extract can ignore it", () => {
+    const parsed = DocumentsExtractTextResponse.parse({
+      hash: "c".repeat(64),
+      status: "skipped_project",
+      text: "",
+      ocrApplied: false,
+      confidence: 1,
+      pages: [],
+    });
+    expect(parsed.status).toBe("skipped_project");
+  });
 });
 
 describe("commercial claim", () => {

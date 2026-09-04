@@ -162,15 +162,30 @@ h3 {
   font-weight: 600;
 }
 
-.urgent-mark {
+.inbox-marks {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.live-mark {
   flex: none;
   font-size: 11px;
-  letter-spacing: 0.02em;
-  color: #2c4a6e;
-  background: #eef3f8;
-  border: 1px solid #c5d2e0;
+  color: #2d5a3d;
+  background: #e8f3ec;
+  border: 1px solid #b7d4c2;
   padding: 1px 6px;
   border-radius: 3px;
+}
+
+.doc-list,
+.missing-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.doc-list li {
+  margin: 0 0 8px;
 }
 
 .inbox-summary,

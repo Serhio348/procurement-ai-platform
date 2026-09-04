@@ -113,6 +113,30 @@ describe("GoszakupkiHttpClient", () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 
+  it("downloads a binary attachment that is not HTML", async () => {
+    const fetchImplementation = vi.fn(async () => {
+      const headers = new Headers({
+        "content-type": "application/pdf",
+        "content-length": "4",
+      });
+      const value = new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers });
+      Object.defineProperty(value, "url", {
+        value: "https://goszakupki.by/files/get?id=1&download=1",
+      });
+      return value;
+    }) as unknown as typeof fetch;
+    const client = new GoszakupkiHttpClient({
+      fetchImplementation,
+      requestsPerMinute: 60_000,
+      bootstrapSession: false,
+    });
+
+    const file = await client.download("/files/get?id=1&download=1");
+    expect(file.status).toBe(200);
+    expect(file.contentType).toContain("pdf");
+    expect([...file.bytes]).toEqual([37, 80, 68, 70]);
+  });
+
   it("refuses to turn a source path into a cross-origin request", async () => {
     const client = new GoszakupkiHttpClient();
 

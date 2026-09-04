@@ -14,11 +14,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "capture-case": "tsx src/capture-specialist-case.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@procurement/contracts": "*",
+    "@procurement/domain": "*",
+    "@procurement/mcp-documents": "*",
     "@procurement/observability": "*",
     "cheerio": "^1.2.0",
     "zod": "^4.5.4"

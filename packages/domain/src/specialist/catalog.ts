@@ -4,13 +4,15 @@ import {
   SpecialistInboxEntry,
   SpecialistProcurementCard,
   type InboxFixtureItem as InboxFixtureItemValue,
-  type ProcedureStatus,
+  type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
 import { compileChangeAlert } from "../notification/message.js";
+import { statusLabel } from "./case.js";
 
 export class SpecialistCatalog {
   readonly #byChangeId = new Map<string, InboxFixtureItemValue>();
   readonly #order: InboxFixtureItemValue[] = [];
+  readonly #cases = new Map<string, SpecialistProcurementCardValue>();
 
   static parse(raw: unknown): SpecialistCatalog {
     const fixture = InboxFixture.parse(raw);
@@ -32,6 +34,10 @@ export class SpecialistCatalog {
     return { duplicate: false, item };
   }
 
+  upsertCase(card: SpecialistProcurementCardValue): void {
+    this.#cases.set(card.id, SpecialistProcurementCard.parse(card));
+  }
+
   urgentInbox(): SpecialistInboxEntry[] {
     return this.#order.filter((item) => item.change.urgent).map(toInboxEntry);
   }
@@ -41,7 +47,9 @@ export class SpecialistCatalog {
     for (const item of this.#order) {
       latest.set(item.change.procurementId, item);
     }
-    return [...latest.values()].map(toProcurementCard);
+    const fromChanges = [...latest.values()].map(toProcurementCard);
+    const rest = fromChanges.filter((item) => !this.#cases.has(item.id));
+    return [...this.#cases.values(), ...rest];
   }
 
   procurement(id: string): SpecialistProcurementCard | undefined {
@@ -100,25 +108,4 @@ function presentChange(item: InboxFixtureItemValue): { summary: string; detail: 
 function firstLine(body: string): string {
   const line = body.split("\n").find((item) => item.length > 0);
   return line ?? "Изменение закупки";
-}
-
-function statusLabel(status: ProcedureStatus): string {
-  switch (status) {
-    case "announced":
-      return "объявлена";
-    case "accepting_bids":
-      return "приём предложений";
-    case "bidding_closed":
-      return "приём завершён";
-    case "auction_in_progress":
-      return "идёт аукцион";
-    case "under_review":
-      return "на рассмотрении";
-    case "completed":
-      return "завершена";
-    case "cancelled":
-      return "отменена";
-    case "unknown":
-      return "неизвестен";
-  }
 }

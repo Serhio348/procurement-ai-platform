@@ -26,6 +26,18 @@ describe("compileProcurementReport", () => {
     expect(report.missing).toContain("Коммерческие условия не извлечены.");
   });
 
+  it("copies a site quote into notes and still does not invent an advance percent", () => {
+    const report = compileProcurementReport({
+      card: card(),
+      terms: CommercialTerms.parse({
+        notes: ["Текст площадки: предоплата до 99,5 %."],
+      }),
+    });
+    expect(report.markdown).toContain("предоплата до 99,5 %");
+    expect(report.markdown).not.toMatch(/Аванс:\s*99/);
+    expect(report.missing).not.toContain("Коммерческие условия не извлечены.");
+  });
+
   it("lists a status change without sending a notification itself", () => {
     const report = compileProcurementReport({
       card: card(),

@@ -84,7 +84,7 @@ function compileCommercial(
   const lines: string[] = [];
   if (terms.advancePercent !== undefined) {
     lines.push(`Аванс: ${String(terms.advancePercent.value)}%.`);
-  } else {
+  } else if (terms.notes.length === 0) {
     missing.push("Доля аванса не подтверждена.");
   }
   if (terms.paymentDeadlineDays !== undefined) {
@@ -98,6 +98,9 @@ function compileCommercial(
   }
   if (terms.paymentKind !== undefined) {
     lines.push(`Вид оплаты: ${paymentKindLabel(terms.paymentKind.value)}.`);
+  }
+  if (terms.notes.length > 0) {
+    lines.push(...terms.notes);
   }
   if (lines.length === 0) {
     missing.push("Подтверждённых коммерческих полей нет.");

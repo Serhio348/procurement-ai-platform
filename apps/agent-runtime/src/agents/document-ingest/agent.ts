@@ -11,7 +11,7 @@ import {
   type IngestedDocument,
   type SourceDocument,
 } from "@procurement/contracts";
-import { ocrNeedsHuman, resolveContentVersion } from "@procurement/domain";
+import { classifyAttachmentRole, ocrNeedsHuman, resolveContentVersion, shouldScanAttachment } from "@procurement/domain";
 import {
   DocumentsMcpClient,
   McpToolCallError,
@@ -123,8 +123,34 @@ export class DocumentAgent {
         }
 
         let text = await documents.extractText({ hash: downloaded.hash }, input.requestId);
-        if (text.status === "ocr_required") {
+        const role = classifyAttachmentRole({ name: source.name, digitalText: text.text });
+        if (role.role === "skip_project") {
+          ingested.push({
+            name: source.name,
+            sourceUrl,
+            hash: downloaded.hash,
+            storageKey: downloaded.storageKey,
+            version: version.version,
+            unchanged: false,
+            status: "skipped_project",
+            ocrApplied: false,
+            confidence: 1,
+            pageCount: text.pages.length,
+            tableCount: 0,
+            textPreview: role.reason,
+          });
+          continue;
+        }
+        if (text.status === "ocr_required" && shouldScanAttachment(role)) {
           text = await documents.ocr({ hash: downloaded.hash }, input.requestId);
+        } else if (text.status === "ocr_required") {
+          needsHuman = true;
+          humanQuestion =
+            "Непонятный скан: не похож на документ конкурса. Файл сохранён, целиком не читали — проверьте вручную.";
+          ingested.push(
+            toIngested(source.name, sourceUrl, downloaded, version.version, text, { tables: [] }),
+          );
+          continue;
         }
         const tables = await documents.extractTables({ hash: downloaded.hash }, input.requestId);
         const lowOcr =

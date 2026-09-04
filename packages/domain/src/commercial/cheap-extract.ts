@@ -19,6 +19,7 @@ export function cheapExtractCommercialClaims(page: {
       if (raw === undefined || quote === undefined || quote.length === 0) continue;
       const value = pattern.parse(raw);
       if (value === undefined) continue;
+      if (pattern.key === "commercial.advance_percent" && /до\s+\d/u.test(quote)) continue;
       claims.push(
         CommercialClaim.parse({
           key: pattern.key,
@@ -47,7 +48,14 @@ const patterns: readonly CheapPattern[] = [
     key: "commercial.advance_percent",
     unit: "%",
     source:
-      "аванс(?:ов(?:ый|ого|ая|ые))?(?:\\s+плат[её]ж(?:а|ом|у)?)?[^\\n.]{0,40}?(\\d{1,3})\\s*(?:%|процент(?:а|ов)?)",
+      "аванс(?:ов(?:ый|ого|ая|ые))?(?:\\s+плат[её]ж(?:а|ом|у)?)?[^\\n.]{0,40}?(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*(?:%|процент(?:а|ов)?)",
+    parse: percent,
+  },
+  {
+    key: "commercial.advance_percent",
+    unit: "%",
+    source:
+      "предоплат\\w*[^\\n.]{0,40}?(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*(?:%|процент(?:а|ов)?)",
     parse: percent,
   },
   {
@@ -71,8 +79,9 @@ const patterns: readonly CheapPattern[] = [
 ];
 
 function percent(raw: string): number | undefined {
-  const value = Number(raw);
-  return Number.isInteger(value) && value >= 0 && value <= 100 ? value : undefined;
+  const value = Number(raw.replace(",", "."));
+  if (!Number.isFinite(value) || value < 0 || value > 100) return undefined;
+  return Math.round(value * 100) / 100;
 }
 
 function days(raw: string): number | undefined {

@@ -11,6 +11,7 @@ export const ExtractionStatus = z.enum([
   "extracted",
   "ocr_required",
   "ocr_low_confidence",
+  "skipped_project",
   "failed",
 ]);
 export type ExtractionStatus = z.infer<typeof ExtractionStatus>;

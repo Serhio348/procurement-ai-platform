@@ -17,6 +17,7 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0
 const now = "2026-09-03T06:00:00.000Z";
 const hashDigital = "a".repeat(64);
 const hashScan = "b".repeat(64);
+const hashDrawing = "c".repeat(64);
 
 describe("DocumentAgent", () => {
   it("extracts digital text and tables without calling OCR or telegram", async () => {
@@ -46,6 +47,23 @@ describe("DocumentAgent", () => {
     ]);
     expect(tools).not.toContain("telegram.send");
     expect(tools).not.toContain("files.delete");
+  });
+
+  it("does not OCR a project album even when extract asks for OCR", async () => {
+    const tools: McpToolName[] = [];
+    const agent = new DocumentAgent({
+      caller: recordingCaller(tools, [drawingSource()]),
+      clock: () => new Date(now),
+    });
+
+    const result = await agent.run(runInput());
+    const payload = DocumentIngestOutput.parse(result.payload);
+
+    expect(payload.documents[0]?.status).toBe("skipped_project");
+    expect(payload.documents[0]?.ocrApplied).toBe(false);
+    expect(payload.documents[0]?.textPreview).toMatch(/альбом проекта|проектн/i);
+    expect(tools).not.toContain("documents.ocr");
+    expect(result.nextRecommendedCapability).toBe("commercial_terms");
   });
 
   it("skips extraction when the same bytes are downloaded again", async () => {
@@ -107,7 +125,8 @@ function recordingCaller(tools: McpToolName[], documents: ReturnType<typeof digi
       if (toolName === "documents.download") {
         const sourceUrl = String(argumentsValue["sourceUrl"]);
         const scan = sourceUrl.includes("scan");
-        const hash = scan ? hashScan : hashDigital;
+        const drawing = sourceUrl.includes("jekn");
+        const hash = drawing ? hashDrawing : scan ? hashScan : hashDigital;
         return {
           structuredContent: {
             hash,
@@ -119,7 +138,7 @@ function recordingCaller(tools: McpToolName[], documents: ReturnType<typeof digi
       }
       if (toolName === "documents.extract_text") {
         const hash = String(argumentsValue["hash"]);
-        if (hash === hashScan) {
+        if (hash === hashScan || hash === hashDrawing) {
           return {
             structuredContent: {
               hash,
@@ -190,6 +209,15 @@ function scanSource() {
     name: "Скан договора.tiff",
     sourceUrl: "https://example.test/files/scan-low.tiff",
     mimeType: "image/tiff",
+    discoveredAt: now,
+  });
+}
+
+function drawingSource() {
+  return SourceDocument.parse({
+    name: "23-301-50-100-jekn-jelektrosnabzhenie.-seti-04kv.pdf",
+    sourceUrl: "https://example.test/files/jekn.pdf",
+    mimeType: "application/pdf",
     discoveredAt: now,
   });
 }

@@ -8,7 +8,9 @@
   },
   "references": [
     { "path": "../../packages/contracts" },
-    { "path": "../../packages/observability" }
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/observability" },
+    { "path": "../documents" }
   ],
   "include": ["src/**/*.ts"]
 }

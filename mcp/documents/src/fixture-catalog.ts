@@ -63,15 +63,15 @@ export class FixtureDocumentCatalog implements DocumentExtractorPort {
     return item;
   }
 
-  extractText(hash: string, _bytes: Uint8Array, _contentType: string): DocumentsExtractTextResponse {
+  async extractText(hash: string, _bytes: Uint8Array, _contentType: string): Promise<DocumentsExtractTextResponse> {
     return this.#text(hash, "extract");
   }
 
-  extractTables(
+  async extractTables(
     hash: string,
     _bytes: Uint8Array,
     _contentType: string,
-  ): DocumentsExtractTablesResponse {
+  ): Promise<DocumentsExtractTablesResponse> {
     const item = this.#item(hash);
     return DocumentsExtractTablesResponse.parse({
       hash,
@@ -79,7 +79,7 @@ export class FixtureDocumentCatalog implements DocumentExtractorPort {
     });
   }
 
-  ocr(hash: string, _bytes: Uint8Array, _contentType: string): DocumentsExtractTextResponse {
+  async ocr(hash: string, _bytes: Uint8Array, _contentType: string): Promise<DocumentsExtractTextResponse> {
     return this.#text(hash, "ocr");
   }
 

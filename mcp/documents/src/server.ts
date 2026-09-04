@@ -57,8 +57,8 @@ export function createDocumentsMcpServer(options: DocumentsMcpServerOptions): Mc
   const extractions = new Map<
     string,
     {
-      text: ReturnType<DocumentExtractorPort["extractText"]>;
-      tables: ReturnType<DocumentExtractorPort["extractTables"]>;
+      text: DocumentsExtractTextResponse;
+      tables: DocumentsExtractTablesResponse;
     }
   >();
   const server = new McpServer({
@@ -158,11 +158,11 @@ export function createDocumentsMcpServer(options: DocumentsMcpServerOptions): Mc
       annotations: readOnlyOpenWorld,
     },
     async (input, extra) =>
-      executeTool("documents.extract_text", logger, correlationId(extra), () => {
+      executeTool("documents.extract_text", logger, correlationId(extra), async () => {
         const request = FilesGetRequest.parse(input);
         const stored = requireBlob(store, request.hash);
-        const text = safeExtract(extractor, "extractText", stored);
-        const tables = safeExtract(extractor, "extractTables", stored);
+        const text = await safeExtract(extractor, "extractText", stored);
+        const tables = await safeExtract(extractor, "extractTables", stored);
         extractions.set(stored.hash, { text, tables });
         return text;
       }),
@@ -177,10 +177,10 @@ export function createDocumentsMcpServer(options: DocumentsMcpServerOptions): Mc
       annotations: readOnlyOpenWorld,
     },
     async (input, extra) =>
-      executeTool("documents.extract_tables", logger, correlationId(extra), () => {
+      executeTool("documents.extract_tables", logger, correlationId(extra), async () => {
         const request = FilesGetRequest.parse(input);
         const stored = requireBlob(store, request.hash);
-        const tables = safeExtract(extractor, "extractTables", stored);
+        const tables = await safeExtract(extractor, "extractTables", stored);
         const current = extractions.get(stored.hash);
         extractions.set(stored.hash, {
           text:
@@ -208,10 +208,10 @@ export function createDocumentsMcpServer(options: DocumentsMcpServerOptions): Mc
       annotations: readOnlyOpenWorld,
     },
     async (input, extra) =>
-      executeTool("documents.ocr", logger, correlationId(extra), () => {
+      executeTool("documents.ocr", logger, correlationId(extra), async () => {
         const request = FilesGetRequest.parse(input);
         const stored = requireBlob(store, request.hash);
-        const text = safeExtract(extractor, "ocr", stored);
+        const text = await safeExtract(extractor, "ocr", stored);
         const tables = extractions.get(stored.hash)?.tables ??
           DocumentsExtractTablesResponse.parse({ hash: stored.hash, tables: [] });
         extractions.set(stored.hash, { text, tables });
@@ -296,14 +296,14 @@ export function createDocumentsMcpServer(options: DocumentsMcpServerOptions): Mc
   return server;
 }
 
-function safeExtract<K extends keyof DocumentExtractorPort>(
+async function safeExtract<K extends keyof DocumentExtractorPort>(
   extractor: DocumentExtractorPort,
   method: K,
   stored: { hash: string; bytes: Uint8Array; contentType: string },
-): ReturnType<DocumentExtractorPort[K]> {
+): Promise<Awaited<ReturnType<DocumentExtractorPort[K]>>> {
   try {
-    return extractor[method](stored.hash, stored.bytes, stored.contentType) as ReturnType<
-      DocumentExtractorPort[K]
+    return (await extractor[method](stored.hash, stored.bytes, stored.contentType)) as Awaited<
+      ReturnType<DocumentExtractorPort[K]>
     >;
   } catch (error) {
     if (error instanceof DocumentSourceNotFoundError && method !== "extractTables") {
@@ -314,13 +314,13 @@ function safeExtract<K extends keyof DocumentExtractorPort>(
         pages: [],
         ocrApplied: false,
         confidence: 0,
-      }) as ReturnType<DocumentExtractorPort[K]>;
+      }) as Awaited<ReturnType<DocumentExtractorPort[K]>>;
     }
     if (error instanceof DocumentSourceNotFoundError) {
       return DocumentsExtractTablesResponse.parse({
         hash: stored.hash,
         tables: [],
-      }) as ReturnType<DocumentExtractorPort[K]>;
+      }) as Awaited<ReturnType<DocumentExtractorPort[K]>>;
     }
     throw error;
   }

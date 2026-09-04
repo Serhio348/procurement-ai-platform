@@ -1,0 +1,128 @@
+import { ProcedureCard, SearchHit } from "@procurement/contracts";
+import { describe, expect, it } from "vitest";
+import { compileSpecialistCase } from "./case.js";
+
+const hash = "a".repeat(64);
+const now = "2026-09-03T10:00:00.000Z";
+
+describe("compileSpecialistCase", () => {
+  it("keeps a quoted 30% advance from the live card and does not invent 90%", () => {
+    const card = compileSpecialistCase({
+      capturedAt: now,
+      profileName: "Электротехническое оборудование",
+      keywords: ["КТПБ", "подстанция"],
+      procurementId: "00000000-0000-4000-8000-000000000020",
+      hit: SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3545578",
+        url: "https://goszakupki.by/auction/view/3545578",
+        title: "Поставка КТПБ 10/0,4 кВ",
+      }),
+      card: ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3545578",
+        url: "https://goszakupki.by/auction/view/3545578",
+        title: "Поставка КТПБ 10/0,4 кВ",
+        status: "accepting_bids",
+        fetchedAt: now,
+        rawFields: { Оплата: "Аванс 30 процентов." },
+        lots: [
+          {
+            number: "1",
+            title: "КТПБ",
+            paymentTermsRaw: "Аванс 30 процентов.",
+          },
+        ],
+      }),
+      cardText: "Поставка КТПБ 10/0,4 кВ\nАванс 30 процентов.",
+      cardTextHash: hash,
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/get?id=1",
+          hash,
+          sizeBytes: 2048,
+          status: "hashed",
+          note: "application/pdf",
+        },
+      ],
+    });
+
+    expect(card.live).toBe(true);
+    expect(card.sourceProcurementId).toBe("auction/3545578");
+    expect(card.termsDetail).toContain("Аванс: 30%.");
+    expect(card.paymentQuote).toContain("Аванс 30 процентов.");
+    expect(card.reportMarkdown).toContain("Аванс: 30%.");
+    expect(card.reportMarkdown).toContain("Аванс: 30%.");
+    expect(card.reportMarkdown).not.toMatch(/90%/);
+    expect(card.missing.some((item) => item.includes("оценка"))).toBe(true);
+    expect(card.actions.map((item) => item.actor)).toEqual([
+      "DomainSearchAgent",
+      "DomainSearchAgent",
+      "DocumentAgent",
+      "CommercialTermsAgent",
+      "ReportAgent",
+      "Scoring",
+      "MonitoringAgent",
+      "NotificationAgent",
+    ]);
+    expect(card.documents[0]?.status).toBe("hashed");
+  });
+
+  it("shows low-confidence OCR to the specialist without turning it into an advance fact", () => {
+    const ocrHash = "b".repeat(64);
+    const card = compileSpecialistCase({
+      capturedAt: now,
+      profileName: "Электротехническое оборудование",
+      keywords: ["КТПБ"],
+      procurementId: "00000000-0000-4000-8000-000000000020",
+      hit: SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3545578",
+        url: "https://goszakupki.by/auction/view/3545578",
+        title: "Поставка КТПБ 10/0,4 кВ",
+      }),
+      card: ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3545578",
+        url: "https://goszakupki.by/auction/view/3545578",
+        title: "Поставка КТПБ 10/0,4 кВ",
+        status: "accepting_bids",
+        fetchedAt: now,
+      }),
+      cardText: "Поставка КТПБ 10/0,4 кВ",
+      cardTextHash: hash,
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/get?id=1",
+          hash: ocrHash,
+          sizeBytes: 2048,
+          status: "hashed",
+          extraction: {
+            status: "ocr_low_confidence",
+            kind: "ocr_scan",
+            pageCount: 1,
+            letterCount: 40,
+            confidence: 0.47,
+            ocrApplied: true,
+            textPreview: "Аванс 30 процентов. Строительный проект.",
+            pages: [
+              {
+                page: 1,
+                text: "Аванс 30 процентов. Строительный проект.",
+                ocrApplied: true,
+                confidence: 0.47,
+              },
+            ],
+            notes: ["Уверенность OCR ниже порога: текст показываем специалисту, в коммерческие факты не берём."],
+          },
+        },
+      ],
+    });
+
+    expect(card.termsDetail).toBeUndefined();
+    expect(card.extractPreview).toContain("Аванс 30");
+    expect(card.extractNotes.join(" ")).toContain("ниже порога");
+  });
+});

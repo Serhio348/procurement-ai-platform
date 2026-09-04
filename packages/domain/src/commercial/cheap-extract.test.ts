@@ -29,4 +29,27 @@ describe("cheapExtractCommercialClaims", () => {
       }),
     ).toEqual([]);
   });
+
+  it("reads предоплата 40% but not a cap «предоплата до 99,5%»", () => {
+    expect(
+      cheapExtractCommercialClaims({
+        hash,
+        page: 1,
+        text: "Расчёты: предоплата 40% после договора.",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        key: "commercial.advance_percent",
+        value: 40,
+        quote: expect.stringContaining("предоплата 40%"),
+      }),
+    ]);
+    expect(
+      cheapExtractCommercialClaims({
+        hash,
+        page: 2,
+        text: "Условия оплаты: предоплата до 99,5 %.",
+      }),
+    ).toEqual([]);
+  });
 });

@@ -528,6 +528,11 @@ function mimeTypeFromName(name: string): string {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     xls: "application/vnd.ms-excel",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    png: "image/png",
     zip: "application/zip",
   };
   return extension === undefined ? "application/octet-stream" : (known[extension] ?? "application/octet-stream");

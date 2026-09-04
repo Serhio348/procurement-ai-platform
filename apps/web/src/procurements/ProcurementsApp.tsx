@@ -1,6 +1,38 @@
 import { useNavigate, useParams } from "react-router-dom";
-import type { SpecialistProcurementCard } from "@procurement/contracts";
+import type { SpecialistCaseDocument, SpecialistProcurementCard } from "@procurement/contracts";
 import { Shell } from "../shell/Shell.js";
+
+export function documentHref(document: SpecialistCaseDocument): string {
+  return document.hash === undefined
+    ? (document.downloadUrl ?? document.sourceUrl)
+    : `/api/documents/${document.hash}`;
+}
+
+export function documentStatusLabel(document: SpecialistCaseDocument): string {
+  const extraction = document.extraction;
+  if (extraction === undefined) {
+    return document.status === "hashed"
+      ? `sha256 ${document.hash?.slice(0, 12) ?? ""}…, ${String(document.sizeBytes ?? 0)} байт`
+      : (document.note ?? document.status);
+  }
+  const confidence = Math.round(extraction.confidence * 100);
+  switch (extraction.kind) {
+    case "digital_text":
+      return `цифровой текст, ${String(extraction.pageCount)} стр.`;
+    case "office_text":
+      return `Word/Excel/PowerPoint, ${String(extraction.pageCount)} ч.`;
+    case "ocr_scan":
+      return `распознавание скана, ${String(extraction.pageCount)} стр., уверенность ${String(confidence)}%`;
+    case "skipped_project":
+      return "проект/чертёж, не распознавали";
+    case "sparse_drawing":
+      return `чертёж/скан, мало букв, ${String(extraction.pageCount)} стр.`;
+    case "empty":
+      return "пустой файл";
+    case "non_pdf":
+      return "формат не прочитан";
+  }
+}
 
 export function ProcurementsApp({ items }: { items: readonly SpecialistProcurementCard[] }) {
   const params = useParams();
@@ -31,9 +63,12 @@ export function ProcurementsApp({ items }: { items: readonly SpecialistProcureme
                     >
                       <span className="inbox-row-top">
                         <span className="inbox-title">{item.title}</span>
-                        {item.latestChange?.urgent === true ? (
-                          <span className="urgent-mark">Срочно</span>
-                        ) : null}
+                        <span className="inbox-marks">
+                          {item.live ? <span className="live-mark">живая</span> : null}
+                          {item.latestChange?.urgent === true ? (
+                            <span className="urgent-mark">Срочно</span>
+                          ) : null}
+                        </span>
                       </span>
                       <span className="inbox-summary">{item.statusLabel}</span>
                       <span className="inbox-date">{item.sourceProcurementId}</span>
@@ -71,7 +106,83 @@ export function ProcurementsApp({ items }: { items: readonly SpecialistProcureme
                     </a>
                   </dd>
                 </div>
+                {selected.kindLabel === undefined ? null : (
+                  <div>
+                    <dt>Вид</dt>
+                    <dd>{selected.kindLabel}</dd>
+                  </div>
+                )}
+                {selected.buyerName === undefined ? null : (
+                  <div>
+                    <dt>Заказчик</dt>
+                    <dd>{selected.buyerName}</dd>
+                  </div>
+                )}
+                {selected.amountLabel === undefined ? null : (
+                  <div>
+                    <dt>Сумма</dt>
+                    <dd>{selected.amountLabel}</dd>
+                  </div>
+                )}
               </dl>
+              {selected.documents.length === 0 ? null : (
+                <>
+                  <h3>Документы</h3>
+                  <ul className="doc-list">
+                    {selected.documents.map((document) => (
+                      <li key={document.sourceUrl}>
+                        <a href={documentHref(document)} target="_blank" rel="noreferrer">
+                          {document.name}
+                        </a>
+                        <span>{documentStatusLabel(document)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {selected.termsDetail === undefined ? null : (
+                <>
+                  <h3>Коммерческие условия</h3>
+                  <pre className="change-body">{selected.termsDetail}</pre>
+                </>
+              )}
+              {selected.paymentQuote === undefined ? null : (
+                <>
+                  <h3>Оплата на площадке</h3>
+                  <pre className="change-body">{selected.paymentQuote}</pre>
+                </>
+              )}
+              {selected.extractNotes.length === 0 && selected.extractPreview === undefined ? null : (
+                <>
+                  <h3>Распознавание PDF</h3>
+                  {selected.extractNotes.length === 0 ? null : (
+                    <ul className="missing-list">
+                      {selected.extractNotes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {selected.extractPreview === undefined ? null : (
+                    <pre className="change-body">{selected.extractPreview}</pre>
+                  )}
+                </>
+              )}
+              {selected.reportMarkdown === undefined ? null : (
+                <>
+                  <h3>Отчёт</h3>
+                  <pre className="change-body">{selected.reportMarkdown}</pre>
+                </>
+              )}
+              {selected.missing.length === 0 ? null : (
+                <>
+                  <h3>Не хватает</h3>
+                  <ul className="missing-list">
+                    {selected.missing.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
               {selected.latestChange === undefined ? null : (
                 <>
                   <h3>Последнее изменение</h3>

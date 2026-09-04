@@ -7,6 +7,13 @@ export interface GoszakupkiPageResponse {
   body: string;
 }
 
+export interface GoszakupkiDownloadResponse {
+  status: number;
+  url: string;
+  bytes: Uint8Array;
+  contentType?: string;
+}
+
 export interface GoszakupkiPageClient {
   get(path: string): Promise<GoszakupkiPageResponse>;
 }
@@ -71,6 +78,27 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
   }
 
   async get(path: string): Promise<GoszakupkiPageResponse> {
+    const loaded = await this.#load(path, "html");
+    return { status: loaded.status, url: loaded.url, body: loaded.body ?? "" };
+  }
+
+  async download(path: string): Promise<GoszakupkiDownloadResponse> {
+    const loaded = await this.#load(path, "binary");
+    return {
+      status: loaded.status,
+      url: loaded.url,
+      bytes: loaded.bytes,
+      ...(loaded.contentType === undefined ? {} : { contentType: loaded.contentType }),
+    };
+  }
+
+  async #load(path: string, mode: "html" | "binary"): Promise<{
+    status: number;
+    url: string;
+    bytes: Uint8Array;
+    body?: string;
+    contentType: string | undefined;
+  }> {
     const url = new URL(path, this.#baseUrl);
     if (url.origin !== this.#baseUrl.origin) {
       throw new Error("Goszakupki HTTP client refuses cross-origin requests");
@@ -81,7 +109,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
 
     try {
       if (this.#bootstrapSession && url.pathname !== "/") await this.#ensureSession();
-      const result = await this.#requestWithSessionRecovery(url);
+      const result = await this.#requestWithSessionRecovery(url, mode);
       this.#recordSuccess();
       return result;
     } catch (error) {
@@ -92,9 +120,18 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     }
   }
 
-  async #requestWithSessionRecovery(url: URL): Promise<GoszakupkiPageResponse> {
+  async #requestWithSessionRecovery(
+    url: URL,
+    mode: "html" | "binary",
+  ): Promise<{
+    status: number;
+    url: string;
+    bytes: Uint8Array;
+    body?: string;
+    contentType: string | undefined;
+  }> {
     try {
-      return await this.#request(url);
+      return await this.#request(url, mode);
     } catch (error) {
       if (
         this.#bootstrapSession &&
@@ -103,13 +140,22 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
       ) {
         this.#invalidateSession();
         await this.#ensureSession();
-        return this.#request(url);
+        return this.#request(url, mode);
       }
       throw error;
     }
   }
 
-  async #request(url: URL): Promise<GoszakupkiPageResponse> {
+  async #request(
+    url: URL,
+    mode: "html" | "binary",
+  ): Promise<{
+    status: number;
+    url: string;
+    bytes: Uint8Array;
+    body?: string;
+    contentType: string | undefined;
+  }> {
     await this.#reserveRequestSlot();
     const cookie = this.#cookieHeader();
     const response = await this.#fetch(url, {
@@ -117,13 +163,13 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
       redirect: "follow",
       signal: AbortSignal.timeout(this.#timeoutMs),
       headers: {
-        accept: "text/html,application/xhtml+xml",
+        accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
         "user-agent": this.#userAgent,
         ...(cookie.length === 0 ? {} : { cookie }),
       },
     });
     this.#captureCookies(response.headers);
-    return this.#readResponse(response);
+    return this.#readResponse(response, mode);
   }
 
   async #ensureSession(): Promise<void> {
@@ -131,7 +177,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     if (this.#sessionBootstrap !== undefined) return this.#sessionBootstrap;
 
     this.#sessionBootstrap = (async () => {
-      const response = await this.#request(this.#baseUrl);
+      const response = await this.#request(this.#baseUrl, "html");
       if (response.status < 200 || response.status >= 300) {
         throw new SourceAccessError(
           "goszakupki_by",
@@ -174,7 +220,16 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     return [...this.#cookies].map(([name, value]) => `${name}=${value}`).join("; ");
   }
 
-  async #readResponse(response: Response): Promise<GoszakupkiPageResponse> {
+  async #readResponse(
+    response: Response,
+    mode: "html" | "binary" = "html",
+  ): Promise<{
+    status: number;
+    url: string;
+    bytes: Uint8Array;
+    body?: string;
+    contentType: string | undefined;
+  }> {
     const declaredLength = Number(response.headers.get("content-length"));
     if (Number.isFinite(declaredLength) && declaredLength > this.#maxResponseBytes) {
       throw new SourceAccessError("goszakupki_by", "response exceeds configured size limit");
@@ -203,19 +258,26 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     if (response.status >= 500) {
       throw new SourceAccessError("goszakupki_by", `source returned HTTP ${response.status}`);
     }
-    const contentType = response.headers.get("content-type")?.toLocaleLowerCase("en");
-    if (
-      response.status !== 404 &&
-      contentType !== undefined &&
-      !contentType.includes("text/html") &&
-      !contentType.includes("application/xhtml+xml")
-    ) {
-      throw new SourceAccessError("goszakupki_by", `unexpected content type ${contentType}`);
+    const contentType = response.headers.get("content-type")?.toLocaleLowerCase("en") ?? undefined;
+    if (mode === "html") {
+      if (
+        response.status !== 404 &&
+        contentType !== undefined &&
+        !contentType.includes("text/html") &&
+        !contentType.includes("application/xhtml+xml")
+      ) {
+        throw new SourceAccessError("goszakupki_by", `unexpected content type ${contentType}`);
+      }
+      if (looksLikeChallenge(body)) {
+        throw new SourceAccessError("goszakupki_by", "source returned an anti-bot challenge");
+      }
+      return { status: response.status, url: finalUrl, bytes, body, contentType };
     }
-    if (looksLikeChallenge(body)) {
+
+    if (contentType !== undefined && contentType.includes("text/html") && looksLikeChallenge(body)) {
       throw new SourceAccessError("goszakupki_by", "source returned an anti-bot challenge");
     }
-    return { status: response.status, url: finalUrl, body };
+    return { status: response.status, url: finalUrl, bytes, contentType };
   }
 
   async #reserveRequestSlot(): Promise<void> {

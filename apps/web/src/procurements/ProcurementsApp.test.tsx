@@ -80,6 +80,10 @@ describe("ProcurementsApp", () => {
         sourceProcurementId: "auction/3629820",
         live: true,
         documents: [document],
+        termsDetail: "Срок поставки: 60 дн.\nГарантия: 60 мес.",
+        extractPreview: "УТВЕРЖДАЮ Г лавный инженер каша OCR",
+        extractNotes: ["Текст взят из Word, без OCR."],
+        reportMarkdown: "# 2БКТПБ\n\nСрок поставки: 60 дн.\nГарантия: 60 мес.",
       }),
     ];
 
@@ -98,5 +102,11 @@ describe("ProcurementsApp", () => {
     expect(screen.getByRole("link", { name: "Документация.pdf" }).getAttribute("href")).toBe(
       `/api/documents/${hash}`,
     );
+    expect(screen.getByRole("heading", { level: 3, name: "Коммерческие условия" })).toBeTruthy();
+    expect(screen.getByText(/Срок поставки: 60 дн/)).toBeTruthy();
+    expect(screen.getByText(/Гарантия: 60 мес/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Текст документов" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Отчёт" })).toBeNull();
+    expect(screen.queryByText(/Г лавный инженер/)).toBeNull();
   });
 });

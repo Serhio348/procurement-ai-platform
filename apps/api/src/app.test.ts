@@ -87,6 +87,29 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("returns delivery and warranty from the live Word TZ and does not treat 99.5% cap as advance", async () => {
+    const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
+    const list = await app.inject({ method: "GET", url: "/api/procurements" });
+    const items = JSON.parse(list.body).items as Array<{
+      id: string;
+      sourceProcurementId: string;
+    }>;
+    const live = items.find((item) => item.sourceProcurementId === "auction/3629820");
+    expect(live).toBeDefined();
+    const card = await app.inject({ method: "GET", url: `/api/procurements/${live?.id ?? ""}` });
+    const body = JSON.parse(card.body) as { termsDetail?: string; paymentQuote?: string };
+
+    expect(card.statusCode).toBe(200);
+    expect(body.termsDetail).toContain("Аванс: до 99,5%.");
+    expect(body.termsDetail).toContain("Срок поставки: 60 дн.");
+    expect(body.termsDetail).toContain("Гарантия: 60 мес.");
+    expect(body.termsDetail ?? "").not.toMatch(/Аванс:\s*99,5%\./);
+    expect(body.paymentQuote).toContain("предоплата до 99,5");
+    expect(body.paymentQuote ?? "").not.toMatch(/_/);
+
+    await app.close();
+  });
+
   it("serves a catalog PDF from the local blob store, not an unknown hash on disk", async () => {
     const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "blobs-"));
     tmpDirs.push(blobDirectory);

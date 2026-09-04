@@ -29,6 +29,8 @@ export const CommercialTerms = z.object({
   paymentKind: Sourced(PaymentKind).optional(),
   /** Share of the contract paid up front, 0..100. */
   advancePercent: Sourced(z.number().min(0).max(100)).optional(),
+  /** Ceiling from «предоплата до N%»; not a point fact for scoring. */
+  advancePercentCap: Sourced(z.number().min(0).max(100)).optional(),
   finalPaymentPercent: Sourced(z.number().min(0).max(100)).optional(),
   /** Calendar days from delivery/acceptance to payment. */
   paymentDeadlineDays: Sourced(z.number().int().nonnegative()).optional(),

@@ -20,6 +20,10 @@ export function assembleCommercialTerms(facts: readonly Fact[]): CommercialTerms
     notes: [],
     ...optionalField("advancePercent", sourcedNumber(facts, "commercial.advance_percent", 0, 100, conflicts)),
     ...optionalField(
+      "advancePercentCap",
+      sourcedNumber(facts, "commercial.advance_percent_cap", 0, 100, conflicts),
+    ),
+    ...optionalField(
       "finalPaymentPercent",
       sourcedNumber(facts, "commercial.final_payment_percent", 0, 100, conflicts),
     ),

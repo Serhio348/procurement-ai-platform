@@ -152,27 +152,6 @@ export function ProcurementsApp({ items }: { items: readonly SpecialistProcureme
                   <pre className="change-body">{selected.paymentQuote}</pre>
                 </>
               )}
-              {selected.extractNotes.length === 0 && selected.extractPreview === undefined ? null : (
-                <>
-                  <h3>Распознавание PDF</h3>
-                  {selected.extractNotes.length === 0 ? null : (
-                    <ul className="missing-list">
-                      {selected.extractNotes.map((note) => (
-                        <li key={note}>{note}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {selected.extractPreview === undefined ? null : (
-                    <pre className="change-body">{selected.extractPreview}</pre>
-                  )}
-                </>
-              )}
-              {selected.reportMarkdown === undefined ? null : (
-                <>
-                  <h3>Отчёт</h3>
-                  <pre className="change-body">{selected.reportMarkdown}</pre>
-                </>
-              )}
               {selected.missing.length === 0 ? null : (
                 <>
                   <h3>Не хватает</h3>

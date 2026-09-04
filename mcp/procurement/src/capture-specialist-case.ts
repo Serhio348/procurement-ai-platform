@@ -12,6 +12,7 @@ import {
   SpecialistLiveRun,
   electricalEquipmentSeedV1,
   type SpecialistCaseDocument as SpecialistCaseDocumentValue,
+  type SpecialistLiveRun as SpecialistLiveRunValue,
 } from "@procurement/contracts";
 import { classifyAttachmentRole, shouldScanAttachment } from "@procurement/domain";
 import { createLogger } from "@procurement/observability";
@@ -91,6 +92,10 @@ function cardText(card: ReturnType<typeof ProcedureCard.parse>): string {
 
 async function main(): Promise<void> {
   await loadDotEnv(fileURLToPath(new URL("../../../.env", import.meta.url)));
+  if (process.env["REFRESH_LIVE_OFFICE"] === "1") {
+    await refreshOfficeFromBlobs();
+    return;
+  }
   const client = new GoszakupkiHttpClient({
     timeoutMs: 45_000,
     requestsPerMinute: 30,
@@ -209,6 +214,34 @@ async function main(): Promise<void> {
     documentCount: documents.length,
     blobDirectory,
   });
+}
+
+async function refreshOfficeFromBlobs(): Promise<void> {
+  const raw = JSON.parse(await readFile(outputPath, "utf8")) as unknown;
+  const run = SpecialistLiveRun.parse(raw);
+  const extractor = new RoutingDocumentExtractor();
+  const documents: SpecialistCaseDocumentValue[] = [];
+  for (const document of run.documents) {
+    const hash = document.hash;
+    if (hash === undefined || document.extraction?.kind !== "office_text") {
+      documents.push(document);
+      continue;
+    }
+    const bytes = await readFile(path.join(blobDirectory, hash));
+    const contentType = document.note ?? "application/octet-stream";
+    const native = await extractor.extractText(hash, bytes, contentType, document.name);
+    const format = resolveDocumentFormat(bytes, document.name, contentType);
+    const extraction = toSpecialistExtraction(native, contentType, format);
+    documents.push(SpecialistCaseDocument.parse({ ...document, extraction }));
+    logger.info("Refreshed office extraction", {
+      name: document.name,
+      hash,
+      textLength: native.pages[0]?.text.length ?? 0,
+    });
+  }
+  const next: SpecialistLiveRunValue = SpecialistLiveRun.parse({ ...run, documents });
+  await writeFile(outputPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  logger.info("Refreshed Word/Excel/PowerPoint text in live specialist case", { outputPath });
 }
 
 async function recognizeListedDocument(input: {

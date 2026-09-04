@@ -25,6 +25,24 @@ describe("assembleCommercialTerms", () => {
     expect(assembled.terms.advancePercent).toBeUndefined();
     expect(assembled.conflicts[0]?.question).toContain("разные значения");
   });
+
+  it("maps an advance cap without treating it as a point advancePercent", () => {
+    const fact = Fact.parse({
+      id: uuid(4),
+      procurementId: uuid(20),
+      key: "commercial.advance_percent_cap",
+      value: 99.5,
+      unit: "%",
+      evidenceIds: [uuid(3)],
+      confidence: 0.92,
+      extractedBy: "commercial_terms",
+      extractedAt: now,
+    });
+    const assembled = assembleCommercialTerms([fact]);
+    expect(assembled.conflicts).toEqual([]);
+    expect(assembled.terms.advancePercent).toBeUndefined();
+    expect(assembled.terms.advancePercentCap?.value).toBe(99.5);
+  });
 });
 
 function factWith(overrides: { id?: string; value: number; extractedAt?: string }) {

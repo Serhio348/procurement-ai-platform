@@ -7,6 +7,18 @@ import { zipEntries } from "./zip-entries.js";
 const hash = createHash("sha256").update("office").digest("hex");
 
 describe("office Open XML extract", () => {
+  it("joins adjacent Word runs so split letters become words", () => {
+    const bytes = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>Г</w:t></w:r><w:r><w:t>лавный</w:t></w:r><w:r><w:t xml:space="preserve"> инженер. Срок поставки не более </w:t></w:r><w:r><w:t>6</w:t></w:r><w:r><w:t>0</w:t></w:r><w:r><w:t xml:space="preserve"> календарных дней</w:t></w:r></w:p></w:document>',
+    });
+    const extracted = extractOpenXml(hash, bytes, "docx");
+    expect(extracted.pages[0]?.text).toContain("Главный инженер");
+    expect(extracted.pages[0]?.text).toContain("не более 60 календарных дней");
+    expect(extracted.pages[0]?.text).not.toContain("Г лавный");
+    expect(extracted.pages[0]?.text).not.toMatch(/6 0/);
+  });
+
   it("reads Word document.xml as native text", async () => {
     const bytes = zipEntries({
       "word/document.xml":

@@ -2,7 +2,8 @@ import { DocumentsExtractTablesResponse, DocumentsExtractTextResponse, Extracted
 import { assessDocumentPages, type DocumentFileFormat } from "@procurement/domain";
 import { unzipEntries } from "./zip-entries.js";
 
-const PAGE_TEXT_LIMIT = 8_000;
+/** Whole Word/Excel/PowerPoint files are one "page"; 8k clipped the TZ commercial block. */
+const PAGE_TEXT_LIMIT = 100_000;
 const PREVIEW_LIMIT = 1_800;
 
 export function inspectOpenXmlFamily(bytes: Uint8Array): "docx" | "xlsx" | "pptx" | undefined {
@@ -115,9 +116,13 @@ function xmlToText(xml: string): string {
   const withBreaks = xml
     .replaceAll(/<\/w:p>/gi, "\n")
     .replaceAll(/<\/a:p>/gi, "\n")
-    .replaceAll(/<w:tab\/>/gi, "\t")
-    .replaceAll(/<w:br\/>/gi, "\n");
-  return decodeEntities(withBreaks.replaceAll(/<[^>]+>/g, " "))
+    .replaceAll(/<\/w:tr>/gi, "\n")
+    .replaceAll(/<\/w:tc>/gi, "\t")
+    .replaceAll(/<w:tab\s*\/>/gi, "\t")
+    .replaceAll(/<w:br\s*\/>/gi, "\n")
+    .replaceAll(/<w:cr\s*\/>/gi, "\n");
+  // Strip tags to empty, not space: Word splits "60" / "Главный" across runs.
+  return decodeEntities(withBreaks.replaceAll(/<[^>]+>/g, ""))
     .replaceAll(/[ \t]+\n/g, "\n")
     .replaceAll(/\n{3,}/g, "\n\n")
     .replaceAll(/[ \t]{2,}/g, " ")

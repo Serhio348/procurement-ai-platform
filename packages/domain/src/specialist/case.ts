@@ -169,7 +169,7 @@ function pipelineActions(input: {
       actor: "CommercialTermsAgent",
       status: input.extracted ? "done" : "skipped",
       detail: input.extracted
-        ? `Цитаты с карточки: ${input.termLines.join(" ")}`
+        ? `Подтверждённые числа: ${input.termLines.join(" ")}`
         : "На карточке нет шаблона «аванс N%». Формулировка оплаты показана как цитата площадки, число из неё не выставлялось.",
     },
     {
@@ -211,23 +211,37 @@ function documentIngestDetail(input: {
     return `${base} Распознавание текста не запускалось.`;
   }
   const skipped = input.documents.filter((item) => item.extraction?.kind === "skipped_project").length;
-  if (skipped > 0 && input.ocrCount === 0) {
+  const officeCount = input.documents.filter((item) => item.extraction?.kind === "office_text").length;
+  if (skipped > 0 && input.ocrCount === 0 && officeCount === 0) {
     return `${base} Альбомы проекта не распознавали (${String(skipped)}), условия берём с карточки.`;
+  }
+  if (officeCount > 0) {
+    return `${base} Текст Word/Excel: ${String(officeCount)}, альбомы проекта пропущены: ${String(skipped)}.`;
   }
   if (input.ocrCount > 0) {
     return `${base} Распознано ${String(input.extractedDocs)} PDF, скан конкурса: ${String(input.ocrCount)}.`;
   }
-  return `${base} Текст взят из цифрового слоя ${String(input.extractedDocs)} PDF.`;
+  return `${base} Текст взят из цифрового слоя ${String(input.extractedDocs)} файл(ов).`;
 }
 
 function emptyTerms(terms: CommercialTerms): boolean {
   return termLines(terms).length === 0;
 }
 
+function formatPercent(value: number): string {
+  return String(value).replace(".", ",");
+}
+
+function formatAdvanceLine(value: number): string {
+  return value === 0 ? "Аванс: нет." : `Аванс: ${formatPercent(value)}%.`;
+}
+
 function termLines(terms: CommercialTerms): string[] {
   const lines: string[] = [];
   if (terms.advancePercent !== undefined) {
-    lines.push(`Аванс: ${String(terms.advancePercent.value)}%.`);
+    lines.push(formatAdvanceLine(terms.advancePercent.value));
+  } else if (terms.advancePercentCap !== undefined) {
+    lines.push(`Аванс: до ${formatPercent(terms.advancePercentCap.value)}%.`);
   }
   if (terms.paymentDeadlineDays !== undefined) {
     lines.push(`Срок оплаты: ${String(terms.paymentDeadlineDays.value)} дн.`);
@@ -242,7 +256,19 @@ function termLines(terms: CommercialTerms): string[] {
 }
 
 function paymentQuote(card: ProcedureCard): string | undefined {
-  return card.lots.map((lot) => lot.paymentTermsRaw).find((value) => value !== undefined && value.length > 0);
+  const raw = card.lots.map((lot) => lot.paymentTermsRaw).find((value) => value !== undefined && value.length > 0);
+  if (raw === undefined) return undefined;
+  const cleaned = stripBlankPlaceholders(raw);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/** Form blanks (`__________`) are insertion points, not content for the specialist. */
+function stripBlankPlaceholders(value: string): string {
+  return value
+    .replaceAll(/_+/g, "")
+    .replaceAll(/\s+([,.;:!?])/g, "$1")
+    .replaceAll(/\s{2,}/g, " ")
+    .trim();
 }
 
 function buyerName(card: ProcedureCard): string | undefined {

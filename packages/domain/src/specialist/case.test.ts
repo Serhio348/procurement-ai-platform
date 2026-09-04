@@ -125,4 +125,78 @@ describe("compileSpecialistCase", () => {
     expect(card.extractPreview).toContain("Аванс 30");
     expect(card.extractNotes.join(" ")).toContain("ниже порога");
   });
+
+  it("reads delivery and warranty from extracted Word TZ and does not turn «до 99,5%» into an advance", () => {
+    const tzHash = "c".repeat(64);
+    const card = compileSpecialistCase({
+      capturedAt: now,
+      profileName: "Электротехническое оборудование",
+      keywords: ["КТПБ"],
+      procurementId: "00000000-0000-4000-8000-000000000020",
+      hit: SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3629820",
+        url: "https://goszakupki.by/auction/view/3629820",
+        title: "2БКТПБ 400кВА",
+      }),
+      card: ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3629820",
+        url: "https://goszakupki.by/auction/view/3629820",
+        title: "2БКТПБ 400кВА",
+        status: "accepting_bids",
+        fetchedAt: now,
+        lots: [
+          {
+            number: "1",
+            title: "2БКТПБ",
+            paymentTermsRaw:
+              "Оплата за оборудование: предоплата до 99,5 % (либо предоплата в размере стоимости материальных затрат _________________, определяемая плановой калькуляцией к договору).",
+          },
+        ],
+      }),
+      cardText: "2БКТПБ 400кВА\nОплата за оборудование: предоплата до 99,5 %.",
+      cardTextHash: hash,
+      documents: [
+        {
+          name: "tz-na-bktp.docx",
+          sourceUrl: "https://goszakupki.by/files/get?id=7",
+          hash: tzHash,
+          sizeBytes: 36546,
+          status: "hashed",
+          extraction: {
+            status: "extracted",
+            kind: "office_text",
+            pageCount: 1,
+            letterCount: 400,
+            confidence: 0.95,
+            ocrApplied: false,
+            textPreview: "Техническое задание",
+            pages: [
+              {
+                page: 1,
+                text: "1. Гарантийный срок не менее 60 месяцев с даты ввода.\n4. Срок поставки не более 60 календарных дней с даты подписания договора.",
+                ocrApplied: false,
+                confidence: 0.95,
+              },
+            ],
+            notes: ["Текст взят из Word, без OCR."],
+          },
+        },
+      ],
+    });
+
+    expect(card.termsDetail).toContain("Аванс: до 99,5%.");
+    expect(card.termsDetail).toContain("Срок поставки: 60 дн.");
+    expect(card.termsDetail).toContain("Гарантия: 60 мес.");
+    expect(card.termsDetail ?? "").not.toMatch(/Аванс:\s*99,5%\./);
+    expect(card.missing).not.toContain("Доля аванса не подтверждена.");
+    expect(card.paymentQuote).toContain("предоплата до 99,5 %");
+    expect(card.paymentQuote).toContain("стоимости материальных затрат, определяемая");
+    expect(card.paymentQuote ?? "").not.toMatch(/_/);
+    expect(card.reportMarkdown).toContain("Срок поставки: 60 дн.");
+    expect(card.actions.find((item) => item.actor === "CommercialTermsAgent")?.detail).toContain(
+      "Подтверждённые числа",
+    );
+  });
 });

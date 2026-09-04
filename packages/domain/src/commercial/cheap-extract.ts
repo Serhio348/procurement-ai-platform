@@ -19,7 +19,23 @@ export function cheapExtractCommercialClaims(page: {
       if (raw === undefined || quote === undefined || quote.length === 0) continue;
       const value = pattern.parse(raw);
       if (value === undefined) continue;
-      if (pattern.key === "commercial.advance_percent" && /до\s+\d/u.test(quote)) continue;
+      if (pattern.key === "commercial.advance_percent" && quoteLooksLikeAdvanceCap(quote)) {
+        claims.push(
+          CommercialClaim.parse({
+            key: "commercial.advance_percent_cap",
+            value,
+            unit: pattern.unit,
+            confidence: 0.92,
+            hash: page.hash,
+            page: page.page,
+            quote,
+          }),
+        );
+        continue;
+      }
+      if (pattern.key === "commercial.advance_percent" && pageHasAdvanceCap(page.text, value)) {
+        continue;
+      }
       claims.push(
         CommercialClaim.parse({
           key: pattern.key,
@@ -33,6 +49,34 @@ export function cheapExtractCommercialClaims(page: {
       );
     }
   }
+  return [...claims, ...extractZeroAdvance(page)];
+}
+
+const zeroAdvanceSource =
+  "без\\s+(?:аванса|предоплаты)|(?:аванс|предоплата)\\s+не\\s+предусмотрен\\p{L}*";
+
+function extractZeroAdvance(page: {
+  hash: string;
+  page: number;
+  text: string;
+}): CommercialClaimValue[] {
+  const regex = new RegExp(zeroAdvanceSource, "giu");
+  const claims: CommercialClaimValue[] = [];
+  for (const match of page.text.matchAll(regex)) {
+    const quote = match[0]?.trim();
+    if (quote === undefined || quote.length === 0) continue;
+    claims.push(
+      CommercialClaim.parse({
+        key: "commercial.advance_percent",
+        value: 0,
+        unit: "%",
+        confidence: 0.92,
+        hash: page.hash,
+        page: page.page,
+        quote,
+      }),
+    );
+  }
   return claims;
 }
 
@@ -43,40 +87,54 @@ interface CheapPattern {
   parse: (raw: string) => number | undefined;
 }
 
+/** JS `\\w` is ASCII; contest wording is Cyrillic (`гарантийный`, `календарных`). */
+const daysAfterNumber =
+  "(\\d{1,3})(?:\\s*\\([^)]{0,40}\\))?(?:\\s+(?:календарн|банковск)\\p{L}*)?\\s*дн\\p{L}*";
+const monthsAfterNumber = "(\\d{1,3})(?:\\s*\\([^)]{0,40}\\))?\\s*мес\\p{L}*";
+
 const patterns: readonly CheapPattern[] = [
   {
     key: "commercial.advance_percent",
     unit: "%",
     source:
-      "аванс(?:ов(?:ый|ого|ая|ые))?(?:\\s+плат[её]ж(?:а|ом|у)?)?[^\\n.]{0,40}?(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*(?:%|процент(?:а|ов)?)",
+      "аванс(?:ов(?:ый|ого|ая|ое|ые))?\\p{L}*(?:\\s+плат[её]ж(?:а|ом|у)?)?[^\\n.]{0,40}?(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*(?:%|процент(?:а|ов)?)",
     parse: percent,
   },
   {
     key: "commercial.advance_percent",
     unit: "%",
     source:
-      "предоплат\\w*[^\\n.]{0,40}?(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*(?:%|процент(?:а|ов)?)",
+      "предоплат\\p{L}*[^\\n.]{0,40}?(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*(?:%|процент(?:а|ов)?)",
     parse: percent,
   },
   {
     key: "commercial.payment_deadline_days",
     unit: "days",
-    source: "оплат(?:а|ы|е|ой)[^\\n.]{0,40}?(\\d{1,3})\\s*(?:календарн\\w+\\s+)?дн",
+    source: `оплат(?:а|ы|е|ой)[^\\n.]{0,40}?${daysAfterNumber}`,
     parse: days,
   },
   {
     key: "commercial.delivery_period_days",
     unit: "days",
-    source: "срок(?:и)?\\s+поставк\\w+[^\\n.]{0,40}?(\\d{1,3})\\s*дн",
+    source: `срок(?:и)?\\s+поставк\\p{L}*[^\\n.]{0,80}?${daysAfterNumber}`,
     parse: days,
   },
   {
     key: "commercial.warranty_months",
     unit: "months",
-    source: "гарант\\w+[^\\n.]{0,60}?(\\d{1,3})\\s*мес",
+    source: `гарант\\p{L}*[^\\n.]{0,80}?${monthsAfterNumber}`,
     parse: months,
   },
 ];
+
+function quoteLooksLikeAdvanceCap(quote: string): boolean {
+  return /до\s+\d/u.test(quote) || /не\s+более/u.test(quote);
+}
+
+function pageHasAdvanceCap(text: string, value: number): boolean {
+  const number = String(value).replace(".", "[.,]");
+  return new RegExp(`до\\s+${number}\\s*(?:%|процент)`, "iu").test(text);
+}
 
 function percent(raw: string): number | undefined {
   const value = Number(raw.replace(",", "."));

@@ -83,7 +83,13 @@ function compileCommercial(
   }
   const lines: string[] = [];
   if (terms.advancePercent !== undefined) {
-    lines.push(`Аванс: ${String(terms.advancePercent.value)}%.`);
+    lines.push(
+      terms.advancePercent.value === 0
+        ? "Аванс: нет."
+        : `Аванс: ${String(terms.advancePercent.value).replace(".", ",")}%.`,
+    );
+  } else if (terms.advancePercentCap !== undefined) {
+    lines.push(`Аванс: до ${String(terms.advancePercentCap.value).replace(".", ",")}%.`);
   } else if (terms.notes.length === 0) {
     missing.push("Доля аванса не подтверждена.");
   }

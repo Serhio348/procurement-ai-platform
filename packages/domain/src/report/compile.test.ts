@@ -26,6 +26,30 @@ describe("compileProcurementReport", () => {
     expect(report.missing).toContain("Коммерческие условия не извлечены.");
   });
 
+  it("prints an advance cap without inventing a point percent or a score", () => {
+    const report = compileProcurementReport({
+      card: card(),
+      terms: CommercialTerms.parse({
+        advancePercentCap: { value: 99.5, factIds: [FactId.parse(uuid(5))], confidence: 0.92 },
+      }),
+    });
+    expect(report.markdown).toContain("Аванс: до 99,5%.");
+    expect(report.markdown).not.toMatch(/Аванс:\s*99,5%\./);
+    expect(report.missing).not.toContain("Доля аванса не подтверждена.");
+    expect(report.missing).toContain("Итоговая оценка ещё не рассчитана.");
+  });
+
+  it("prints «Аванс: нет.» when the proven share is zero", () => {
+    const report = compileProcurementReport({
+      card: card(),
+      terms: CommercialTerms.parse({
+        advancePercent: { value: 0, factIds: [FactId.parse(uuid(6))], confidence: 0.92 },
+      }),
+    });
+    expect(report.markdown).toContain("Аванс: нет.");
+    expect(report.missing).not.toContain("Доля аванса не подтверждена.");
+  });
+
   it("copies a site quote into notes and still does not invent an advance percent", () => {
     const report = compileProcurementReport({
       card: card(),

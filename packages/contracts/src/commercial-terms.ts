@@ -9,6 +9,7 @@ import { CompiledDocumentRef } from "./documents.js";
  */
 export const CommercialFactKey = z.enum([
   "commercial.advance_percent",
+  "commercial.advance_percent_cap",
   "commercial.payment_kind",
   "commercial.final_payment_percent",
   "commercial.payment_deadline_days",

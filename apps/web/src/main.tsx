@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { fetchInbox, fetchProcurements } from "./api/specialist.js";
+import { fetchInbox, fetchProcurements, searchProcurements } from "./api/specialist.js";
 import { SpecialistApp } from "./SpecialistApp.js";
 import "./styles.css";
 
@@ -15,7 +15,7 @@ try {
   const [inbox, procurements] = await Promise.all([fetchInbox(), fetchProcurements()]);
   mount.render(
     <StrictMode>
-      <SpecialistApp inbox={inbox} procurements={procurements} />
+      <SpecialistApp inbox={inbox} procurements={procurements} search={searchProcurements} />
     </StrictMode>,
   );
 } catch {

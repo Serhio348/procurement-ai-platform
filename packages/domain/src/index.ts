@@ -15,5 +15,6 @@ export * from "./report/compile.js";
 export * from "./scoring/components.js";
 export * from "./scoring/engine.js";
 export * from "./search/cheap-classify.js";
+export * from "./search/search-cards.js";
 export * from "./specialist/case.js";
 export * from "./specialist/catalog.js";

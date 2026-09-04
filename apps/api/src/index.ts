@@ -1,2 +1,2 @@
 export { buildSpecialistApi } from "./app.js";
-export { loadFixtureCatalog } from "./load-fixture.js";
+export { loadFixtureCatalog, loadFixtureSearchHits } from "./load-fixture.js";

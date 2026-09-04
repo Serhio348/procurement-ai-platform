@@ -2,8 +2,9 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 19 — консоль показывает живой кейс; из Word-ТЗ читаются
-срок поставки и гарантия с цитатой; альбомы проекта не OCR-ятся.
+**Статус:** этап 20 — из списка закупок можно запустить поиск по профилю.
+В работу попадают точные совпадения ключевых слов; кабель и неоднозначные
+заголовки не показываются. Это не чат.
 
 ## Принцип
 
@@ -47,6 +48,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 17 — распознавание live-PDF](docs/architecture/STAGE-17.md)
 - [Этап 18 — отбор файлов и vision сканов конкурса](docs/architecture/STAGE-18.md)
 - [Этап 19 — факты поставки и гарантии из Word-ТЗ](docs/architecture/STAGE-19.md)
+- [Этап 20 — поиск по профилю из консоли](docs/architecture/STAGE-20.md)
 
 ## Пакеты
 
@@ -60,8 +62,8 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/mcp-documents` | Documents MCP: blob по sha256, fixture extract/OCR |
 | `@procurement/mcp-notifications` | Notifications MCP: inbox и telegram.send |
 | `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent, NotificationAgent |
-| `@procurement/api` | Fastify: inbox срочных изменений и карточки закупок |
-| `@procurement/web` | Консоль специалиста: inbox и список закупок |
+| `@procurement/api` | Fastify: inbox, карточки закупок и поиск по профилю |
+| `@procurement/web` | Консоль специалиста: inbox, список закупок, поиск по профилю |
 
 ## Разработка
 

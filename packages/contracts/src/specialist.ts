@@ -120,6 +120,19 @@ export const SpecialistProcurementListResponse = z.object({
 });
 export type SpecialistProcurementListResponse = z.infer<typeof SpecialistProcurementListResponse>;
 
+export const SpecialistSearchRequest = z.object({
+  limit: z.number().int().positive().max(50).default(20),
+});
+export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
+
+export const SpecialistSearchResponse = z.object({
+  profileName: z.string().min(1),
+  relevantCount: z.number().int().nonnegative(),
+  discardedCount: z.number().int().nonnegative(),
+  items: z.array(SpecialistProcurementCard),
+});
+export type SpecialistSearchResponse = z.infer<typeof SpecialistSearchResponse>;
+
 export const SpecialistLiveRun = z.object({
   capturedAt: IsoDateTime,
   profileName: z.string().min(1),

@@ -2,9 +2,13 @@ import {
   InboxFixtureItem,
   SpecialistInboxListResponse,
   SpecialistProcurementListResponse,
+  SpecialistSearchRequest,
+  SpecialistSearchResponse,
+  electricalEquipmentSeedV1,
+  type SearchHit,
   type SpecialistCaseDocument,
 } from "@procurement/contracts";
-import { SpecialistCatalog } from "@procurement/domain";
+import { selectRelevantSearchCards, SpecialistCatalog } from "@procurement/domain";
 import { silentLogger, type Logger } from "@procurement/observability";
 import Fastify from "fastify";
 import {
@@ -14,17 +18,24 @@ import {
   getBlob,
   isSha256Hex,
 } from "./blobs.js";
+import { loadFixtureSearchHits } from "./load-fixture.js";
+
+export interface SpecialistSearchHitsPort {
+  search: (limit: number) => Promise<readonly SearchHit[]>;
+}
 
 export interface BuildApiOptions {
   catalog?: SpecialistCatalog;
   logger?: Logger;
   blobDirectory?: string;
+  searchHits?: SpecialistSearchHitsPort;
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}) {
   const catalog = options.catalog ?? new SpecialistCatalog();
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
+  const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
   const app = Fastify({ logger: false });
 
   app.get("/api/health", async () => ({ ok: true as const }));
@@ -51,6 +62,36 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}) {
   app.get("/api/procurements", async () =>
     SpecialistProcurementListResponse.parse({ items: catalog.procurements() }),
   );
+
+  app.post("/api/procurements/search", async (request, reply) => {
+    const parsed = SpecialistSearchRequest.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const hits = await searchHits.search(parsed.data.limit);
+    const selected = selectRelevantSearchCards(
+      hits,
+      {
+        keywords: electricalEquipmentSeedV1.keywords,
+        excludeKeywords: electricalEquipmentSeedV1.excludeKeywords,
+      },
+      parsed.data.limit,
+    );
+    for (const card of selected.cards) {
+      catalog.upsertCase(card);
+    }
+    logger.info("Specialist profile search recorded", {
+      profileName: electricalEquipmentSeedV1.name,
+      relevantCount: selected.cards.length,
+      discardedCount: selected.discardedCount,
+    });
+    return SpecialistSearchResponse.parse({
+      profileName: electricalEquipmentSeedV1.name,
+      relevantCount: selected.cards.length,
+      discardedCount: selected.discardedCount,
+      items: catalog.procurements(),
+    });
+  });
 
   app.get("/api/procurements/:id", async (request, reply) => {
     const params = request.params as { id: string };
@@ -81,6 +122,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}) {
   });
 
   return app;
+}
+
+async function loadDefaultSearchHits(_limit: number): Promise<readonly SearchHit[]> {
+  return loadFixtureSearchHits();
 }
 
 function findCatalogDocument(

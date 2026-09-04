@@ -1,5 +1,10 @@
 import { useNavigate, useParams } from "react-router-dom";
-import type { SpecialistCaseDocument, SpecialistProcurementCard } from "@procurement/contracts";
+import { useRef, useState } from "react";
+import type {
+  SpecialistCaseDocument,
+  SpecialistProcurementCard,
+  SpecialistSearchResponse,
+} from "@procurement/contracts";
 import { Shell } from "../shell/Shell.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
@@ -34,17 +39,59 @@ export function documentStatusLabel(document: SpecialistCaseDocument): string {
   }
 }
 
-export function ProcurementsApp({ items }: { items: readonly SpecialistProcurementCard[] }) {
+export function ProcurementsApp({
+  items: catalog,
+  search,
+}: {
+  items: readonly SpecialistProcurementCard[];
+  search?: () => Promise<SpecialistSearchResponse>;
+}) {
   const params = useParams();
   const navigate = useNavigate();
-  const selected =
-    items.find((item) => item.id === params["id"]) ?? items[0];
+  const [items, setItems] = useState(catalog);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | undefined>();
+  const catalogRef = useRef(catalog);
+  if (catalogRef.current !== catalog) {
+    catalogRef.current = catalog;
+    setItems(catalog);
+  }
+  const selected = items.find((item) => item.id === params["id"]) ?? items[0];
+
+  async function runSearch(): Promise<void> {
+    if (search === undefined || busy) return;
+    setBusy(true);
+    try {
+      const result = await search();
+      setItems(result.items);
+      setNotice(
+        `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}.`,
+      );
+    } catch {
+      setNotice("Не удалось выполнить поиск по профилю.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Shell>
       <main className="workspace">
         <section className="inbox" aria-labelledby="procurements-heading">
-          <h1 id="procurements-heading">Закупки</h1>
+          <div className="inbox-toolbar">
+            <h1 id="procurements-heading">Закупки</h1>
+            <button
+              type="button"
+              className="search-profile"
+              disabled={search === undefined || busy}
+              onClick={() => {
+                void runSearch();
+              }}
+            >
+              {busy ? "Ищем…" : "Искать по профилю"}
+            </button>
+          </div>
+          {notice === undefined ? null : <p className="search-notice">{notice}</p>}
           {items.length === 0 ? (
             <p className="empty">Нет закупок в работе</p>
           ) : (
@@ -125,6 +172,16 @@ export function ProcurementsApp({ items }: { items: readonly SpecialistProcureme
                   </div>
                 )}
               </dl>
+              {selected.actions.length === 0 ? null : (
+                <>
+                  <h3>Что сделано</h3>
+                  <ul className="missing-list">
+                    {selected.actions.map((action) => (
+                      <li key={`${String(action.step)}-${action.actor}`}>{action.detail}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
               {selected.documents.length === 0 ? null : (
                 <>
                   <h3>Документы</h3>

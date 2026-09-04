@@ -285,7 +285,7 @@ function amountLabel(card: ProcedureCard): string | undefined {
   return undefined;
 }
 
-function uuidFromHex(seed: string): string {
+export function uuidFromHex(seed: string): string {
   const hex = [...seed]
     .map((char) => char.charCodeAt(0).toString(16).padStart(2, "0"))
     .join("")

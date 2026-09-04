@@ -110,6 +110,51 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("searches by the seeded electrical profile and ignores keywords in the request body", async () => {
+    const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { keywords: ["кабель"], limit: 20 },
+    });
+    const body = JSON.parse(response.body) as {
+      profileName: string;
+      relevantCount: number;
+      discardedCount: number;
+      items: Array<{ title: string; sourceProcurementId: string }>;
+    };
+
+    expect(response.statusCode).toBe(200);
+    expect(body.profileName).toBe("Электротехническое оборудование");
+    expect(body.relevantCount).toBe(1);
+    expect(body.discardedCount).toBe(3);
+    expect(body.items.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
+      true,
+    );
+    expect(body.items.some((item) => item.title === "Кабель силовой")).toBe(false);
+    expect(body.items.some((item) => item.title === "Трансформаторы силовые")).toBe(false);
+    expect(body.items.some((item) => item.title === "Ремонт трансформаторной подстанции")).toBe(
+      false,
+    );
+
+    const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+    const titles = (JSON.parse(listed.body).items as Array<{ title: string }>).map(
+      (item) => item.title,
+    );
+    expect(titles).toContain("Комплектная трансформаторная подстанция");
+    expect(titles).toContain("Бытовой щиток");
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { limit: 0 },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    await app.close();
+  });
+
   it("serves a catalog PDF from the local blob store, not an unknown hash on disk", async () => {
     const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "blobs-"));
     tmpDirs.push(blobDirectory);

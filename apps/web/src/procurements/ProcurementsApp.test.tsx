@@ -109,4 +109,70 @@ describe("ProcurementsApp", () => {
     expect(screen.queryByRole("heading", { name: "Отчёт" })).toBeNull();
     expect(screen.queryByText(/Г лавный инженер/)).toBeNull();
   });
+
+  it("adds profile matches from search without a keyword text field", async () => {
+    const user = userEvent.setup();
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Комплектная трансформаторная подстанция",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/001",
+      sourceProcurementId: "auction-001",
+      amountLabel: "125 000,00 BYN",
+      actions: [
+        {
+          step: 1,
+          actor: "DomainSearchAgent",
+          status: "done",
+          detail:
+            "procurement.search: найдена «Комплектная трансформаторная подстанция». Документы ещё не брали.",
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                search={async () => ({
+                  profileName: "Электротехническое оборудование",
+                  relevantCount: 1,
+                  discardedCount: 3,
+                  items: [found],
+                })}
+              />
+            }
+          />
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp
+                items={[]}
+                search={async () => ({
+                  profileName: "Электротехническое оборудование",
+                  relevantCount: 1,
+                  discardedCount: 3,
+                  items: [found],
+                })}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Искать по профилю" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Искать по профилю" }));
+
+    expect(screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeTruthy();
+    expect(screen.getByText(/найдено 1, отброшено 3/)).toBeTruthy();
+    expect(screen.getByText(/Документы ещё не брали/)).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
 });

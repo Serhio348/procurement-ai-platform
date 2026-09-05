@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDatabase } from "./client.js";
 
@@ -7,6 +8,17 @@ export async function migrateDatabase(connectionString: string): Promise<void> {
   const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
   try {
     await migrate(db, { migrationsFolder });
+    const tables = await db.execute<{ tablename: string }>(sql`
+      select tablename
+      from pg_tables
+      where schemaname = 'public'
+        and tablename in ('specialist_workspaces', 'specialist_cases')
+    `);
+    if (tables.rows.length < 2) {
+      throw new Error(
+        "specialist_workspaces/specialist_cases missing after migrate; journal timestamps may have skipped 0001",
+      );
+    }
   } finally {
     await pool.end();
   }

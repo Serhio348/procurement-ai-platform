@@ -186,6 +186,38 @@ export const SpecialistDecisionWrite = z.object({
 });
 export type SpecialistDecisionWrite = z.infer<typeof SpecialistDecisionWrite>;
 
+export const SpecialistIngestFileState = z.enum([
+  "pending",
+  "downloading",
+  "indexing",
+  "read",
+  "skipped",
+  "failed",
+]);
+export type SpecialistIngestFileState = z.infer<typeof SpecialistIngestFileState>;
+
+export const SpecialistIngestFileProgress = z.object({
+  name: z.string().min(1),
+  sourceUrl: z.string().url(),
+  state: SpecialistIngestFileState,
+  percent: z.number().int().min(0).max(100),
+});
+export type SpecialistIngestFileProgress = z.infer<typeof SpecialistIngestFileProgress>;
+
+/** Live participate ingest. Percent is files weighted, not a 0–100 score. */
+export const SpecialistIngestProgress = z.object({
+  procurementId: ProcurementId,
+  phase: z.enum(["idle", "listing", "downloading", "indexing", "done", "failed"]),
+  total: z.number().int().nonnegative(),
+  downloaded: z.number().int().nonnegative(),
+  indexed: z.number().int().nonnegative(),
+  readCount: z.number().int().nonnegative(),
+  percent: z.number().int().min(0).max(100),
+  currentName: z.string().optional(),
+  files: z.array(SpecialistIngestFileProgress).default([]),
+});
+export type SpecialistIngestProgress = z.infer<typeof SpecialistIngestProgress>;
+
 export const SpecialistWorkspaceState = z.object({
   profiles: z.array(SpecialistWorkingProfile).min(1),
   activeProfileId: z.string().uuid(),

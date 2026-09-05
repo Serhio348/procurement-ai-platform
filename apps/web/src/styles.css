@@ -324,6 +324,74 @@ h3 {
   margin: 0 0 8px;
 }
 
+.doc-list li span {
+  margin-left: 8px;
+  color: #5c6778;
+}
+
+.case-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+  min-height: 0;
+}
+
+.doc-open {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1d4f91;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.doc-open.is-current {
+  color: #2d5a3d;
+  font-weight: 600;
+}
+
+.doc-text {
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.doc-read-mark {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #2d5a3d;
+  background: #e8f3ec;
+  border: 1px solid #b7d4c2;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.ingest-progress {
+  margin: 12px 0 0;
+}
+
+.ingest-progress-label {
+  color: #2d5a3d;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.ingest-progress-bar {
+  height: 8px;
+  background: #e6eadf;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ingest-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: #2d5a3d;
+}
+
 .inbox-summary,
 .inbox-date {
   color: #5c6778;

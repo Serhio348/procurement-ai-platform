@@ -31,6 +31,7 @@ describe("detectDocumentFormat", () => {
     expect(formatHasNativeText("docx")).toBe(true);
     expect(formatHasNativeText("xlsx")).toBe(true);
     expect(formatHasNativeText("pptx")).toBe(true);
+    expect(formatHasNativeText("doc")).toBe(true);
     expect(formatNeedsRasterScan("docx")).toBe(false);
     expect(formatNeedsRasterScan("pdf")).toBe(true);
     expect(formatNeedsRasterScan("jpeg")).toBe(true);

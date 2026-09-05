@@ -6,6 +6,7 @@ import {
   ProcurementGetStatusResponse,
   ProcurementSearchResponse,
   SourceId,
+  type ProcurementFileBytes,
   type IsoDateTime,
   type ProcurementSourcePort,
   type SearchQuery,
@@ -119,6 +120,32 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   ): Promise<ProcurementGetChangesResponse> {
     await this.#load(id);
     return ProcurementGetChangesResponse.parse({ changes: [] });
+  }
+
+  async download(downloadUrl: string): Promise<ProcurementFileBytes> {
+    let parsed: URL;
+    try {
+      parsed = new URL(downloadUrl);
+    } catch {
+      throw new SourceAccessError(this.sourceId, "document URL is not valid");
+    }
+    if (parsed.hostname !== "goszakupki.by") {
+      throw new SourceAccessError(this.sourceId, "document URL is outside goszakupki.by");
+    }
+    if (this.#client.download === undefined) {
+      throw new SourceAccessError(this.sourceId, "this client cannot download files");
+    }
+    const file = await this.#client.download(`${parsed.pathname}${parsed.search}`);
+    if (file.status < 200 || file.status >= 300) {
+      throw new SourceAccessError(
+        this.sourceId,
+        `document download returned unexpected HTTP ${String(file.status)}`,
+      );
+    }
+    return {
+      bytes: file.bytes,
+      contentType: file.contentType ?? "application/octet-stream",
+    };
   }
 
   async #load(id: SourceProcurementId): Promise<ParsedGoszakupkiCard> {

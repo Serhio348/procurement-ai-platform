@@ -1,5 +1,6 @@
 import {
   SpecialistInboxListResponse,
+  SpecialistIngestProgress,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistSearchResponse,
@@ -10,6 +11,7 @@ import {
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
   type SpecialistTriageKind,
   type SpecialistProfileListResponse as SpecialistProfileListResponseValue,
+  type SpecialistIngestProgress as SpecialistIngestProgressValue,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
 } from "@procurement/contracts";
 
@@ -129,6 +131,17 @@ export async function setProfileWatch(
     throw new Error("Не удалось изменить слежение за новыми закупками");
   }
   return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function fetchIngestProgress(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistIngestProgressValue> {
+  const response = await fetcher(`/api/procurements/${id}/ingest-progress`);
+  if (!response.ok) {
+    throw new Error("Не удалось получить прогресс индексации");
+  }
+  return SpecialistIngestProgress.parse(await response.json());
 }
 
 export async function decideProcurement(

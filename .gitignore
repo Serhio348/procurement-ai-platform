@@ -36,3 +36,6 @@ uploads/
 # Test artifacts
 playwright-report/
 test-results/
+
+# Tesseract language packs (downloaded locally, not source)
+*.traineddata

@@ -1,6 +1,7 @@
 export * from "./activity/gate.js";
 export * from "./commercial/assemble.js";
 export * from "./commercial/cheap-extract.js";
+export * from "./commercial/detail.js";
 export * from "./commercial/provenance.js";
 export * from "./documents/attachment-role.js";
 export * from "./documents/file-format.js";
@@ -18,6 +19,8 @@ export * from "./search/cheap-classify.js";
 export * from "./search/search-cards.js";
 export * from "./specialist/case.js";
 export * from "./specialist/catalog.js";
+export * from "./specialist/ingest-progress.js";
 export * from "./specialist/looking-for.js";
+export * from "./specialist/participate.js";
 export * from "./specialist/triage.js";
 export * from "./specialist/workspace.js";

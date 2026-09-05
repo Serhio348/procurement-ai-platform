@@ -11,6 +11,7 @@ import {
   SourceClarification,
   SourceDocument,
   type IsoDateTime,
+  type ProcurementFileBytes,
   type ProcurementSourcePort,
   type SearchHit,
   type SearchQuery,
@@ -108,6 +109,10 @@ export class FixtureProcurementSource implements ProcurementSourcePort {
     id: SourceProcurementId,
   ): Promise<z.infer<typeof ProcurementGetHistoryResponse>> {
     return ProcurementGetHistoryResponse.parse({ clarifications: this.#getRecord(id).history });
+  }
+
+  async download(_downloadUrl: string): Promise<ProcurementFileBytes> {
+    throw new SourceRecordNotFoundError(this.sourceId, "fixture-download");
   }
 
   async getChanges(

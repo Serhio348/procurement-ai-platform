@@ -1,4 +1,6 @@
 import {
+  ProcurementDownloadRequest,
+  ProcurementDownloadResponse,
   ProcurementGetChangesRequest,
   ProcurementGetChangesResponse,
   ProcurementGetDocumentsResponse,
@@ -21,6 +23,7 @@ import {
   SourceRecordNotFoundError,
   SourceUnavailableError,
 } from "./source-registry.js";
+import { storeDownloadedFile } from "./store-download.js";
 
 export interface ProcurementMcpServerOptions {
   sources: readonly ProcurementSourcePort[];
@@ -130,6 +133,28 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
         const request = ProcurementGetRequest.parse(input);
         const output = await registry.get(request.sourceId).getHistory(request.sourceProcurementId);
         return ProcurementGetHistoryResponse.parse(output);
+      }),
+  );
+
+  server.registerTool(
+    "procurement.download",
+    {
+      description:
+        "Download a public procurement attachment through the source session and store it by sha256.",
+      inputSchema: ProcurementDownloadRequest,
+      outputSchema: ProcurementDownloadResponse,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (input, extra) =>
+      executeTool("procurement.download", logger, correlationId(extra), async () => {
+        const request = ProcurementDownloadRequest.parse(input);
+        const file = await registry.get(request.sourceId).download(request.downloadUrl);
+        return storeDownloadedFile(file);
       }),
   );
 

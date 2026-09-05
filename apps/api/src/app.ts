@@ -2,6 +2,7 @@ import {
   InboxFixtureItem,
   SpecialistDecisionWrite,
   SpecialistDiscoveryResponse,
+  SpecialistIngestProgress,
   SpecialistInboxListResponse,
   SpecialistProcurementCard,
   SpecialistProcurementListResponse,
@@ -34,6 +35,8 @@ import {
   getBlob,
   isSha256Hex,
 } from "./blobs.js";
+import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
+import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 
 export interface SpecialistSearchHitsPort {
@@ -50,9 +53,11 @@ export interface BuildApiOptions {
   logger?: Logger;
   blobDirectory?: string;
   searchHits?: SpecialistSearchHitsPort;
+  documentIngest?: SpecialistDocumentIngestPort;
   liveProcurementsOnly?: boolean;
   persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
   clock?: () => string;
+  ingestProgress?: ReturnType<typeof createIngestProgressHub>;
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
@@ -61,6 +66,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
+  const documentIngest = options.documentIngest;
+  const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
   const clock = options.clock ?? (() => new Date().toISOString());
   const persist = async (): Promise<void> => {
@@ -347,14 +354,36 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     workspace.recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
-    const next = withTriage(card, workspace);
+    let next = withTriage(card, workspace);
+    if (parsed.data.kind === "participate" && documentIngest !== undefined) {
+      ingestProgress.begin(card.id);
+      try {
+        next = withTriage(await documentIngest.ingest(next), workspace);
+        ingestProgress.done(card.id);
+      } catch (error) {
+        ingestProgress.fail(card.id);
+        logger.error("Specialist participate document ingest failed", error, {
+          sourceProcurementId: card.sourceProcurementId,
+        });
+      }
+    }
     catalog.upsertCase(next);
     await persist();
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,
       kind: parsed.data.kind,
+      documentCount: next.documents.length,
     });
     return SpecialistProcurementListResponse.parse({ items: listed() });
+  });
+
+  app.get("/api/procurements/:id/ingest-progress", async (request, reply) => {
+    const params = request.params as { id: string };
+    const card = listed().find((item) => item.id === params.id);
+    if (card === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    return SpecialistIngestProgress.parse(ingestProgress.snapshot(card.id));
   });
 
   app.get("/api/procurements/:id", async (request, reply) => {

@@ -59,6 +59,7 @@ export const electricalEquipmentSeedV1 = DomainProfileSeed.parse({
     "procurement.get",
     "procurement.get_lots",
     "procurement.get_documents",
+    "procurement.download",
     "procurement.get_status",
     "procurement.get_changes",
     "documents.list",

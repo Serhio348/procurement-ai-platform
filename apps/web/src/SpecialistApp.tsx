@@ -2,6 +2,7 @@ import { useState, type ReactElement } from "react";
 import { BrowserRouter, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
   SpecialistInboxEntry,
+  SpecialistIngestProgress,
   SpecialistProcurementCard,
   SpecialistProfileListResponse,
   SpecialistProfileWrite,
@@ -29,6 +30,7 @@ export interface SpecialistAppProps {
     id: string,
     kind: SpecialistTriageKind,
   ) => Promise<readonly SpecialistProcurementCard[]>;
+  ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -146,6 +148,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                     },
                   })}
               {...(decide === undefined ? {} : { decide })}
+              {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
             />
           }
         />
@@ -165,6 +168,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                     },
                   })}
               {...(decide === undefined ? {} : { decide })}
+              {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
             />
           }
         />

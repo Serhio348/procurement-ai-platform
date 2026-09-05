@@ -16,6 +16,7 @@ export interface ProcurementMcpProcess {
 export async function connectProcurementMcp(options: {
   mode: "live" | "fixture";
   logger: Logger;
+  blobDirectory?: string;
 }): Promise<ProcurementMcpProcess> {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const mcpMain = fileURLToPath(
@@ -27,6 +28,9 @@ export async function connectProcurementMcp(options: {
     if (value !== undefined) env[key] = value;
   }
   env["PROCUREMENT_SOURCE_MODE"] = options.mode;
+  if (options.blobDirectory !== undefined) {
+    env["DOCUMENT_BLOB_DIR"] = options.blobDirectory;
+  }
 
   const transport = new StdioClientTransport({
     command: process.execPath,

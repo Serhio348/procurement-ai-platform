@@ -10,7 +10,8 @@
     { "path": "../../packages/contracts" },
     { "path": "../../packages/domain" },
     { "path": "../../packages/observability" },
-    { "path": "../../packages/mcp-client" }
+    { "path": "../../packages/mcp-client" },
+    { "path": "../../mcp/documents" }
   ],
   "include": ["src/**/*.ts"]
 }

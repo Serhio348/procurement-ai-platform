@@ -8,21 +8,19 @@ import {
   SearchQuery,
   SourceProcurementId,
   SpecialistCaseDocument,
-  SpecialistDocumentExtraction,
   SpecialistLiveRun,
   electricalEquipmentSeedV1,
   type SpecialistCaseDocument as SpecialistCaseDocumentValue,
   type SpecialistLiveRun as SpecialistLiveRunValue,
 } from "@procurement/contracts";
-import { classifyAttachmentRole, shouldScanAttachment } from "@procurement/domain";
+import { classifyAttachmentRole } from "@procurement/domain";
 import { createLogger } from "@procurement/observability";
 import {
   createDocumentScanEngine,
+  recognizeSpecialistDocument,
   resolveDocumentFormat,
   RoutingDocumentExtractor,
-  skippedProjectExtraction,
   toSpecialistExtraction,
-  unscannedUnknownExtraction,
 } from "@procurement/mcp-documents";
 import { GoszakupkiHttpClient } from "./goszakupki-by-http.js";
 import { GoszakupkiBySource } from "./goszakupki-by-source.js";
@@ -143,7 +141,7 @@ async function main(): Promise<void> {
         const contentType = file.contentType ?? "application/octet-stream";
         let extraction;
         try {
-          extraction = await recognizeListedDocument({
+          extraction = await recognizeSpecialistDocument({
             name: document.name,
             hash,
             bytes: file.bytes,
@@ -242,50 +240,6 @@ async function refreshOfficeFromBlobs(): Promise<void> {
   const next: SpecialistLiveRunValue = SpecialistLiveRun.parse({ ...run, documents });
   await writeFile(outputPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   logger.info("Refreshed Word/Excel/PowerPoint text in live specialist case", { outputPath });
-}
-
-async function recognizeListedDocument(input: {
-  name: string;
-  hash: string;
-  bytes: Uint8Array;
-  contentType: string;
-  nativeExtractor: RoutingDocumentExtractor;
-  scanExtractor: RoutingDocumentExtractor;
-  usesVision: boolean;
-}): Promise<ReturnType<typeof SpecialistDocumentExtraction.parse>> {
-  const format = resolveDocumentFormat(input.bytes, input.name, input.contentType);
-  const native = await input.nativeExtractor.extractText(
-    input.hash,
-    input.bytes,
-    input.contentType,
-    input.name,
-  );
-  const role = classifyAttachmentRole({ name: input.name, digitalText: native.text });
-  if (role.role === "skip_project") {
-    return skippedProjectExtraction(role.reason);
-  }
-  if (!shouldScanAttachment(role)) {
-    return unscannedUnknownExtraction(role.reason);
-  }
-  if (native.status === "extracted") {
-    return toSpecialistExtraction(native, input.contentType, format);
-  }
-  const scanned = toSpecialistExtraction(
-    await input.scanExtractor.extractText(input.hash, input.bytes, input.contentType, input.name),
-    input.contentType,
-    format,
-  );
-  if (scanned.status === "failed") {
-    return SpecialistDocumentExtraction.parse({
-      ...scanned,
-      notes: [role.reason, ...scanned.notes],
-    });
-  }
-  if (!input.usesVision || !scanned.ocrApplied) return scanned;
-  return SpecialistDocumentExtraction.parse({
-    ...scanned,
-    notes: [...scanned.notes, "Скан прочитан DeepSeek vision, не Tesseract."],
-  });
 }
 
 async function loadDotEnv(envPath: string): Promise<void> {

@@ -46,6 +46,7 @@ describe("Procurement MCP", () => {
     const result = await client.listTools();
 
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([
+      "procurement.download",
       "procurement.get",
       "procurement.get_changes",
       "procurement.get_documents",

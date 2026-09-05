@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cheapExtractCommercialClaims } from "./cheap-extract.js";
+import { cheapExtractCommercialClaims, cheapExtractCommercialNotes } from "./cheap-extract.js";
 
 const hash = "a".repeat(64);
 
@@ -102,6 +102,28 @@ describe("cheapExtractCommercialClaims", () => {
     );
   });
 
+  it("reads payment after delivery and labeled TZ lines without inventing days", () => {
+    const text =
+      "срок поставки: сентябрь 2026г.;\nусловия доставки: силами Поставщика;\nместо поставки: г. Гомель, ул. Медицинская, 6;\nусловия оплаты: по факту поставки;";
+    const claims = cheapExtractCommercialClaims({ hash, page: 1, text });
+    expect(claims).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "commercial.payment_kind",
+          value: "on_delivery",
+          quote: expect.stringMatching(/по факту поставки/i),
+        }),
+      ]),
+    );
+    expect(claims.some((item) => item.key === "commercial.delivery_period_days")).toBe(false);
+    expect(cheapExtractCommercialNotes({ text })).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/срок поставки:\s*сентябрь 2026/i),
+        expect.stringMatching(/условия оплаты:\s*по факту поставки/i),
+      ]),
+    );
+  });
+
   it("reads «без аванса» as a zero advance, not a missing field", () => {
     expect(
       cheapExtractCommercialClaims({
@@ -109,12 +131,19 @@ describe("cheapExtractCommercialClaims", () => {
         page: 1,
         text: "Оплата после поставки. Без аванса. Расчёт по ТТН.",
       }),
-    ).toEqual([
-      expect.objectContaining({
-        key: "commercial.advance_percent",
-        value: 0,
-        quote: expect.stringMatching(/без аванса/i),
-      }),
-    ]);
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "commercial.advance_percent",
+          value: 0,
+          quote: expect.stringMatching(/без аванса/i),
+        }),
+        expect.objectContaining({
+          key: "commercial.payment_kind",
+          value: "on_delivery",
+          quote: expect.stringMatching(/после поставки/i),
+        }),
+      ]),
+    );
   });
 });

@@ -10,6 +10,7 @@ import {
 } from "@procurement/domain";
 import type { DocumentExtractorPort } from "./extractor-port.js";
 import type { OcrEngine } from "./ocr-port.js";
+import { extractOleWord } from "./ole-word.js";
 import { extractOpenXml, extractOpenXmlTables, inspectOpenXmlFamily } from "./office-xml.js";
 import { PdfJsDocumentExtractor } from "./pdfjs-extractor.js";
 
@@ -60,6 +61,9 @@ export class RoutingDocumentExtractor implements DocumentExtractorPort {
     }
     if (format === "docx" || format === "xlsx" || format === "pptx") {
       return extractOpenXml(hash, bytes, format);
+    }
+    if (format === "doc") {
+      return extractOleWord(hash, bytes);
     }
     if ((format === "jpeg" || format === "png") && this.#ocr !== undefined) {
       const ocr = await this.#ocr.recognize(bytes);
@@ -122,8 +126,8 @@ export class RoutingDocumentExtractor implements DocumentExtractorPort {
 
 export function unsupportedFormatNote(format: DocumentFileFormat): string {
   const office = officeFormatLabel(format);
-  if (office !== undefined && (format === "doc" || format === "xls" || format === "ppt")) {
-    return `Формат ${office}: старый OLE, этот конвейер читает docx/xlsx/pptx.`;
+  if (office !== undefined && (format === "xls" || format === "ppt")) {
+    return `Формат ${office}: старый OLE, этот конвейер читает xlsx/pptx.`;
   }
   if (format === "unknown") {
     return "Формат файла не опознан — подходящий инструмент не выбран.";

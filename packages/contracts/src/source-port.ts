@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { IsoDateTime, PlatformInstant } from "./common.js";
+import { IsoDateTime, PlatformInstant, Sha256 } from "./common.js";
+import { BlobStorageKey } from "./documents.js";
 import { SourceId, SourceProcurementId } from "./ids.js";
 import {
   ProcedureCard,
@@ -79,6 +80,27 @@ export const ProcurementGetChangesResponse = z.object({
 });
 export type ProcurementGetChangesResponse = z.infer<typeof ProcurementGetChangesResponse>;
 
+export const ProcurementDownloadRequest = z
+  .object({
+    sourceId: SourceId,
+    downloadUrl: z.string().url(),
+  })
+  .strict();
+export type ProcurementDownloadRequest = z.infer<typeof ProcurementDownloadRequest>;
+
+export const ProcurementDownloadResponse = z.object({
+  hash: Sha256,
+  storageKey: BlobStorageKey,
+  sizeBytes: z.number().int().nonnegative(),
+  contentType: z.string().min(1),
+});
+export type ProcurementDownloadResponse = z.infer<typeof ProcurementDownloadResponse>;
+
+export interface ProcurementFileBytes {
+  bytes: Uint8Array;
+  contentType: string;
+}
+
 /**
  * Neutral source adapter. Implementations must not import database packages
  * or `DomainProfile`. Filtering by profile keywords happens in application code
@@ -93,4 +115,5 @@ export interface ProcurementSourcePort {
   getDocuments(id: SourceProcurementId): Promise<ProcurementGetDocumentsResponse>;
   getHistory(id: SourceProcurementId): Promise<ProcurementGetHistoryResponse>;
   getChanges(id: SourceProcurementId, since?: IsoDateTime): Promise<ProcurementGetChangesResponse>;
+  download(downloadUrl: string): Promise<ProcurementFileBytes>;
 }

@@ -243,6 +243,7 @@ describe("ContextCompiler", () => {
     expect(result.context.allowedTools).toEqual(
       expect.arrayContaining([
         "procurement.get_documents",
+        "procurement.download",
         "documents.download",
         "documents.extract_text",
         "documents.extract_tables",

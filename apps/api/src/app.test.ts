@@ -9,7 +9,7 @@ import {
 } from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildSpecialistApi } from "./app.js";
 import { putBlob } from "./blobs.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
@@ -260,6 +260,119 @@ describe("specialist API", () => {
     expect(cable).toBeDefined();
     expect(rejected.statusCode).toBe(200);
     expect(remaining.some((item) => item.title === "Кабель силовой")).toBe(false);
+
+    await app.close();
+  });
+
+  it("ingests documents only after participate, not after monitor", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    const ingest = vi.fn(async (card: typeof found) =>
+      SpecialistProcurementCard.parse({
+        ...card,
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/401",
+            hash: "a".repeat(64),
+            sizeBytes: 12,
+            status: "hashed",
+          },
+        ],
+        actions: [
+          ...card.actions,
+          {
+            step: 2,
+            actor: "DocumentAgent",
+            status: "done",
+            detail: "procurement.get_documents: 1 файл(ов), скачано: 1, ошибок: 0, разобрано: 0.",
+          },
+        ],
+      }),
+    );
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest },
+    });
+
+    const monitored = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/decision`,
+      payload: { kind: "monitor" },
+    });
+    const participated = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/decision`,
+      payload: { kind: "participate" },
+    });
+    const items = JSON.parse(participated.body).items as Array<{
+      documents: Array<{ name: string; status: string }>;
+    }>;
+
+    expect(monitored.statusCode).toBe(200);
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(participated.statusCode).toBe(200);
+    expect(items[0]?.documents).toEqual([
+      expect.objectContaining({ name: "ТЗ.pdf", status: "hashed" }),
+    ]);
+
+    await app.close();
+  });
+
+  it("exposes ingest progress while participate is still running", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    let app: Awaited<ReturnType<typeof buildSpecialistApi>> | undefined;
+    const ingest = vi.fn(async (card: typeof found) => {
+      const mid = await app?.inject({
+        method: "GET",
+        url: `/api/procurements/${found.id}/ingest-progress`,
+      });
+      expect(mid?.statusCode).toBe(200);
+      expect(JSON.parse(mid?.body ?? "{}").phase).toBe("listing");
+      return card;
+    });
+    app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest },
+    });
+
+    const idle = await app.inject({
+      method: "GET",
+      url: `/api/procurements/${found.id}/ingest-progress`,
+    });
+    const participated = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/decision`,
+      payload: { kind: "participate" },
+    });
+    const done = await app.inject({
+      method: "GET",
+      url: `/api/procurements/${found.id}/ingest-progress`,
+    });
+
+    expect(JSON.parse(idle.body).phase).toBe("idle");
+    expect(participated.statusCode).toBe(200);
+    expect(JSON.parse(done.body).phase).toBe("done");
+    expect(JSON.parse(done.body).percent).toBe(100);
 
     await app.close();
   });

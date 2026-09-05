@@ -13,6 +13,7 @@ import {
 } from "@procurement/contracts";
 import { assembleCommercialTerms } from "../commercial/assemble.js";
 import { cheapExtractCommercialClaims } from "../commercial/cheap-extract.js";
+import { paymentKindLabel } from "../commercial/detail.js";
 import { keepQuotedClaims, pageKey } from "../commercial/provenance.js";
 import { pageSafeForCommercialFacts } from "../documents/text-quality.js";
 import { compileProcurementReport } from "../report/compile.js";
@@ -242,6 +243,9 @@ function termLines(terms: CommercialTerms): string[] {
     lines.push(formatAdvanceLine(terms.advancePercent.value));
   } else if (terms.advancePercentCap !== undefined) {
     lines.push(`Аванс: до ${formatPercent(terms.advancePercentCap.value)}%.`);
+  }
+  if (terms.paymentKind !== undefined) {
+    lines.push(paymentKindLabel(terms.paymentKind.value));
   }
   if (terms.paymentDeadlineDays !== undefined) {
     lines.push(`Срок оплаты: ${String(terms.paymentDeadlineDays.value)} дн.`);

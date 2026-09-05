@@ -11,6 +11,7 @@ export default defineConfig({
       "@procurement/domain": fromRoot("./packages/domain/src/index.ts"),
       "@procurement/observability": fromRoot("./packages/observability/src/index.ts"),
       "@procurement/mcp-client": fromRoot("./packages/mcp-client/src/index.ts"),
+      "@procurement/mcp-documents": fromRoot("./mcp/documents/src/index.ts"),
     },
   },
   test: {

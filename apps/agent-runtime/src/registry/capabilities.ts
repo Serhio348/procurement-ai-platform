@@ -17,6 +17,7 @@ const procurementTools = [
   "procurement.get_history",
   "procurement.get_documents",
   "procurement.get_changes",
+  "procurement.download",
 ] as const satisfies readonly McpToolName[];
 
 function definition(input: AgentDefinition): AgentDefinition {
@@ -47,6 +48,7 @@ export const capabilityRegistry: Readonly<Record<CapabilityId, AgentDefinition>>
     responsibility: "Получать документы закупки и извлекать текст и таблицы.",
     allowedTools: [
       "procurement.get_documents",
+      "procurement.download",
       "documents.list",
       "documents.download",
       "documents.extract_text",

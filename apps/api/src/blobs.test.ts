@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   contentDisposition,
@@ -40,10 +41,14 @@ describe("document blobs", () => {
     expect(contentTypeForName("задание.pdf")).toBe("application/pdf");
     expect(contentDisposition("Техническое задание.pdf")).toContain("filename*=UTF-8''");
     expect(contentDisposition("Техническое задание.pdf")).toContain("inline");
+    expect(contentDisposition("договор.doc")).toContain("attachment");
+    expect(contentDisposition("договор.doc")).toContain(".doc");
   });
 
-  it("resolves a relative DOCUMENT_BLOB_DIR from the process cwd", () => {
+  it("resolves a relative DOCUMENT_BLOB_DIR from the repo root, not apps/api cwd", () => {
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
     expect(path.isAbsolute(resolveBlobDirectory(undefined))).toBe(true);
-    expect(resolveBlobDirectory("data/blobs")).toBe(path.resolve("data/blobs"));
+    expect(resolveBlobDirectory("data/blobs")).toBe(path.join(repoRoot, "data", "blobs"));
+    expect(contentTypeForName("договор.doc")).toBe("application/msword");
   });
 });

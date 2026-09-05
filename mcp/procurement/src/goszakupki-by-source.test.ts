@@ -57,6 +57,54 @@ describe("GoszakupkiBySource", () => {
     expect(get).toHaveBeenCalledWith("/request/view/9000003");
   });
 
+  it("downloads an attachment only from goszakupki.by through the session client", async () => {
+    const download = vi.fn(async () => ({
+      status: 200,
+      url: "https://goszakupki.by/files/get?id=1&download=1",
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "application/pdf",
+    }));
+    const source = new GoszakupkiBySource({
+      client: {
+        get: async () => {
+          throw new Error("must not fetch the card");
+        },
+        download,
+      },
+    });
+
+    const file = await source.download("https://goszakupki.by/files/get?id=1&download=1");
+
+    expect(file.contentType).toBe("application/pdf");
+    expect(file.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    expect(download).toHaveBeenCalledWith("/files/get?id=1&download=1");
+    await expect(source.download("https://example.test/files/1")).rejects.toThrow(
+      /outside goszakupki.by/,
+    );
+  });
+
+  it("keeps the HTTP client bound so private fields stay readable", async () => {
+    class SessionClient {
+      readonly #token = "session";
+      async get(): Promise<never> {
+        throw new Error("must not fetch the card");
+      }
+      async download(path: string) {
+        return {
+          status: 200,
+          url: `https://goszakupki.by${path}`,
+          bytes: new Uint8Array([1, 2, 3]),
+          contentType: "application/msword",
+          token: this.#token,
+        };
+      }
+    }
+    const source = new GoszakupkiBySource({ client: new SessionClient() });
+    const file = await source.download("https://goszakupki.by/files/get?id=2&download=1");
+    expect(file.contentType).toBe("application/msword");
+    expect(file.bytes).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
   it("maps a source 404 to a typed record-not-found error", async () => {
     const client: GoszakupkiPageClient = {
       get: vi.fn(async () => ({

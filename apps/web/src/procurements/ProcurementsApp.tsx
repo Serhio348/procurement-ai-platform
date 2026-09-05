@@ -2,12 +2,18 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useRef, useState } from "react";
 import type {
   SpecialistCaseDocument,
+  SpecialistIngestFileProgress,
+  SpecialistIngestProgress,
   SpecialistProcurementCard,
   SpecialistSearchResponse,
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
-import { profileDisplayName } from "@procurement/domain";
+import {
+  ingestFileWeight,
+  profileDisplayName,
+  specialistDocumentWasRead,
+} from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
@@ -16,11 +22,15 @@ export function documentHref(document: SpecialistCaseDocument): string {
     : `/api/documents/${document.hash}`;
 }
 
+export function documentOpensInline(document: SpecialistCaseDocument): boolean {
+  return document.name.toLowerCase().endsWith(".pdf");
+}
+
 export function documentStatusLabel(document: SpecialistCaseDocument): string {
   const extraction = document.extraction;
   if (extraction === undefined) {
     return document.status === "hashed"
-      ? `sha256 ${document.hash?.slice(0, 12) ?? ""}…, ${String(document.sizeBytes ?? 0)} байт`
+      ? `· ${String(document.sizeBytes ?? 0)} байт`
       : (document.note ?? document.status);
   }
   const confidence = Math.round(extraction.confidence * 100);
@@ -40,6 +50,38 @@ export function documentStatusLabel(document: SpecialistCaseDocument): string {
     case "non_pdf":
       return "формат не прочитан";
   }
+}
+
+export function ingestFileProgressLabel(file: SpecialistIngestFileProgress): string {
+  switch (file.state) {
+    case "pending":
+      return "ожидает";
+    case "downloading":
+      return "скачивание";
+    case "indexing":
+      return `индексация ${String(ingestFileWeight(file.state, file.percent))}%`;
+    case "read":
+      return "прочитано агентом";
+    case "skipped":
+      return "агент не разбирал";
+    case "failed":
+      return "ошибка";
+  }
+}
+
+export function ingestProgressCaption(progress: SpecialistIngestProgress): string {
+  if (progress.phase === "listing") return "Список документов…";
+  if (progress.phase === "downloading") {
+    return progress.currentName === undefined
+      ? `Скачивание ${String(progress.percent)}%`
+      : `Скачивание «${progress.currentName}» — ${String(progress.percent)}%`;
+  }
+  if (progress.phase === "failed") return "Индексация не удалась";
+  const current = progress.files.find((item) => item.name === progress.currentName);
+  if (progress.phase === "indexing" && current !== undefined) {
+    return `Индексация «${current.name}» — ${String(ingestFileWeight(current.state, current.percent))}%`;
+  }
+  return `Индексация ${String(progress.percent)}%`;
 }
 
 export function triageLabel(kind: SpecialistTriageKind): string {
@@ -80,6 +122,7 @@ export function ProcurementsApp({
   search,
   selectProfile,
   decide,
+  ingestProgress,
 }: {
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
@@ -87,19 +130,27 @@ export function ProcurementsApp({
   search?: () => Promise<SpecialistSearchResponse>;
   selectProfile?: (id: string) => Promise<void>;
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
+  ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
 }) {
   const params = useParams();
   const navigate = useNavigate();
   const [items, setItems] = useState(catalog);
   const [chosenProfileId, setChosenProfileId] = useState(activeProfileId ?? profiles[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
+  const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
+  const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const catalogRef = useRef(catalog);
   if (catalogRef.current !== catalog) {
     catalogRef.current = catalog;
     setItems(catalog);
   }
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
+  const showCommercial =
+    selected !== undefined &&
+    (selected.termsDetail !== undefined ||
+      selected.paymentQuote !== undefined ||
+      (selected.triage === "participate" && selected.documents.length > 0));
 
   async function runSearch(): Promise<void> {
     if (search === undefined || busy) return;
@@ -125,6 +176,20 @@ export function ProcurementsApp({
   async function runDecide(kind: SpecialistTriageKind): Promise<void> {
     if (decide === undefined || selected === undefined || busy) return;
     setBusy(true);
+    setBusyKind(kind);
+    const pullProgress = (): void => {
+      if (ingestProgress === undefined) return;
+      void ingestProgress(selected.id)
+        .then((next) => {
+          setProgress(next);
+        })
+        .catch(() => undefined);
+    };
+    const timer =
+      kind === "participate" && ingestProgress !== undefined
+        ? window.setInterval(pullProgress, 400)
+        : undefined;
+    if (kind === "participate") pullProgress();
     try {
       const next = await decide(selected.id, kind);
       setItems(next);
@@ -132,11 +197,24 @@ export function ProcurementsApp({
         setNotice("Закупка скрыта и больше не будет предлагаться.");
         const remaining = next[0];
         await navigate(remaining === undefined ? "/procurements" : `/procurements/${remaining.id}`);
+      } else if (kind === "participate") {
+        const current = next.find((item) => item.id === selected.id);
+        const hashed = current?.documents.filter((item) => item.status === "hashed").length ?? 0;
+        const failed = current?.documents.filter((item) => item.status === "download_failed").length ?? 0;
+        const read = current?.documents.filter((item) => specialistDocumentWasRead(item)).length ?? 0;
+        setNotice(
+          failed > 0
+            ? `Участвуем. Прочитано агентом: ${String(read)}, скачано: ${String(hashed)}, не скачалось: ${String(failed)}.`
+            : `Участвуем. Прочитано агентом: ${String(read)} из ${String(hashed)}.`,
+        );
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Не удалось сохранить решение.");
     } finally {
+      if (timer !== undefined) window.clearInterval(timer);
+      setProgress(undefined);
       setBusy(false);
+      setBusyKind(undefined);
     }
   }
 
@@ -174,7 +252,7 @@ export function ProcurementsApp({
                   void runSearch();
                 }}
               >
-                {busy ? "Ищем…" : "Искать по профилю"}
+                {busy && busyKind === undefined ? "Ищем…" : "Искать по профилю"}
               </button>
             </div>
           </div>
@@ -291,7 +369,11 @@ export function ProcurementsApp({
                       void runDecide("participate");
                     }}
                   >
-                    Участвовать
+                    {busyKind === "participate"
+                      ? (progress === undefined
+                        ? "Скачиваем документы…"
+                        : ingestProgressCaption(progress))
+                      : "Участвовать"}
                   </button>
                   <button
                     type="button"
@@ -316,32 +398,76 @@ export function ProcurementsApp({
                   </ul>
                 </>
               )}
-              {selected.documents.length === 0 ? null : (
+              {progress === undefined ? null : (
+                <div className="ingest-progress" aria-live="polite">
+                  <div className="ingest-progress-label">{ingestProgressCaption(progress)}</div>
+                  <div
+                    className="ingest-progress-bar"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={progress.percent}
+                  >
+                    <span style={{ width: `${String(progress.percent)}%` }} />
+                  </div>
+                </div>
+              )}
+              {progress !== undefined && progress.files.length > 0 ? (
                 <>
                   <h3>Документы</h3>
                   <ul className="doc-list">
-                    {selected.documents.map((document) => (
-                      <li key={document.sourceUrl}>
-                        <a href={documentHref(document)} target="_blank" rel="noreferrer">
-                          {document.name}
-                        </a>
-                        <span>{documentStatusLabel(document)}</span>
+                    {progress.files.map((file) => (
+                      <li key={file.sourceUrl}>
+                        <span>{file.name}</span>
+                        <span className={file.state === "read" ? "doc-read-mark" : undefined}>
+                          {ingestFileProgressLabel(file)}
+                        </span>
                       </li>
                     ))}
                   </ul>
                 </>
-              )}
-              {selected.termsDetail === undefined ? null : (
-                <>
-                  <h3>Коммерческие условия</h3>
-                  <pre className="change-body">{selected.termsDetail}</pre>
-                </>
-              )}
-              {selected.paymentQuote === undefined ? null : (
-                <>
-                  <h3>Оплата на площадке</h3>
-                  <pre className="change-body">{selected.paymentQuote}</pre>
-                </>
+              ) : selected.documents.length === 0 && !showCommercial ? null : (
+                <div className="case-columns">
+                  {selected.documents.length === 0 ? null : (
+                    <div>
+                      <h3>Документы</h3>
+                      <ul className="doc-list">
+                        {selected.documents.map((document) => (
+                          <li key={document.sourceUrl}>
+                            {documentOpensInline(document) ? (
+                              <a href={documentHref(document)} target="_blank" rel="noreferrer">
+                                {document.name}
+                              </a>
+                            ) : (
+                              <a href={documentHref(document)} download={document.name}>
+                                {document.name}
+                              </a>
+                            )}
+                            {specialistDocumentWasRead(document) ? (
+                              <span className="doc-read-mark">прочитано агентом</span>
+                            ) : null}
+                            <span>{documentStatusLabel(document)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {showCommercial ? (
+                    <div>
+                      <h3>Коммерческие условия</h3>
+                      <pre className="change-body">
+                        {selected.termsDetail ??
+                          "В разобранном тексте нет аванса, срока в днях и гарантии. Смотрите цитаты в тексте документа."}
+                      </pre>
+                      {selected.paymentQuote === undefined ? null : (
+                        <>
+                          <h3>Оплата на площадке</h3>
+                          <pre className="change-body">{selected.paymentQuote}</pre>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               )}
               {selected.missing.length === 0 ? null : (
                 <>

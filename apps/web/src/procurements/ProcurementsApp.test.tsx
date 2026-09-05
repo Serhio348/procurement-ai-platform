@@ -1,11 +1,21 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
+import {
+  SpecialistIngestProgress,
+  SpecialistProcurementCard,
+  SpecialistWorkingProfile,
+} from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import fixture from "../../../../tests/fixtures/specialist/inbox.json";
-import { documentHref, documentStatusLabel, ProcurementsApp } from "./ProcurementsApp.js";
+import {
+  documentHref,
+  documentStatusLabel,
+  ingestFileProgressLabel,
+  ingestProgressCaption,
+  ProcurementsApp,
+} from "./ProcurementsApp.js";
 
 afterEach(() => {
   cleanup();
@@ -32,6 +42,51 @@ describe("ProcurementsApp", () => {
       },
     });
     expect(label).toContain("не распознавали");
+  });
+
+  it("does not glue sha256 onto a hashed filename", () => {
+    const label = documentStatusLabel({
+      name: "zapros-filtra.doc",
+      sourceUrl: "https://goszakupki.by/files/1",
+      hash: "c".repeat(64),
+      sizeBytes: 75_264,
+      status: "hashed",
+    });
+    expect(label).toBe("· 75264 байт");
+    expect(label).not.toContain("sha256");
+  });
+
+  it("names indexing percent and a finished file as read by the agent", () => {
+    expect(
+      ingestFileProgressLabel({
+        name: "договор.doc",
+        sourceUrl: "https://example.test/files/1",
+        state: "indexing",
+        percent: 0,
+      }),
+    ).toBe("индексация 20%");
+    expect(
+      ingestProgressCaption(
+        SpecialistIngestProgress.parse({
+          procurementId: "00000000-0000-4000-8000-000000000401",
+          phase: "indexing",
+          total: 1,
+          downloaded: 1,
+          indexed: 0,
+          readCount: 0,
+          percent: 20,
+          currentName: "договор.doc",
+          files: [
+            {
+              name: "договор.doc",
+              sourceUrl: "https://example.test/files/1",
+              state: "indexing",
+              percent: 0,
+            },
+          ],
+        }),
+      ),
+    ).toBe("Индексация «договор.doc» — 20%");
   });
 
   it("opens the household case from the list without treating it as an urgent inbox row", async () => {
@@ -106,8 +161,66 @@ describe("ProcurementsApp", () => {
     expect(screen.getByText(/Срок поставки: 60 дн/)).toBeTruthy();
     expect(screen.getByText(/Гарантия: 60 мес/)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Текст документов" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Текст документа" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Отчёт" })).toBeNull();
     expect(screen.queryByText(/Г лавный инженер/)).toBeNull();
+  });
+
+  it("hands a Word file to the editor and keeps commercial notes on the card", () => {
+    const items = [
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000401",
+        title: "Комплект фильтров",
+        status: "unknown",
+        statusLabel: "Подача предложений",
+        url: "https://example.test/marketing/1",
+        sourceProcurementId: "marketing/1",
+        triage: "participate",
+        termsDetail: "Оплата: по факту поставки.\nсрок поставки: сентябрь 2026г.",
+        documents: [
+          {
+            name: "zapros-filtra.doc",
+            sourceUrl: "https://example.test/files/1",
+            hash: "a".repeat(64),
+            sizeBytes: 75_264,
+            status: "hashed",
+            extraction: {
+              status: "extracted",
+              kind: "office_text",
+              pageCount: 1,
+              letterCount: 80,
+              confidence: 0.86,
+              ocrApplied: false,
+              textPreview: "срок поставки: сентябрь 2026г.",
+              pages: [
+                {
+                  page: 1,
+                  text: "Заявка. срок поставки: сентябрь 2026г.; условия оплаты: по факту поставки;",
+                  ocrApplied: false,
+                  confidence: 0.86,
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ];
+
+    render(
+      <MemoryRouter initialEntries={[`/procurements/${items[0]!.id}`]}>
+        <Routes>
+          <Route path="/procurements/:id" element={<ProcurementsApp items={items} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", { name: "zapros-filtra.doc" });
+    expect(link.getAttribute("href")).toBe(`/api/documents/${"a".repeat(64)}`);
+    expect(link.getAttribute("download")).toBe("zapros-filtra.doc");
+    expect(screen.queryByRole("heading", { name: "Текст документа" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 3, name: "Коммерческие условия" })).toBeTruthy();
+    expect(screen.getByText(/Оплата: по факту поставки/)).toBeTruthy();
+    expect(screen.getByText(/сентябрь 2026/)).toBeTruthy();
   });
 
   it("adds profile matches from search without a keyword text field", async () => {
@@ -241,7 +354,27 @@ describe("ProcurementsApp", () => {
               <ProcurementsApp
                 items={[found]}
                 decide={async (_id, kind) =>
-                  kind === "reject" ? [] : [{ ...found, triage: kind }]
+                  kind === "reject"
+                    ? []
+                    : [
+                        {
+                          ...found,
+                          triage: kind,
+                          ...(kind === "participate"
+                            ? {
+                                documents: [
+                                  {
+                                    name: "ТЗ.pdf",
+                                    sourceUrl: "https://example.test/files/tz.pdf",
+                                    hash: "a".repeat(64),
+                                    sizeBytes: 12,
+                                    status: "hashed" as const,
+                                  },
+                                ],
+                              }
+                            : {}),
+                        },
+                      ]
                 }
               />
             }
@@ -252,7 +385,27 @@ describe("ProcurementsApp", () => {
               <ProcurementsApp
                 items={[found]}
                 decide={async (_id, kind) =>
-                  kind === "reject" ? [] : [{ ...found, triage: kind }]
+                  kind === "reject"
+                    ? []
+                    : [
+                        {
+                          ...found,
+                          triage: kind,
+                          ...(kind === "participate"
+                            ? {
+                                documents: [
+                                  {
+                                    name: "ТЗ.pdf",
+                                    sourceUrl: "https://example.test/files/tz.pdf",
+                                    hash: "a".repeat(64),
+                                    sizeBytes: 12,
+                                    status: "hashed" as const,
+                                  },
+                                ],
+                              }
+                            : {}),
+                        },
+                      ]
                 }
               />
             }
@@ -280,8 +433,98 @@ describe("ProcurementsApp", () => {
     expect(
       screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ }).className,
     ).toContain("is-triage-participate");
+    expect(screen.getByText(/Прочитано агентом: 0 из 1/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "ТЗ.pdf" }).getAttribute("href")).toBe(
+      `/api/documents/${"a".repeat(64)}`,
+    );
     await user.click(screen.getByRole("button", { name: "Не нужно" }));
     expect(screen.getByText("Закупка скрыта и больше не будет предлагаться.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();
+  });
+
+  it("shows file indexing percent then a read mark after the agent finishes", async () => {
+    const user = userEvent.setup();
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Комплект фильтров",
+      status: "unknown",
+      statusLabel: "Подача предложений",
+      url: "https://example.test/marketing/1",
+      sourceProcurementId: "marketing/1",
+    });
+    let finish: ((items: SpecialistProcurementCard[]) => void) | undefined;
+    const decide = (): Promise<SpecialistProcurementCard[]> =>
+      new Promise((resolve) => {
+        finish = resolve;
+      });
+
+    render(
+      <MemoryRouter initialEntries={[`/procurements/${found.id}`]}>
+        <Routes>
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp
+                items={[found]}
+                decide={decide}
+                ingestProgress={async () =>
+                  SpecialistIngestProgress.parse({
+                    procurementId: found.id,
+                    phase: "indexing",
+                    total: 1,
+                    downloaded: 1,
+                    indexed: 0,
+                    readCount: 0,
+                    percent: 20,
+                    currentName: "договор.doc",
+                    files: [
+                      {
+                        name: "договор.doc",
+                        sourceUrl: "https://example.test/files/1",
+                        state: "indexing",
+                        percent: 0,
+                      },
+                    ],
+                  })
+                }
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Участвовать" }));
+    expect(await screen.findByRole("progressbar")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("20");
+    expect(screen.getAllByText(/Индексация «договор.doc» — 20%/).length).toBeGreaterThan(0);
+    finish?.([
+      {
+        ...found,
+        triage: "participate",
+        documents: [
+          {
+            name: "договор.doc",
+            sourceUrl: "https://example.test/files/1",
+            hash: "a".repeat(64),
+            sizeBytes: 64_512,
+            status: "hashed",
+            extraction: {
+              status: "extracted",
+              kind: "office_text",
+              pageCount: 1,
+              letterCount: 40,
+              confidence: 0.86,
+              ocrApplied: false,
+              textPreview: "аванс",
+              pages: [],
+              notes: [],
+            },
+          },
+        ],
+      },
+    ]);
+    expect(await screen.findByText("прочитано агентом")).toBeTruthy();
+    expect(screen.getByText(/Прочитано агентом: 1 из 1/)).toBeTruthy();
   });
 });

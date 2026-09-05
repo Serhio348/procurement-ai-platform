@@ -27,7 +27,8 @@ export function toSpecialistExtraction(
   const assessed = assessDocumentPages(extracted.pages, extracted.ocrApplied);
   const office = officeFormatLabel(format);
   const kind =
-    (format === "docx" || format === "xlsx" || format === "pptx") && assessed.kind === "digital_text"
+    (format === "docx" || format === "xlsx" || format === "pptx" || format === "doc") &&
+    assessed.kind === "digital_text"
       ? "office_text"
       : assessed.kind;
   const notes =

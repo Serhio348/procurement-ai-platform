@@ -28,6 +28,7 @@ export const McpToolName = z.enum([
   "procurement.get_history",
   "procurement.get_documents",
   "procurement.get_changes",
+  "procurement.download",
 
   "documents.list",
   "documents.download",

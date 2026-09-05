@@ -122,7 +122,14 @@ export function formatNeedsRasterScan(format: DocumentFileFormat): boolean {
 }
 
 export function formatHasNativeText(format: DocumentFileFormat): boolean {
-  return format === "pdf" || format === "docx" || format === "xlsx" || format === "pptx" || format === "rtf";
+  return (
+    format === "pdf" ||
+    format === "docx" ||
+    format === "xlsx" ||
+    format === "pptx" ||
+    format === "doc" ||
+    format === "rtf"
+  );
 }
 
 export function officeFormatLabel(format: DocumentFileFormat): string | undefined {

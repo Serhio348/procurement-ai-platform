@@ -8,9 +8,12 @@ export function defaultBlobDirectory(): string {
   return fileURLToPath(new URL("../../../data/blobs/", import.meta.url));
 }
 
+/** Relative env paths are from the repo root, not `apps/api` cwd. */
 export function resolveBlobDirectory(fromEnv: string | undefined): string {
   if (fromEnv === undefined || fromEnv.length === 0) return defaultBlobDirectory();
-  return path.isAbsolute(fromEnv) ? fromEnv : path.resolve(fromEnv);
+  if (path.isAbsolute(fromEnv)) return fromEnv;
+  const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  return path.resolve(repoRoot, fromEnv);
 }
 
 export function isSha256Hex(value: string): boolean {
@@ -38,10 +41,15 @@ export function safeDownloadName(name: string): string {
   return base.length > 0 ? base : "document.bin";
 }
 
+export function opensInlineInBrowser(name: string): boolean {
+  return name.toLowerCase().endsWith(".pdf");
+}
+
 export function contentDisposition(name: string): string {
   const filename = safeDownloadName(name);
   const ascii = filename.replace(/[^\u0020-\u007E]/g, "_");
-  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  const mode = opensInlineInBrowser(name) ? "inline" : "attachment";
+  return `${mode}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 export function contentTypeForName(name: string): string {
@@ -53,5 +61,6 @@ export function contentTypeForName(name: string): string {
   if (lower.endsWith(".xlsx")) {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
+  if (lower.endsWith(".doc")) return "application/msword";
   return "application/octet-stream";
 }

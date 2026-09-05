@@ -12,4 +12,5 @@ export * from "./pdf-layout.js";
 export * from "./pdfjs-extractor.js";
 export * from "./server.js";
 export * from "./specialist-extraction.js";
+export * from "./recognize-specialist-document.js";
 export * from "./tesseract-ocr.js";

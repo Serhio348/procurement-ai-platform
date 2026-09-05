@@ -6,6 +6,7 @@ import {
   decideProcurement,
   deleteProfile,
   fetchInbox,
+  fetchIngestProgress,
   fetchProcurements,
   fetchProfiles,
   saveProfile,
@@ -42,6 +43,7 @@ try {
         saveProfile={saveProfile}
         setProfileWatch={setProfileWatch}
         decide={decideProcurement}
+        ingestProgress={fetchIngestProgress}
       />
     </StrictMode>,
   );

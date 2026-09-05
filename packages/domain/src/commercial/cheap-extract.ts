@@ -49,7 +49,22 @@ export function cheapExtractCommercialClaims(page: {
       );
     }
   }
-  return [...claims, ...extractZeroAdvance(page)];
+  return [...claims, ...extractZeroAdvance(page), ...extractOnDelivery(page)];
+}
+
+const commercialNoteSource =
+  "(?:срок поставки|условия оплаты|условия доставки|место поставки)\\s*:\\s*[^\\n;]{3,160}";
+
+/** Labeled lines from TZ/request text. The match is the quote; no numbers invented. */
+export function cheapExtractCommercialNotes(page: { text: string }): string[] {
+  const regex = new RegExp(commercialNoteSource, "giu");
+  const notes: string[] = [];
+  for (const match of page.text.matchAll(regex)) {
+    const quote = match[0]?.trim().replace(/\s+/g, " ");
+    if (quote === undefined || quote.length === 0 || notes.includes(quote)) continue;
+    notes.push(quote);
+  }
+  return notes;
 }
 
 const zeroAdvanceSource =
@@ -71,6 +86,33 @@ function extractZeroAdvance(page: {
         value: 0,
         unit: "%",
         confidence: 0.92,
+        hash: page.hash,
+        page: page.page,
+        quote,
+      }),
+    );
+  }
+  return claims;
+}
+
+const onDeliverySource =
+  "по\\s+факту\\s+поставк\\p{L}*|оплат\\p{L}*\\s+после\\s+поставк\\p{L}*";
+
+function extractOnDelivery(page: {
+  hash: string;
+  page: number;
+  text: string;
+}): CommercialClaimValue[] {
+  const regex = new RegExp(onDeliverySource, "giu");
+  const claims: CommercialClaimValue[] = [];
+  for (const match of page.text.matchAll(regex)) {
+    const quote = match[0]?.trim();
+    if (quote === undefined || quote.length === 0) continue;
+    claims.push(
+      CommercialClaim.parse({
+        key: "commercial.payment_kind",
+        value: "on_delivery",
+        confidence: 0.9,
         hash: page.hash,
         page: page.page,
         quote,

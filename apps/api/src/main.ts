@@ -8,6 +8,8 @@ import { resolveBlobDirectory } from "./blobs.js";
 import { loadDotEnv } from "./load-env.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
 import { connectProcurementMcp } from "./procurement-mcp.js";
+import { createProcurementDocumentIngest } from "./document-ingest.js";
+import { createIngestProgressHub } from "./ingest-progress.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
 import { loadWorkspaceFile, saveWorkspaceFile } from "./workspace-file.js";
 
@@ -21,10 +23,13 @@ async function main(): Promise<void> {
   const mode = process.env["PROCUREMENT_SOURCE_MODE"] === "live" ? "live" : "fixture";
   const catalog = mode === "live" ? new SpecialistCatalog() : await loadFixtureCatalog();
   const blobDirectory = resolveBlobDirectory(process.env["DOCUMENT_BLOB_DIR"]);
+  const ingestProgress = createIngestProgressHub();
   const workspacePath = path.join(repoRoot, "data", "specialist-workspace.json");
   const workspace = await loadWorkspaceFile(workspacePath);
   const mcp =
-    mode === "live" ? await connectProcurementMcp({ mode: "live", logger }) : undefined;
+    mode === "live"
+      ? await connectProcurementMcp({ mode: "live", logger, blobDirectory })
+      : undefined;
   const searchHits =
     mcp === undefined
       ? undefined
@@ -41,7 +46,18 @@ async function main(): Promise<void> {
     persistWorkspace: async () => {
       await saveWorkspaceFile(workspacePath, workspace);
     },
+    ingestProgress,
     ...(searchHits === undefined ? {} : { searchHits }),
+    ...(mcp === undefined
+      ? {}
+      : {
+          documentIngest: createProcurementDocumentIngest({
+            caller: mcp.caller,
+            blobDirectory,
+            logger,
+            progress: ingestProgress,
+          }),
+        }),
     ...(mode === "live" ? { liveProcurementsOnly: true } : {}),
   });
   const port = Number.parseInt(process.env["API_PORT"] ?? "3001", 10);

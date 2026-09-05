@@ -1,4 +1,6 @@
 import {
+  ProcurementDownloadRequest,
+  ProcurementDownloadResponse,
   ProcurementGetChangesRequest,
   ProcurementGetChangesResponse,
   ProcurementGetDocumentsResponse,
@@ -10,6 +12,8 @@ import {
   ProcurementSearchRequest,
   ProcurementSearchResponse,
   type RequestId,
+  type ProcurementDownloadRequest as ProcurementDownloadRequestValue,
+  type ProcurementDownloadResponse as ProcurementDownloadResponseValue,
   type ProcurementGetChangesRequest as ProcurementGetChangesRequestValue,
   type ProcurementGetChangesResponse as ProcurementGetChangesResponseValue,
   type ProcurementGetDocumentsResponse as ProcurementGetDocumentsResponseValue,
@@ -137,6 +141,19 @@ export class ProcurementMcpClient {
     );
   }
 
+  download(
+    input: ProcurementDownloadRequestValue,
+    requestId: RequestId,
+  ): Promise<ProcurementDownloadResponseValue> {
+    return this.#call(
+      "procurement.download",
+      input,
+      ProcurementDownloadRequest,
+      ProcurementDownloadResponse,
+      requestId,
+    );
+  }
+
   #call<Input extends Record<string, unknown>, Output>(
     toolName:
       | "procurement.search"
@@ -145,7 +162,8 @@ export class ProcurementMcpClient {
       | "procurement.get_lots"
       | "procurement.get_documents"
       | "procurement.get_history"
-      | "procurement.get_changes",
+      | "procurement.get_changes"
+      | "procurement.download",
     input: Input,
     inputSchema: Parameters<typeof callValidatedTool<Input, Output>>[0]["inputSchema"],
     outputSchema: Parameters<typeof callValidatedTool<Input, Output>>[0]["outputSchema"],

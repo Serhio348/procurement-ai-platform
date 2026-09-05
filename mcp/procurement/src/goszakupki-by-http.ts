@@ -16,6 +16,7 @@ export interface GoszakupkiDownloadResponse {
 
 export interface GoszakupkiPageClient {
   get(path: string): Promise<GoszakupkiPageResponse>;
+  download?(path: string): Promise<GoszakupkiDownloadResponse>;
 }
 
 export interface GoszakupkiHttpClientOptions {

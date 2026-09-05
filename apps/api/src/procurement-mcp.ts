@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -30,6 +31,12 @@ export async function connectProcurementMcp(options: {
   env["PROCUREMENT_SOURCE_MODE"] = options.mode;
   if (options.blobDirectory !== undefined) {
     env["DOCUMENT_BLOB_DIR"] = options.blobDirectory;
+  }
+  // Node's fetch ignores tls.setDefaultCACertificates; the child must see
+  // NODE_EXTRA_CA_CERTS at process start or goszakupki.by fails TLS.
+  const systemCa = "/etc/ssl/certs/ca-certificates.crt";
+  if ((env["NODE_EXTRA_CA_CERTS"] ?? "").trim().length === 0 && existsSync(systemCa)) {
+    env["NODE_EXTRA_CA_CERTS"] = systemCa;
   }
 
   const transport = new StdioClientTransport({

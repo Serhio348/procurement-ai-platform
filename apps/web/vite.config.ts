@@ -15,6 +15,7 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    allowedHosts: [".trycloudflare.com", ".ngrok-free.app", ".ngrok.io"],
     proxy: {
       "/api": {
         target: "http://127.0.0.1:3001",

@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import * as tls from "node:tls";
+import { Agent, fetch as undiciFetch } from "undici";
 import { SourceAccessError } from "./source-registry.js";
 
 export interface GoszakupkiPageResponse {
@@ -70,7 +72,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
       options.userAgent ?? "ProcurementAIPlatform/0.1 (read-only procurement adapter)";
     this.#circuitFailureThreshold = options.circuitFailureThreshold ?? 3;
     this.#circuitResetMs = options.circuitResetMs ?? 30_000;
-    this.#fetch = options.fetchImplementation ?? fetch;
+    this.#fetch = options.fetchImplementation ?? createDefaultFetch();
     this.#now = options.now ?? Date.now;
     this.#sleep =
       options.sleep ??
@@ -328,6 +330,37 @@ export function configureSystemCa(): void {
     ]);
   }
   systemCaConfigured = true;
+}
+
+const linuxCaBundle = "/etc/ssl/certs/ca-certificates.crt";
+
+function loadCaBundles(): Array<string | Buffer> {
+  const bundles: Array<string | Buffer> = [];
+  if (Array.isArray(tls.rootCertificates)) bundles.push(...tls.rootCertificates);
+  const extra = process.env["NODE_EXTRA_CA_CERTS"]?.trim();
+  for (const file of [extra, linuxCaBundle]) {
+    if (file === undefined || file.length === 0) continue;
+    try {
+      bundles.push(readFileSync(file));
+    } catch {
+      // Optional system bundle; Windows has no this path.
+    }
+  }
+  return bundles;
+}
+
+/** Undici fetch does not honor tls.setDefaultCACertificates. */
+function createDefaultFetch(): typeof fetch {
+  const insecure = process.env["GOSZAKUPKI_TLS_INSECURE"] === "1";
+  const ca = loadCaBundles();
+  const agent = new Agent({
+    connect: {
+      rejectUnauthorized: !insecure,
+      ...(ca.length > 0 ? { ca } : {}),
+    },
+  });
+  return ((input, init) =>
+    undiciFetch(input as never, { ...(init ?? {}), dispatcher: agent })) as typeof fetch;
 }
 
 function looksLikeChallenge(body: string): boolean {

@@ -132,7 +132,7 @@ export const SpecialistSearchRequest = z.object({
 export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
 
 export const SpecialistSearchResponse = z.object({
-  profileName: z.string().min(1),
+  profileName: z.string().min(1).default("Без названия"),
   relevantCount: z.number().int().nonnegative(),
   discardedCount: z.number().int().nonnegative(),
   items: z.array(SpecialistProcurementCard),
@@ -148,10 +148,16 @@ export type SpecialistTriageDecision = z.infer<typeof SpecialistTriageDecision>;
 
 /**
  * Console working copy of a Domain Profile. Watch is off until the specialist
- * presses the dedicated button; saving keywords must not start discovery.
+ * presses the dedicated button; saving looking-for text must not start discovery.
+ * `keywords` are the platform queries: collected from `description` when empty,
+ * otherwise the specialist's edited list.
  */
 export const SpecialistWorkingProfile = z.object({
-  name: z.string().min(1).max(200),
+  id: z.string().uuid().default(() => crypto.randomUUID()),
+  name: z.string().max(200).default(""),
+  purpose: z.string().max(4000).default(""),
+  description: z.string().max(4000).default(""),
+  instructions: z.string().max(8000).default(""),
   keywords: z.array(z.string().min(1)).max(50).default([]),
   excludeKeywords: z.array(z.string().min(1)).max(50).default([]),
   watchNewProcurements: z.boolean().default(false),
@@ -159,9 +165,16 @@ export const SpecialistWorkingProfile = z.object({
 export type SpecialistWorkingProfile = z.infer<typeof SpecialistWorkingProfile>;
 
 export const SpecialistProfileWrite = SpecialistWorkingProfile.omit({
+  id: true,
   watchNewProcurements: true,
 });
 export type SpecialistProfileWrite = z.infer<typeof SpecialistProfileWrite>;
+
+export const SpecialistProfileListResponse = z.object({
+  items: z.array(SpecialistWorkingProfile),
+  activeProfileId: z.string().uuid(),
+});
+export type SpecialistProfileListResponse = z.infer<typeof SpecialistProfileListResponse>;
 
 export const SpecialistWatchWrite = z.object({
   watchNewProcurements: z.boolean(),
@@ -174,7 +187,8 @@ export const SpecialistDecisionWrite = z.object({
 export type SpecialistDecisionWrite = z.infer<typeof SpecialistDecisionWrite>;
 
 export const SpecialistWorkspaceState = z.object({
-  profile: SpecialistWorkingProfile,
+  profiles: z.array(SpecialistWorkingProfile).min(1),
+  activeProfileId: z.string().uuid(),
   decisions: z.array(SpecialistTriageDecision).default([]),
 });
 export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;

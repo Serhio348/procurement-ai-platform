@@ -285,13 +285,28 @@ function amountLabel(card: ProcedureCard): string | undefined {
   return undefined;
 }
 
+/**
+ * Stable UUID from an arbitrary seed. The whole seed must participate:
+ * encoding only the first 16 characters made every `goszakupki_by:…` card
+ * share one id, so fifteen hits collapsed to a handful of rows.
+ */
 export function uuidFromHex(seed: string): string {
-  const hex = [...seed]
-    .map((char) => char.charCodeAt(0).toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 32)
-    .padEnd(32, "0");
+  const hex = fnvHex(seed);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function fnvHex(seed: string): string {
+  const parts: string[] = [];
+  let hash = 2166136261;
+  for (let round = 0; round < 4; round += 1) {
+    hash ^= round * 0x9e3779b9;
+    for (let index = 0; index < seed.length; index += 1) {
+      hash ^= seed.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    parts.push((hash >>> 0).toString(16).padStart(8, "0"));
+  }
+  return parts.join("");
 }
 
 export function statusLabel(status: ProcedureStatus): string {

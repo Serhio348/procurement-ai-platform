@@ -1,6 +1,7 @@
 import {
   SpecialistInboxListResponse,
   SpecialistProcurementListResponse,
+  SpecialistProfileListResponse,
   SpecialistSearchResponse,
   SpecialistWorkingProfile,
   type SpecialistInboxEntry,
@@ -8,6 +9,7 @@ import {
   type SpecialistProfileWrite,
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
   type SpecialistTriageKind,
+  type SpecialistProfileListResponse as SpecialistProfileListResponseValue,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
 } from "@procurement/contracts";
 
@@ -49,6 +51,52 @@ export async function fetchProfile(
   const response = await fetcher("/api/profile");
   if (!response.ok) {
     throw new Error("Не удалось загрузить профиль");
+  }
+  return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function fetchProfiles(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistProfileListResponseValue> {
+  const response = await fetcher("/api/profiles");
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить профили");
+  }
+  return SpecialistProfileListResponse.parse(await response.json());
+}
+
+export async function createProfile(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistWorkingProfileValue> {
+  const response = await fetcher("/api/profiles", { method: "POST" });
+  if (!response.ok) {
+    throw new Error("Не удалось создать профиль");
+  }
+  return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function deleteProfile(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistProfileListResponseValue> {
+  const response = await fetcher(`/api/profiles/${id}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(
+      response.status === 409
+        ? "Нельзя удалить единственный профиль"
+        : "Не удалось удалить профиль",
+    );
+  }
+  return SpecialistProfileListResponse.parse(await response.json());
+}
+
+export async function activateProfile(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistWorkingProfileValue> {
+  const response = await fetcher(`/api/profiles/${id}/activate`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error("Не удалось выбрать профиль");
   }
   return SpecialistWorkingProfile.parse(await response.json());
 }
@@ -107,6 +155,9 @@ export async function searchFailureMessage(response: Response): Promise<string> 
     }
     if (body.error === "search_timeout") {
       return "Поиск на площадке занял слишком много времени.";
+    }
+    if (body.error === "no_keywords") {
+      return "В профиле нет слов для поиска. Заполните «Что ищем».";
     }
   } catch {
     return "Не удалось выполнить поиск по профилю.";

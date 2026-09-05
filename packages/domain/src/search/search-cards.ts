@@ -24,11 +24,19 @@ export function selectRelevantSearchCards(
   profile: CheapClassifyProfile,
   limit: number,
 ): ProfileSearchSelection {
-  const listed = hits
+  const uniqueHits: SearchHitValue[] = [];
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    const key = `${hit.sourceId}:${hit.sourceProcurementId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueHits.push(hit);
+  }
+  const listed = uniqueHits
     .filter((hit) => hitMatchesProfileKeywords(hit, profile.keywords))
     .slice(0, limit);
   const cards: SpecialistProcurementCardValue[] = [];
-  let discardedCount = hits.length - listed.length;
+  let discardedCount = uniqueHits.length - listed.length;
   for (const hit of listed) {
     const classified = cheapClassifyHit(
       {

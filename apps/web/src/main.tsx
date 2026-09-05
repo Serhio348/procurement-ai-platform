@@ -1,10 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  activateProfile,
+  createProfile,
   decideProcurement,
+  deleteProfile,
   fetchInbox,
   fetchProcurements,
-  fetchProfile,
+  fetchProfiles,
   saveProfile,
   searchProcurements,
   setProfileWatch,
@@ -20,18 +23,22 @@ if (root === null) {
 const mount = createRoot(root);
 
 try {
-  const [inbox, procurements, profile] = await Promise.all([
+  const [inbox, procurements, listed] = await Promise.all([
     fetchInbox(),
     fetchProcurements(),
-    fetchProfile(),
+    fetchProfiles(),
   ]);
   mount.render(
     <StrictMode>
       <SpecialistApp
         inbox={inbox}
         procurements={procurements}
-        profile={profile}
+        profiles={listed.items}
+        activeProfileId={listed.activeProfileId}
         search={searchProcurements}
+        createProfile={createProfile}
+        deleteProfile={deleteProfile}
+        activateProfile={activateProfile}
         saveProfile={saveProfile}
         setProfileWatch={setProfileWatch}
         decide={decideProcurement}

@@ -1,4 +1,4 @@
-import { SearchHit } from "@procurement/contracts";
+import { SearchHit, electricalEquipmentSeedV1 } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import {
   isRejectedTriage,
@@ -17,6 +17,36 @@ function hit(sourceProcurementId: string, title: string): SearchHit {
 }
 
 describe("specialist triage", () => {
+  it("starts with an empty working profile and can keep a second direction", () => {
+    const workspace = new SpecialistWorkspace();
+    expect(workspace.profile().name).toBe("");
+    expect(workspace.profile().description).toBe("");
+    expect(workspace.profile().keywords).toEqual([]);
+    expect(workspace.profile().instructions).toBe("");
+    const second = workspace.addProfile();
+    expect(workspace.profiles()).toHaveLength(2);
+    expect(workspace.profile().id).toBe(second.id);
+    expect(second.keywords).toEqual([]);
+    const remaining = workspace.removeProfile(second.id);
+    expect(workspace.profiles()).toHaveLength(1);
+    expect(remaining.id).toBe(workspace.profiles()[0]?.id);
+    expect(() => workspace.removeProfile(remaining.id)).toThrow("last_profile");
+  });
+
+  it("clears the stock electrical seed so the form starts empty", () => {
+    const workspace = SpecialistWorkspace.parse({
+      profile: {
+        name: electricalEquipmentSeedV1.name,
+        description: electricalEquipmentSeedV1.description,
+        keywords: electricalEquipmentSeedV1.keywords,
+      },
+    });
+    expect(workspace.profile().name).toBe("");
+    expect(workspace.profile().description).toBe("");
+    expect(workspace.profile().keywords).toEqual([]);
+    expect(workspace.profile().instructions).toBe("");
+  });
+
   it("does not start discovery until the specialist turns watch on", () => {
     const workspace = new SpecialistWorkspace();
     expect(workspace.profile().watchNewProcurements).toBe(false);
@@ -25,15 +55,19 @@ describe("specialist triage", () => {
     expect(shouldRunDiscovery(workspace.profile().watchNewProcurements)).toBe(true);
   });
 
-  it("saving keywords does not silently enable watch", () => {
+  it("saving looking-for text does not silently enable watch", () => {
     const workspace = new SpecialistWorkspace();
     workspace.replaceProfile({
       name: "Щиты",
-      keywords: ["НКУ"],
-      excludeKeywords: [],
+      purpose: "ignored purpose",
+      description: "НКУ, щиты",
+      instructions: "Бытовые щитки не брать.",
+      keywords: ["НКУ", "щиты", "ВРУ"],
     });
     expect(workspace.profile().watchNewProcurements).toBe(false);
-    expect(workspace.profile().keywords).toEqual(["НКУ"]);
+    expect(workspace.profile().excludeKeywords).toEqual([]);
+    expect(workspace.profile().keywords).toEqual(["НКУ", "щиты", "ВРУ"]);
+    expect(workspace.profile().purpose).toBe("ignored purpose");
   });
 
   it("does not re-offer a rejected or already judged source id on the next discovery", () => {

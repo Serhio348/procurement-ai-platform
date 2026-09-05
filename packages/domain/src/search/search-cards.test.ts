@@ -45,6 +45,36 @@ describe("selectRelevantSearchCards", () => {
     expect(selected.cards[0]?.live).toBe(false);
   });
 
+  it("gives each goszakupki.by procedure its own card id", () => {
+    const selected = selectRelevantSearchCards(
+      [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "marketing/3541093",
+          url: "https://goszakupki.by/marketing/view/3541093",
+          title: "Системы очистки воды картриджи",
+        }),
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "request/3552348",
+          url: "https://goszakupki.by/request/view/3552348",
+          title: "Системы очистки воды осмос",
+        }),
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "single-source/3481185",
+          url: "https://goszakupki.by/single-source/view/3481185",
+          title: "Системы очистки воды обслуживание",
+        }),
+      ],
+      { keywords: ["Системы очистки воды"], excludeKeywords: [] },
+      20,
+    );
+    const ids = new Set(selected.cards.map((card) => card.id));
+    expect(selected.cards).toHaveLength(3);
+    expect(ids.size).toBe(3);
+  });
+
   it("marks goszakupki.by hits as live cases", () => {
     const selected = selectRelevantSearchCards(
       [

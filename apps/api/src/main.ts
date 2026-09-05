@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   logger.info("Specialist API listening", {
     port,
     searchMode: mode,
-    watchNewProcurements: workspace.profile().watchNewProcurements,
+    watchingCount: workspace.profiles().filter((item) => item.watchNewProcurements).length,
   });
 
   const intervalMs = Number.parseInt(process.env["SPECIALIST_DISCOVERY_INTERVAL_MS"] ?? "600000", 10);

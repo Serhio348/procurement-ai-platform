@@ -5,7 +5,9 @@ import type {
   SpecialistProcurementCard,
   SpecialistSearchResponse,
   SpecialistTriageKind,
+  SpecialistWorkingProfile,
 } from "@procurement/contracts";
+import { profileDisplayName } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
@@ -51,18 +53,45 @@ export function triageLabel(kind: SpecialistTriageKind): string {
   }
 }
 
+export function procurementRowClass(
+  selected: boolean,
+  triage: SpecialistTriageKind | undefined,
+): string {
+  return [
+    "inbox-row",
+    selected ? "is-selected" : undefined,
+    triage === undefined ? undefined : `is-triage-${triage}`,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
+}
+
+export function triageActionClass(
+  kind: SpecialistTriageKind,
+  current: SpecialistTriageKind | undefined,
+): string {
+  return current === kind ? `search-profile is-pressed is-pressed-${kind}` : "search-profile";
+}
+
 export function ProcurementsApp({
   items: catalog,
+  profiles = [],
+  activeProfileId,
   search,
+  selectProfile,
   decide,
 }: {
   items: readonly SpecialistProcurementCard[];
+  profiles?: readonly SpecialistWorkingProfile[];
+  activeProfileId?: string;
   search?: () => Promise<SpecialistSearchResponse>;
+  selectProfile?: (id: string) => Promise<void>;
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
 }) {
   const params = useParams();
   const navigate = useNavigate();
   const [items, setItems] = useState(catalog);
+  const [chosenProfileId, setChosenProfileId] = useState(activeProfileId ?? profiles[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
   const catalogRef = useRef(catalog);
@@ -76,6 +105,9 @@ export function ProcurementsApp({
     if (search === undefined || busy) return;
     setBusy(true);
     try {
+      if (selectProfile !== undefined && chosenProfileId.length > 0) {
+        await selectProfile(chosenProfileId);
+      }
       const result = await search();
       setItems(result.items);
       setNotice(
@@ -114,16 +146,37 @@ export function ProcurementsApp({
         <section className="inbox" aria-labelledby="procurements-heading">
           <div className="inbox-toolbar">
             <h1 id="procurements-heading">Закупки</h1>
-            <button
-              type="button"
-              className="search-profile"
-              disabled={search === undefined || busy}
-              onClick={() => {
-                void runSearch();
-              }}
-            >
-              {busy ? "Ищем…" : "Искать по профилю"}
-            </button>
+            <div className="inbox-search">
+              {profiles.length === 0 ? null : (
+                <>
+                  <label htmlFor="search-profile-select">Профиль</label>
+                  <select
+                    id="search-profile-select"
+                    value={chosenProfileId}
+                    disabled={busy}
+                    onChange={(event) => {
+                      setChosenProfileId(event.target.value);
+                    }}
+                  >
+                    {profiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profileDisplayName(profile)}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+              <button
+                type="button"
+                className="search-profile"
+                disabled={search === undefined || busy}
+                onClick={() => {
+                  void runSearch();
+                }}
+              >
+                {busy ? "Ищем…" : "Искать по профилю"}
+              </button>
+            </div>
           </div>
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}
           {items.length === 0 ? (
@@ -136,7 +189,7 @@ export function ProcurementsApp({
                   <li key={item.id}>
                     <button
                       type="button"
-                      className={isSelected ? "inbox-row is-selected" : "inbox-row"}
+                      className={procurementRowClass(isSelected, item.triage)}
                       aria-current={isSelected ? "true" : undefined}
                       onClick={() => {
                         void navigate(`/procurements/${item.id}`);
@@ -147,7 +200,9 @@ export function ProcurementsApp({
                         <span className="inbox-marks">
                           {item.live ? <span className="live-mark">живая</span> : null}
                           {item.triage === undefined ? null : (
-                            <span className="triage-mark">{triageLabel(item.triage)}</span>
+                            <span className={`triage-mark is-${item.triage}`}>
+                              {triageLabel(item.triage)}
+                            </span>
                           )}
                           {item.latestChange?.urgent === true ? (
                             <span className="urgent-mark">Срочно</span>
@@ -164,7 +219,12 @@ export function ProcurementsApp({
           )}
         </section>
 
-        <section className="detail" aria-labelledby="case-heading">
+        <section
+          className={
+            selected?.triage === undefined ? "detail" : `detail is-triage-${selected.triage}`
+          }
+          aria-labelledby="case-heading"
+        >
           {selected === undefined ? (
             <>
               <h2 id="case-heading">Закупка</h2>
@@ -213,7 +273,8 @@ export function ProcurementsApp({
                 <div className="triage-actions">
                   <button
                     type="button"
-                    className="search-profile"
+                    className={triageActionClass("monitor", selected.triage)}
+                    aria-pressed={selected.triage === "monitor"}
                     disabled={busy}
                     onClick={() => {
                       void runDecide("monitor");
@@ -223,7 +284,8 @@ export function ProcurementsApp({
                   </button>
                   <button
                     type="button"
-                    className="search-profile"
+                    className={triageActionClass("participate", selected.triage)}
+                    aria-pressed={selected.triage === "participate"}
                     disabled={busy}
                     onClick={() => {
                       void runDecide("participate");
@@ -233,7 +295,8 @@ export function ProcurementsApp({
                   </button>
                   <button
                     type="button"
-                    className="search-profile"
+                    className={triageActionClass("reject", selected.triage)}
+                    aria-pressed={selected.triage === "reject"}
                     disabled={busy}
                     onClick={() => {
                       void runDecide("reject");

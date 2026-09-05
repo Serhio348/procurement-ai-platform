@@ -7,27 +7,56 @@ import {
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
+import { resolvePlatformKeywords, sameSearchPhrases } from "./looking-for.js";
 
-export function defaultSpecialistWorkingProfile(): SpecialistWorkingProfileValue {
+export function emptySpecialistWorkingProfile(
+  id = crypto.randomUUID(),
+): SpecialistWorkingProfileValue {
   return SpecialistWorkingProfile.parse({
-    name: electricalEquipmentSeedV1.name,
-    keywords: electricalEquipmentSeedV1.keywords,
-    excludeKeywords: electricalEquipmentSeedV1.excludeKeywords,
+    id,
+    name: "",
+    purpose: "",
+    description: "",
+    instructions: "",
+    keywords: [],
+    excludeKeywords: [],
     watchNewProcurements: false,
   });
 }
 
+export function defaultSpecialistWorkingProfile(): SpecialistWorkingProfileValue {
+  return emptySpecialistWorkingProfile();
+}
+
+export function profileDisplayName(profile: { name: string }): string {
+  const name = profile.name.trim();
+  return name.length > 0 ? name : "Без названия";
+}
+
 export class SpecialistWorkspace {
-  #profile: SpecialistWorkingProfileValue;
+  #profiles: SpecialistWorkingProfileValue[];
+  #activeProfileId: string;
   readonly #decisions: SpecialistTriageDecision[] = [];
 
-  constructor(profile: SpecialistWorkingProfileValue = defaultSpecialistWorkingProfile()) {
-    this.#profile = SpecialistWorkingProfile.parse(profile);
+  constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
+    const parsed = SpecialistWorkingProfile.parse(stripStockElectricalSeed(profile));
+    this.#profiles = [parsed];
+    this.#activeProfileId = parsed.id;
   }
 
   static parse(raw: unknown): SpecialistWorkspace {
-    const state = SpecialistWorkspaceState.parse(raw);
-    const workspace = new SpecialistWorkspace(state.profile);
+    const state = SpecialistWorkspaceState.parse(migrateWorkspaceState(raw));
+    const workspace = new SpecialistWorkspace(state.profiles[0]);
+    workspace.#profiles = state.profiles.map((item) =>
+      SpecialistWorkingProfile.parse(stripStockElectricalSeed(item)),
+    );
+    const active =
+      workspace.#profiles.find((item) => item.id === state.activeProfileId) ?? workspace.#profiles[0];
+    if (active === undefined) {
+      throw new Error("workspace has no profiles");
+    }
+    workspace.#activeProfileId = active.id;
+    workspace.#decisions.length = 0;
     for (const decision of state.decisions) {
       workspace.#decisions.push(SpecialistTriageDecision.parse(decision));
     }
@@ -36,33 +65,96 @@ export class SpecialistWorkspace {
 
   snapshot(): SpecialistWorkspaceStateValue {
     return SpecialistWorkspaceState.parse({
-      profile: this.#profile,
+      profiles: this.#profiles,
+      activeProfileId: this.#activeProfileId,
       decisions: this.#decisions,
     });
   }
 
+  profiles(): readonly SpecialistWorkingProfileValue[] {
+    return this.#profiles;
+  }
+
   profile(): SpecialistWorkingProfileValue {
-    return this.#profile;
+    return this.profileById(this.#activeProfileId);
+  }
+
+  findProfile(id: string): SpecialistWorkingProfileValue | undefined {
+    return this.#profiles.find((item) => item.id === id);
+  }
+
+  profileById(id: string): SpecialistWorkingProfileValue {
+    const found = this.findProfile(id);
+    if (found === undefined) {
+      throw new Error("profile_not_found");
+    }
+    return found;
+  }
+
+  activate(id: string): SpecialistWorkingProfileValue {
+    const found = this.profileById(id);
+    this.#activeProfileId = found.id;
+    return found;
+  }
+
+  addProfile(): SpecialistWorkingProfileValue {
+    const created = emptySpecialistWorkingProfile();
+    this.#profiles.push(created);
+    this.#activeProfileId = created.id;
+    return created;
+  }
+
+  removeProfile(id: string): SpecialistWorkingProfileValue {
+    this.profileById(id);
+    if (this.#profiles.length === 1) {
+      throw new Error("last_profile");
+    }
+    this.#profiles = this.#profiles.filter((item) => item.id !== id);
+    if (this.#activeProfileId === id) {
+      const next = this.#profiles[0];
+      if (next === undefined) {
+        throw new Error("workspace has no profiles");
+      }
+      this.#activeProfileId = next.id;
+    }
+    return this.profile();
   }
 
   replaceProfile(input: {
     name: string;
+    purpose: string;
+    description: string;
+    instructions: string;
     keywords: readonly string[];
-    excludeKeywords: readonly string[];
   }): void {
-    this.#profile = SpecialistWorkingProfile.parse({
-      ...this.#profile,
-      name: input.name,
-      keywords: [...input.keywords],
-      excludeKeywords: [...input.excludeKeywords],
-    });
+    this.#replace(this.#activeProfileId, input);
+  }
+
+  replaceProfileById(
+    id: string,
+    input: {
+      name: string;
+      purpose: string;
+      description: string;
+      instructions: string;
+      keywords: readonly string[];
+    },
+  ): SpecialistWorkingProfileValue {
+    this.#replace(id, input);
+    return this.profileById(id);
   }
 
   setWatch(watchNewProcurements: boolean): void {
-    this.#profile = SpecialistWorkingProfile.parse({
-      ...this.#profile,
-      watchNewProcurements,
-    });
+    this.setWatchById(this.#activeProfileId, watchNewProcurements);
+  }
+
+  setWatchById(id: string, watchNewProcurements: boolean): SpecialistWorkingProfileValue {
+    this.#profiles = this.#profiles.map((item) =>
+      item.id === id
+        ? SpecialistWorkingProfile.parse({ ...item, watchNewProcurements })
+        : item,
+    );
+    return this.profileById(id);
   }
 
   recordDecision(sourceProcurementId: string, kind: SpecialistTriageKind, madeAt: string): void {
@@ -90,6 +182,92 @@ export class SpecialistWorkspace {
     }
     return ids;
   }
+
+  #replace(
+    id: string,
+    input: {
+      name: string;
+      purpose: string;
+      description: string;
+      instructions: string;
+      keywords: readonly string[];
+    },
+  ): void {
+    const current = this.profileById(id);
+    const lookingFor = input.description.trim();
+    const next = SpecialistWorkingProfile.parse({
+      ...current,
+      name: input.name.trim(),
+      purpose: input.purpose.trim() || lookingFor,
+      description: lookingFor,
+      instructions: input.instructions,
+      keywords: resolvePlatformKeywords(lookingFor, input.keywords),
+      excludeKeywords: [],
+    });
+    this.#profiles = this.#profiles.map((item) => (item.id === id ? next : item));
+  }
+}
+
+function migrateWorkspaceState(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) {
+    const created = emptySpecialistWorkingProfile();
+    return { profiles: [created], activeProfileId: created.id, decisions: [] };
+  }
+  const record = raw as {
+    profiles?: unknown;
+    profile?: unknown;
+    activeProfileId?: unknown;
+    decisions?: unknown;
+  };
+  if (Array.isArray(record.profiles) && record.profiles.length > 0) {
+    const profiles = record.profiles.map((item) =>
+      SpecialistWorkingProfile.parse(stripStockElectricalSeed(item)),
+    );
+    const active =
+      profiles.find((item) => item.id === record.activeProfileId) ?? profiles[0];
+    return {
+      profiles,
+      activeProfileId: active?.id,
+      decisions: record.decisions ?? [],
+    };
+  }
+  if (record.profile !== undefined) {
+    const profile = SpecialistWorkingProfile.parse(stripStockElectricalSeed(record.profile));
+    return {
+      profiles: [profile],
+      activeProfileId: profile.id,
+      decisions: record.decisions ?? [],
+    };
+  }
+  const created = emptySpecialistWorkingProfile();
+  return { profiles: [created], activeProfileId: created.id, decisions: record.decisions ?? [] };
+}
+
+function stripStockElectricalSeed(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const profile = raw as {
+    name?: unknown;
+    description?: unknown;
+    keywords?: unknown;
+  };
+  const name = typeof profile.name === "string" ? profile.name : "";
+  const description = typeof profile.description === "string" ? profile.description : "";
+  const keywords = Array.isArray(profile.keywords)
+    ? profile.keywords.filter((item): item is string => typeof item === "string")
+    : [];
+  const stockName = name === electricalEquipmentSeedV1.name;
+  const stockDescription = description === electricalEquipmentSeedV1.description;
+  const stockKeywords = sameSearchPhrases(keywords, electricalEquipmentSeedV1.keywords);
+  if (!stockName && !stockDescription && !stockKeywords) return raw;
+  return {
+    ...raw,
+    name: "",
+    purpose: "",
+    description: "",
+    instructions: "",
+    keywords: [],
+    excludeKeywords: [],
+  };
 }
 
 function sourceIdsWithLatestKind(

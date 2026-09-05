@@ -1,6 +1,6 @@
 import { ProcedureCard, SearchHit } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { compileSpecialistCase } from "./case.js";
+import { compileSpecialistCase, uuidFromHex } from "./case.js";
 
 const hash = "a".repeat(64);
 const now = "2026-09-03T10:00:00.000Z";
@@ -198,5 +198,13 @@ describe("compileSpecialistCase", () => {
     expect(card.actions.find((item) => item.actor === "CommercialTermsAgent")?.detail).toContain(
       "Подтверждённые числа",
     );
+  });
+});
+
+describe("uuidFromHex", () => {
+  it("does not collapse different goszakupki.by procedures onto one id", () => {
+    const first = uuidFromHex("goszakupki_by:marketing/3541093");
+    const second = uuidFromHex("goszakupki_by:request/3552348");
+    expect(first).not.toBe(second);
   });
 });

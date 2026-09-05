@@ -1,8 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SpecialistProcurementCard } from "@procurement/contracts";
+import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import fixture from "../../../../tests/fixtures/specialist/inbox.json";
 import { documentHref, documentStatusLabel, ProcurementsApp } from "./ProcurementsApp.js";
@@ -176,6 +176,51 @@ describe("ProcurementsApp", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("lets the specialist pick which profile to search", async () => {
+    const user = userEvent.setup();
+    const substations = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "Подстанции",
+    });
+    const water = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Водоподготовка",
+    });
+    const selectProfile = vi.fn(async () => undefined);
+    const search = vi.fn(async () => ({
+      profileName: "Водоподготовка",
+      relevantCount: 0,
+      discardedCount: 0,
+      items: [],
+    }));
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                profiles={[substations, water]}
+                activeProfileId={substations.id}
+                selectProfile={selectProfile}
+                search={search}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((screen.getByLabelText("Профиль") as HTMLSelectElement).value).toBe(substations.id);
+    await user.selectOptions(screen.getByLabelText("Профиль"), water.id);
+    await user.click(screen.getByRole("button", { name: "Искать по профилю" }));
+
+    expect(selectProfile).toHaveBeenCalledWith(water.id);
+    expect(search).toHaveBeenCalled();
+  });
+
   it("records a specialist choice and hides a rejected case from the list", async () => {
     const user = userEvent.setup();
     const found = SpecialistProcurementCard.parse({
@@ -218,6 +263,23 @@ describe("ProcurementsApp", () => {
 
     await user.click(screen.getByRole("button", { name: "Отслеживать" }));
     expect(screen.getByText("отслеживаем")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Отслеживать" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Участвовать" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(
+      screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ }).className,
+    ).toContain("is-triage-monitor");
+    await user.click(screen.getByRole("button", { name: "Участвовать" }));
+    expect(screen.getByText("участвуем")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Участвовать" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ }).className,
+    ).toContain("is-triage-participate");
     await user.click(screen.getByRole("button", { name: "Не нужно" }));
     expect(screen.getByText("Закупка скрыта и больше не будет предлагаться.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();

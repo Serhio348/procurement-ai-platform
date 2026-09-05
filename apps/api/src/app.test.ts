@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { SearchHit, SpecialistProcurementCard } from "@procurement/contracts";
+import {
+  SearchHit,
+  SpecialistProcurementCard,
+  electricalEquipmentSeedV1,
+} from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,6 +108,11 @@ describe("specialist API", () => {
       },
     });
 
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТПБ", keywords: ["2БКТПБ"] },
+    });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const before = await app.inject({ method: "GET", url: "/api/procurements" });
     const searched = await app.inject({
@@ -155,8 +164,16 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("searches by the seeded electrical profile and ignores keywords in the request body", async () => {
+  it("searches by the saved profile and ignores keywords in the request body", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "Электротехническое оборудование",
+        keywords: electricalEquipmentSeedV1.keywords,
+      },
+    });
 
     const response = await app.inject({
       method: "POST",
@@ -235,6 +252,7 @@ describe("specialist API", () => {
     expect(saved.statusCode).toBe(200);
     expect(JSON.parse(watchOff.body).watchNewProcurements).toBe(false);
     expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
+    expect(JSON.parse(saved.body).keywords).toEqual(["кабель"]);
     expect(searched.statusCode).toBe(200);
     expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
       false,
@@ -246,9 +264,89 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("starts with an empty profile and can add a second empty direction", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+
+    const first = await app.inject({ method: "GET", url: "/api/profile" });
+    const created = await app.inject({ method: "POST", url: "/api/profiles" });
+    const listed = await app.inject({ method: "GET", url: "/api/profiles" });
+    const body = JSON.parse(listed.body) as {
+      items: Array<{ id: string; name: string; keywords: string[] }>;
+      activeProfileId: string;
+    };
+
+    expect(first.statusCode).toBe(200);
+    expect(JSON.parse(first.body).name).toBe("");
+    expect(JSON.parse(first.body).keywords).toEqual([]);
+    expect(created.statusCode).toBe(200);
+    expect(JSON.parse(created.body).keywords).toEqual([]);
+    expect(body.items).toHaveLength(2);
+    expect(body.activeProfileId).toBe(JSON.parse(created.body).id);
+
+    const removed = await app.inject({
+      method: "DELETE",
+      url: `/api/profiles/${JSON.parse(created.body).id}`,
+    });
+    const afterRemove = JSON.parse(removed.body) as {
+      items: Array<{ id: string }>;
+      activeProfileId: string;
+    };
+    const last = await app.inject({
+      method: "DELETE",
+      url: `/api/profiles/${afterRemove.activeProfileId}`,
+    });
+
+    expect(removed.statusCode).toBe(200);
+    expect(afterRemove.items).toHaveLength(1);
+    expect(afterRemove.activeProfileId).toBe(JSON.parse(first.body).id);
+    expect(last.statusCode).toBe(409);
+
+    await app.close();
+  });
+
+  it("keeps edited platform keywords and fills them from looking-for when empty", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+
+    const edited = await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "Кабель",
+        description: "кабель силовой",
+        keywords: ["кабель"],
+        excludeKeywords: [],
+      },
+    });
+    const derived = await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "Кабель",
+        description: "кабель",
+        keywords: [],
+        excludeKeywords: [],
+      },
+    });
+
+    expect(edited.statusCode).toBe(200);
+    expect(JSON.parse(edited.body).keywords).toEqual(["кабель"]);
+    expect(derived.statusCode).toBe(200);
+    expect(JSON.parse(derived.body).keywords).toEqual(["кабель"]);
+
+    await app.close();
+  });
+
   it("does not discover new procurements until watch is turned on and then skips judged ids", async () => {
     const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
 
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "Электротехническое оборудование",
+        keywords: electricalEquipmentSeedV1.keywords,
+      },
+    });
     const idle = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     const enabled = await app.inject({
       method: "POST",
@@ -297,6 +395,11 @@ describe("specialist API", () => {
       },
     });
 
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
     const response = await app.inject({
       method: "POST",
       url: "/api/procurements/search",

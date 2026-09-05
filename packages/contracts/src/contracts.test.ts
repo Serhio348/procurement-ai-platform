@@ -525,5 +525,14 @@ describe("specialist working profile", () => {
     });
     expect(parsed.watchNewProcurements).toBe(false);
   });
+
+  it("allows an empty working profile so the console does not ship a stock industry", () => {
+    const parsed = SpecialistWorkingProfile.parse({});
+    expect(parsed.name).toBe("");
+    expect(parsed.description).toBe("");
+    expect(parsed.keywords).toEqual([]);
+    expect(parsed.instructions).toBe("");
+    expect(parsed.watchNewProcurements).toBe(false);
+  });
 });
 

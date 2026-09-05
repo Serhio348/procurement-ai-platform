@@ -23,12 +23,12 @@
 ## 2. Архитектурное решение
 
 ```text
-Профиль (keywords, exclude)
+Профиль («Что ищем» → keywords)
   → PUT /api/profile                 # не включает watch
 Слежение
   → POST /api/profile/watch          # явный флаг
 Разовый поиск
-  → POST /api/procurements/search    # keywords из профиля, не из HTTP-тела
+  → POST /api/procurements/search    # keywords из «Что ищем», не из HTTP-тела
 Решение
   → POST /api/procurements/:id/decision  { kind: monitor|participate|reject }
   → append-only SpecialistTriageDecision
@@ -37,7 +37,10 @@ Discovery (интервал API)
   → иначе search, выкинуть уже решённые sourceProcurementId
 ```
 
-- Тема поиска — данные профиля. HTTP-тело по-прежнему без `keywords`.
+- Тема поиска — одно поле «Что ищем». Код режет его на слова площадки
+  (`searchPhrasesFromLookingFor`). Слова можно убрать или дописать
+  отдельно, не копируя тот же текст во второй textarea. HTTP-тело поиска
+  по-прежнему без `keywords`.
 - `reject` скрывает карточку из списка и больше не возвращается ни разовым
   поиском, ни discovery.
 - `monitor` / `participate` остаются в работе и тоже не предлагаются как
@@ -91,12 +94,15 @@ SpecialistWorkspace (profile + decisions)
 - `SpecialistWorkspace` и `partitionHitsByDecision` в domain;
 - API: GET/PUT профиль, POST watch, POST decision, POST discovery;
 - live MCP search берёт keywords из текущего профиля;
-- UI: раздел «Профили», кнопки решения на карточке.
+- UI: раздел «Профили», кнопки решения на карточке;
+- запрос на goszakupki.by собирается из «Что ищем»; слова можно убрать или дописать.
 
 ## 5. Новые файлы
 
 ```text
 packages/domain/src/specialist/workspace.ts
+packages/domain/src/specialist/looking-for.ts
+packages/domain/src/specialist/looking-for.test.ts
 packages/domain/src/specialist/triage.ts
 packages/domain/src/specialist/triage.test.ts
 apps/api/src/workspace-file.ts
@@ -123,7 +129,8 @@ docs/architecture/STAGE-22.md
 ## 8. Контракты API / MCP / агентов
 
 - `GET /api/profile`
-- `PUT /api/profile` `{ name, keywords, excludeKeywords }` — не трогает watch
+- `PUT /api/profile` `{ name, description, … }` — `keywords` считаются из
+  `description`; watch не трогается
 - `POST /api/profile/watch` `{ watchNewProcurements }`
 - `POST /api/profile/discovery` `{ limit? }`
 - `POST /api/procurements/:id/decision` `{ kind: monitor|participate|reject }`
@@ -138,6 +145,7 @@ Discovery:
 ## 9. Тесты
 
 - сохранение профиля не включает watch;
+- «Что ищем» собирает строки поиска; правки специалиста сохраняются;
 - reject не возвращается следующим поиском;
 - discovery при выключенном watch не добавляет карточки;
 - включённый watch пропускает уже решённые source id;

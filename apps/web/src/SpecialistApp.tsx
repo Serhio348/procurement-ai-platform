@@ -1,8 +1,9 @@
 import { useState, type ReactElement } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
   SpecialistInboxEntry,
   SpecialistProcurementCard,
+  SpecialistProfileListResponse,
   SpecialistProfileWrite,
   SpecialistSearchResponse,
   SpecialistTriageKind,
@@ -11,12 +12,17 @@ import type {
 import { InboxApp } from "./inbox/InboxApp.js";
 import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
+import { ProfileList } from "./profile/ProfileList.js";
 
 export interface SpecialistAppProps {
   inbox: readonly SpecialistInboxEntry[];
   procurements: readonly SpecialistProcurementCard[];
-  profile: SpecialistWorkingProfile;
+  profiles: readonly SpecialistWorkingProfile[];
+  activeProfileId?: string;
   search?: () => Promise<SpecialistSearchResponse>;
+  createProfile?: () => Promise<SpecialistWorkingProfile>;
+  deleteProfile?: (id: string) => Promise<SpecialistProfileListResponse>;
+  activateProfile?: (id: string) => Promise<SpecialistWorkingProfile>;
   saveProfile?: (next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
   setProfileWatch?: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
   decide?: (
@@ -27,8 +33,17 @@ export interface SpecialistAppProps {
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const [procurements, setProcurements] = useState(props.procurements);
+  const [profiles, setProfiles] = useState(props.profiles);
+  const [activeProfileId, setActiveProfileId] = useState(
+    props.activeProfileId ?? props.profiles[0]?.id ?? "",
+  );
   const searchProfile = props.search;
   const decideCase = props.decide;
+  const activateProfile = props.activateProfile;
+  const createProfile = props.createProfile;
+  const deleteProfile = props.deleteProfile;
+  const saveProfile = props.saveProfile;
+  const setProfileWatch = props.setProfileWatch;
 
   const search =
     searchProfile === undefined
@@ -48,6 +63,17 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           return items;
         };
 
+  function remember(next: SpecialistWorkingProfile, activate = false): SpecialistWorkingProfile {
+    setProfiles((current) => {
+      if (current.some((item) => item.id === next.id)) {
+        return current.map((item) => (item.id === next.id ? next : item));
+      }
+      return [...current, next];
+    });
+    if (activate) setActiveProfileId(next.id);
+    return next;
+  }
+
   return (
     <BrowserRouter>
       <Routes>
@@ -55,10 +81,52 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         <Route
           path="/profiles"
           element={
-            <ProfileApp
-              profile={props.profile}
-              save={props.saveProfile ?? (async () => props.profile)}
-              setWatch={props.setProfileWatch ?? (async () => props.profile)}
+            <ProfileListRoute
+              profiles={profiles}
+              create={async () => {
+                if (createProfile === undefined) return undefined;
+                return remember(await createProfile(), true);
+              }}
+              {...(deleteProfile === undefined
+                ? {}
+                : {
+                    remove: async (id: string) => {
+                      const listed = await deleteProfile(id);
+                      setProfiles(listed.items);
+                      setActiveProfileId(listed.activeProfileId);
+                    },
+                  })}
+            />
+          }
+        />
+        <Route
+          path="/profiles/:id"
+          element={
+            <ProfileEditorRoute
+              profiles={profiles}
+              {...(activateProfile === undefined
+                ? {}
+                : { activate: async (id: string) => remember(await activateProfile(id), true) })}
+              save={async (next) => {
+                if (saveProfile === undefined) {
+                  const current = profiles[0];
+                  if (current === undefined) {
+                    throw new Error("no_profile");
+                  }
+                  return remember({ ...current, ...next });
+                }
+                return remember(await saveProfile(next));
+              }}
+              setWatch={async (watchNewProcurements) => {
+                if (setProfileWatch === undefined) {
+                  const current = profiles[0];
+                  if (current === undefined) {
+                    throw new Error("no_profile");
+                  }
+                  return remember({ ...current, watchNewProcurements });
+                }
+                return remember(await setProfileWatch(watchNewProcurements));
+              }}
             />
           }
         />
@@ -67,7 +135,16 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           element={
             <ProcurementsApp
               items={procurements}
+              profiles={profiles}
+              {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
               {...(search === undefined ? {} : { search })}
+              {...(activateProfile === undefined
+                ? {}
+                : {
+                    selectProfile: async (id: string) => {
+                      remember(await activateProfile(id), true);
+                    },
+                  })}
               {...(decide === undefined ? {} : { decide })}
             />
           }
@@ -77,12 +154,69 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           element={
             <ProcurementsApp
               items={procurements}
+              profiles={profiles}
+              {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
               {...(search === undefined ? {} : { search })}
+              {...(activateProfile === undefined
+                ? {}
+                : {
+                    selectProfile: async (id: string) => {
+                      remember(await activateProfile(id), true);
+                    },
+                  })}
               {...(decide === undefined ? {} : { decide })}
             />
           }
         />
       </Routes>
     </BrowserRouter>
+  );
+}
+
+function ProfileListRoute({
+  profiles,
+  create,
+  remove,
+}: {
+  profiles: readonly SpecialistWorkingProfile[];
+  create: () => Promise<SpecialistWorkingProfile | undefined>;
+  remove?: (id: string) => Promise<void>;
+}): ReactElement {
+  const navigate = useNavigate();
+  return (
+    <ProfileList
+      profiles={profiles}
+      create={async () => {
+        const created = await create();
+        if (created !== undefined) navigate(`/profiles/${created.id}`);
+      }}
+      {...(remove === undefined ? {} : { remove })}
+    />
+  );
+}
+
+function ProfileEditorRoute({
+  profiles,
+  activate,
+  save,
+  setWatch,
+}: {
+  profiles: readonly SpecialistWorkingProfile[];
+  activate?: (id: string) => Promise<SpecialistWorkingProfile>;
+  save: (next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
+  setWatch: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
+}): ReactElement {
+  const { id } = useParams();
+  const profile = profiles.find((item) => item.id === id) ?? profiles[0];
+  if (profile === undefined) {
+    return <ProfileList profiles={[]} create={async () => undefined} />;
+  }
+  return (
+    <ProfileApp
+      profile={profile}
+      {...(activate === undefined ? {} : { activate })}
+      save={save}
+      setWatch={setWatch}
+    />
   );
 }

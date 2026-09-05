@@ -5,6 +5,7 @@ import {
   SpecialistInboxListResponse,
   SpecialistProcurementCard,
   SpecialistProcurementListResponse,
+  SpecialistProfileListResponse,
   SpecialistProfileWrite,
   SpecialistSearchRequest,
   SpecialistSearchResponse,
@@ -17,6 +18,7 @@ import {
 } from "@procurement/contracts";
 import {
   partitionHitsByDecision,
+  profileDisplayName,
   selectRelevantSearchCards,
   shouldRunDiscovery,
   SpecialistCatalog,
@@ -84,7 +86,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       hits,
       {
         keywords: profile.keywords,
-        excludeKeywords: profile.excludeKeywords,
+        excludeKeywords: [],
       },
       limit,
     );
@@ -102,7 +104,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: selected.discardedCount + skippedRejected,
     });
     return SpecialistSearchResponse.parse({
-      profileName: profile.name,
+      profileName: profileDisplayName(profile),
       relevantCount: selected.cards.length - skippedRejected,
       discardedCount: selected.discardedCount + skippedRejected,
       items: listed(),
@@ -110,8 +112,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   async function runDiscovery(limit = 20) {
-    const profile = workspace.profile();
-    if (!shouldRunDiscovery(profile.watchNewProcurements)) {
+    const watched = workspace.profiles().filter((item) =>
+      shouldRunDiscovery(item.watchNewProcurements),
+    );
+    if (watched.length === 0) {
       return SpecialistDiscoveryResponse.parse({
         ran: false,
         reason: "watch_off",
@@ -120,7 +124,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         items: listed(),
       });
     }
-    if (profile.keywords.length === 0) {
+    const ready = watched.filter((item) => item.keywords.length > 0);
+    if (ready.length === 0) {
       return SpecialistDiscoveryResponse.parse({
         ran: false,
         reason: "no_keywords",
@@ -129,44 +134,126 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         items: listed(),
       });
     }
-    let hits: readonly SearchHit[];
-    try {
-      hits = await searchHits.search(limit, profile.keywords);
-    } catch (error) {
-      logger.error("Specialist discovery search failed", error);
-      throw error;
-    }
-    const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
-    const selected = selectRelevantSearchCards(
-      partitioned.undecided,
-      {
-        keywords: profile.keywords,
-        excludeKeywords: profile.excludeKeywords,
-      },
-      limit,
-    );
-    const known = new Set(catalog.procurements().map((item) => item.sourceProcurementId));
     let addedCount = 0;
-    for (const card of selected.cards) {
-      if (known.has(card.sourceProcurementId)) continue;
-      catalog.upsertCase(withTriage(card, workspace));
-      addedCount += 1;
+    let skippedDecidedCount = 0;
+    const known = new Set(catalog.procurements().map((item) => item.sourceProcurementId));
+    for (const profile of ready) {
+      let hits: readonly SearchHit[];
+      try {
+        hits = await searchHits.search(limit, profile.keywords);
+      } catch (error) {
+        logger.error("Specialist discovery search failed", error);
+        throw error;
+      }
+      const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
+      skippedDecidedCount += partitioned.skippedDecidedCount;
+      const selected = selectRelevantSearchCards(
+        partitioned.undecided,
+        {
+          keywords: profile.keywords,
+          excludeKeywords: [],
+        },
+        limit,
+      );
+      for (const card of selected.cards) {
+        if (known.has(card.sourceProcurementId)) continue;
+        catalog.upsertCase(withTriage(card, workspace));
+        known.add(card.sourceProcurementId);
+        addedCount += 1;
+      }
+      logger.info("Specialist discovery recorded", {
+        profileName: profileDisplayName(profile),
+        addedCount,
+        skippedDecidedCount,
+      });
     }
-    logger.info("Specialist discovery recorded", {
-      profileName: profile.name,
-      addedCount,
-      skippedDecidedCount: partitioned.skippedDecidedCount,
-    });
     return SpecialistDiscoveryResponse.parse({
       ran: true,
       reason: "ok",
       addedCount,
-      skippedDecidedCount: partitioned.skippedDecidedCount,
+      skippedDecidedCount,
       items: listed(),
     });
   }
 
   app.get("/api/health", async () => ({ ok: true as const }));
+
+  function profileList() {
+    return SpecialistProfileListResponse.parse({
+      items: workspace.profiles(),
+      activeProfileId: workspace.profile().id,
+    });
+  }
+
+  app.get("/api/profiles", async () => profileList());
+
+  app.post("/api/profiles", async () => {
+    const created = workspace.addProfile();
+    await persist();
+    logger.info("Specialist working profile created", { id: created.id });
+    return SpecialistWorkingProfile.parse(created);
+  });
+
+  app.post("/api/profiles/:id/activate", async (request, reply) => {
+    const params = request.params as { id: string };
+    if (workspace.findProfile(params.id) === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    workspace.activate(params.id);
+    await persist();
+    return SpecialistWorkingProfile.parse(workspace.profile());
+  });
+
+  app.put("/api/profiles/:id", async (request, reply) => {
+    const params = request.params as { id: string };
+    const parsed = SpecialistProfileWrite.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    if (workspace.findProfile(params.id) === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const saved = workspace.replaceProfileById(params.id, parsed.data);
+    await persist();
+    logger.info("Specialist working profile saved", {
+      id: saved.id,
+      name: profileDisplayName(saved),
+      keywordCount: saved.keywords.length,
+    });
+    return SpecialistWorkingProfile.parse(saved);
+  });
+
+  app.delete("/api/profiles/:id", async (request, reply) => {
+    const params = request.params as { id: string };
+    if (workspace.findProfile(params.id) === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    if (workspace.profiles().length === 1) {
+      return reply.code(409).send({ error: "last_profile" });
+    }
+    workspace.removeProfile(params.id);
+    await persist();
+    logger.info("Specialist working profile removed", { id: params.id });
+    return profileList();
+  });
+
+  app.post("/api/profiles/:id/watch", async (request, reply) => {
+    const params = request.params as { id: string };
+    const parsed = SpecialistWatchWrite.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    if (workspace.findProfile(params.id) === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const saved = workspace.setWatchById(params.id, parsed.data.watchNewProcurements);
+    await persist();
+    logger.info("Specialist profile watch updated", {
+      id: saved.id,
+      watchNewProcurements: saved.watchNewProcurements,
+    });
+    return SpecialistWorkingProfile.parse(saved);
+  });
 
   app.get("/api/profile", async () => SpecialistWorkingProfile.parse(workspace.profile()));
 
@@ -177,11 +264,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     workspace.replaceProfile(parsed.data);
     await persist();
+    const saved = workspace.profile();
     logger.info("Specialist working profile saved", {
-      name: parsed.data.name,
-      keywordCount: parsed.data.keywords.length,
+      name: profileDisplayName(saved),
+      keywordCount: saved.keywords.length,
     });
-    return SpecialistWorkingProfile.parse(workspace.profile());
+    return SpecialistWorkingProfile.parse(saved);
   });
 
   app.post("/api/profile/watch", async (request, reply) => {

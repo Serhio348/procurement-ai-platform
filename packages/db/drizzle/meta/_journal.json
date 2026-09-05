@@ -8,6 +8,13 @@
       "when": 1788205342795,
       "tag": "0000_spooky_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1757058000000,
+      "tag": "0001_specialist_console",
+      "breakpoints": true
     }
   ]
 }

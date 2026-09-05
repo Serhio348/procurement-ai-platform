@@ -2,8 +2,9 @@
 
 Автономная AI-платформа для поиска, мониторинга, исследования и анализа конкурсных процедур и закупок.
 
-**Статус:** этап 24 — документы скачиваются после «Участвовать», не на
-поиске. Несколько профилей, без зашитой отрасли. Это не чат.
+**Статус:** этап 25 — профили и кейсы в PostgreSQL, хеши отдельно от
+файлов в MinIO, слежение через Redis. Документы по-прежнему только после
+«Участвовать». Это не чат.
 
 ## Принцип
 
@@ -52,6 +53,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 - [Этап 22 — профиль, решение и слежение](docs/architecture/STAGE-22.md)
 - [Этап 23 — несколько профилей](docs/architecture/STAGE-23.md)
 - [Этап 24 — документы после «Участвовать»](docs/architecture/STAGE-24.md)
+- [Этап 25 — PostgreSQL, MinIO и Redis для консоли](docs/architecture/STAGE-25.md)
 
 ## Пакеты
 
@@ -65,7 +67,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 | `@procurement/mcp-documents` | Documents MCP: blob по sha256, fixture extract/OCR |
 | `@procurement/mcp-notifications` | Notifications MCP: inbox и telegram.send |
 | `@procurement/agent-runtime` | Supervisor, Context Compiler, DomainSearchAgent, DocumentAgent, CommercialTermsAgent, MonitoringAgent, ReportAgent, NotificationAgent |
-| `@procurement/api` | Fastify: inbox, карточки, профиль, поиск и discovery |
+| `@procurement/api` | Fastify: inbox, карточки, профиль, поиск; PostgreSQL / MinIO / Redis |
 | `@procurement/web` | Консоль специалиста: inbox, закупки, профиль |
 
 ## Разработка
@@ -105,5 +107,7 @@ PROCUREMENT_SOURCE_MODE=live
 
 ## Следующий шаг
 
-Следующий плановый этап — веб-интерфейс. На чистой Ubuntu 24.04 инфраструктуру поднимают по
-[инструкции сервера](docs/ops/ubuntu-server.md).
+Чтобы консоль писала в PostgreSQL / MinIO / Redis: `npm run infra:up`, затем
+`npm run db:migrate`. Без Docker остаются JSON-файл и `data/blobs`.
+Telegram-бот и OCR чертежей — отдельные работы. На чистой Ubuntu 24.04
+инфраструктуру поднимают по [инструкции сервера](docs/ops/ubuntu-server.md).

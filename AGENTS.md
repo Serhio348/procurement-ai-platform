@@ -43,6 +43,7 @@
 - [`docs/architecture/STAGE-22.md`](docs/architecture/STAGE-22.md) — профиль, решение и слежение
 - [`docs/architecture/STAGE-23.md`](docs/architecture/STAGE-23.md) — несколько профилей
 - [`docs/architecture/STAGE-24.md`](docs/architecture/STAGE-24.md) — документы после «Участвовать»
+- [`docs/architecture/STAGE-25.md`](docs/architecture/STAGE-25.md) — PostgreSQL, MinIO и Redis для консоли
 
 ---
 
@@ -188,6 +189,7 @@ docs/architecture/ Документы этапов
 - Этап 22 — редактор профиля, решения по карточке и слежение за новыми закупками
 - Этап 23 — несколько профилей, пустые поля, слежение на каждом
 - Этап 24 — документы найденной процедуры после «Участвовать»
+- Этап 25 — консоль: хеши в PostgreSQL, файлы в MinIO, discovery в Redis
 
 Не начато: документы на «Отслеживать» (только хеши),
 PostgreSQL outbox для inbox, входящий Telegram-бот.
@@ -221,7 +223,7 @@ OCR / vision электрических схем и чертежей — отд�
 PDF, 18 — отбор вложений и vision сканов конкурса, 19 — факты из Word-ТЗ,
 20 — поиск по профилю из UI, 21 — живой поиск goszakupki.by из консоли,
 22 — профиль, triage и watch, 23 — несколько профилей,
-24 — документы после «Участвовать».
+24 — документы после «Участвовать», 25 — PostgreSQL / MinIO / Redis.
 Строки «входящий Telegram / наблюдаемость / безопасность / e2e» в таблице —
 очередь работ, не следующие свободные номера документов.
 

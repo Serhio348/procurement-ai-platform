@@ -141,6 +141,44 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("persists found cases after search so a restart can reload them", async () => {
+    const persistCases = vi.fn(async () => undefined);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      persistCases,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/persist-1",
+            url: "https://goszakupki.by/auction/view/persist-1",
+            title: "Кабель силовой",
+          }),
+        ],
+      },
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { limit: 5 },
+    });
+
+    expect(searched.statusCode).toBe(200);
+    expect(persistCases).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceProcurementId: "auction/persist-1" }),
+      ]),
+    );
+
+    await app.close();
+  });
+
   it("returns delivery and warranty from the live Word TZ and does not treat 99.5% cap as advance", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     const list = await app.inject({ method: "GET", url: "/api/procurements" });
@@ -340,9 +378,9 @@ describe("specialist API", () => {
     });
     const catalog = new SpecialistCatalog();
     catalog.upsertCase(found);
-    let app: Awaited<ReturnType<typeof buildSpecialistApi>> | undefined;
+    const holder: { app?: Awaited<ReturnType<typeof buildSpecialistApi>> } = {};
     const ingest = vi.fn(async (card: typeof found) => {
-      const mid = await app?.inject({
+      const mid = await holder.app?.inject({
         method: "GET",
         url: `/api/procurements/${found.id}/ingest-progress`,
       });
@@ -350,10 +388,11 @@ describe("specialist API", () => {
       expect(JSON.parse(mid?.body ?? "{}").phase).toBe("listing");
       return card;
     });
-    app = await buildSpecialistApi({
+    const app = await buildSpecialistApi({
       catalog,
       documentIngest: { ingest },
     });
+    holder.app = app;
 
     const idle = await app.inject({
       method: "GET",

@@ -55,9 +55,11 @@ describe("createProcurementDocumentIngest", () => {
     await putBlob(blobDirectory, hash, bytes);
     const callTool = vi.fn<McpToolCaller["callTool"]>().mockImplementation(fakeCaller(hash));
     const progress = createIngestProgressHub();
+    const blobStore = { put: vi.fn(async () => undefined), get: vi.fn(async () => undefined) };
     const port = createProcurementDocumentIngest({
       caller: { callTool },
       blobDirectory,
+      blobStore,
       progress,
     });
     const card = SpecialistProcurementCard.parse({
@@ -87,6 +89,7 @@ describe("createProcurementDocumentIngest", () => {
       sourceProcurementId: "auction/401",
     });
     expect(RequestId.parse(String(callTool.mock.calls[0]?.[2]?.requestId)).length).toBeGreaterThan(0);
+    expect(blobStore.put).toHaveBeenCalledWith(hash, expect.any(Uint8Array));
   });
 
   it("does not report a download as hashed when the blob cannot be read back", async () => {

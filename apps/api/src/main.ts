@@ -5,13 +5,16 @@ import { SpecialistCatalog } from "@procurement/domain";
 import { createLogger } from "@procurement/observability";
 import { buildSpecialistApi } from "./app.js";
 import { resolveBlobDirectory } from "./blobs.js";
-import { loadDotEnv } from "./load-env.js";
-import { loadFixtureCatalog } from "./load-fixture.js";
-import { connectProcurementMcp } from "./procurement-mcp.js";
+import { startDiscoveryRepeat } from "./discovery-queue.js";
+import { discoveryTransport } from "./discovery-transport.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
+import { loadDotEnv } from "./load-env.js";
+import { loadFixtureCatalog } from "./load-fixture.js";
+import { createBlobStoreFromEnv, objectStoreKind } from "./object-store.js";
+import { openSpecialistPersistence } from "./persist.js";
+import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
-import { loadWorkspaceFile, saveWorkspaceFile } from "./workspace-file.js";
 
 async function main(): Promise<void> {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -23,9 +26,15 @@ async function main(): Promise<void> {
   const mode = process.env["PROCUREMENT_SOURCE_MODE"] === "live" ? "live" : "fixture";
   const catalog = mode === "live" ? new SpecialistCatalog() : await loadFixtureCatalog();
   const blobDirectory = resolveBlobDirectory(process.env["DOCUMENT_BLOB_DIR"]);
+  const blobStore = createBlobStoreFromEnv(process.env, blobDirectory);
   const ingestProgress = createIngestProgressHub();
-  const workspacePath = path.join(repoRoot, "data", "specialist-workspace.json");
-  const workspace = await loadWorkspaceFile(workspacePath);
+  const persistence = await openSpecialistPersistence({
+    workspacePath: path.join(repoRoot, "data", "specialist-workspace.json"),
+    databaseUrl: process.env["DATABASE_URL"],
+    logger,
+  });
+  await persistence.hydrateCatalog(catalog);
+  const workspace = persistence.workspace;
   const mcp =
     mode === "live"
       ? await connectProcurementMcp({ mode: "live", logger, blobDirectory })
@@ -43,9 +52,9 @@ async function main(): Promise<void> {
     workspace,
     logger,
     blobDirectory,
-    persistWorkspace: async () => {
-      await saveWorkspaceFile(workspacePath, workspace);
-    },
+    blobStore,
+    persistWorkspace: persistence.persistWorkspace,
+    persistCases: persistence.persistCases,
     ingestProgress,
     ...(searchHits === undefined ? {} : { searchHits }),
     ...(mcp === undefined
@@ -54,6 +63,7 @@ async function main(): Promise<void> {
           documentIngest: createProcurementDocumentIngest({
             caller: mcp.caller,
             blobDirectory,
+            blobStore,
             logger,
             progress: ingestProgress,
           }),
@@ -62,26 +72,49 @@ async function main(): Promise<void> {
   });
   const port = Number.parseInt(process.env["API_PORT"] ?? "3001", 10);
   await app.listen({ port, host: "127.0.0.1" });
+  const transport = discoveryTransport(process.env);
   logger.info("Specialist API listening", {
     port,
     searchMode: mode,
+    postgres: persistence.postgres,
+    objectStore: objectStoreKind(process.env),
+    discovery: transport.kind,
     watchingCount: workspace.profiles().filter((item) => item.watchNewProcurements).length,
   });
 
-  const intervalMs = Number.parseInt(process.env["SPECIALIST_DISCOVERY_INTERVAL_MS"] ?? "600000", 10);
-  const timer =
-    Number.isFinite(intervalMs) && intervalMs > 0
-      ? setInterval(() => {
-          void app.runDiscovery().catch((error: unknown) => {
-            logger.error("Specialist discovery failed", error);
-          });
-        }, intervalMs)
-      : undefined;
+  let redisRepeat: Awaited<ReturnType<typeof startDiscoveryRepeat>> | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  if (transport.kind === "redis") {
+    try {
+      redisRepeat = await startDiscoveryRepeat({
+        redisUrl: transport.redisUrl,
+        intervalMs: transport.intervalMs,
+        run: async () => {
+          await app.runDiscovery();
+        },
+        logger,
+      });
+    } catch (error) {
+      logger.warn("Redis discovery unavailable; using in-process interval", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (redisRepeat === undefined && transport.kind !== "off") {
+    const intervalMs = transport.intervalMs;
+    timer = setInterval(() => {
+      void app.runDiscovery().catch((error: unknown) => {
+        logger.error("Specialist discovery failed", error);
+      });
+    }, intervalMs);
+  }
 
   const shutdown = async (): Promise<void> => {
     if (timer !== undefined) clearInterval(timer);
+    if (redisRepeat !== undefined) await redisRepeat.close();
     await app.close();
     if (mcp !== undefined) await mcp.close();
+    await persistence.close();
   };
   process.once("SIGINT", () => {
     void shutdown();

@@ -116,13 +116,7 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         {
-          paths: [
-            {
-              name: "@procurement/db",
-              message: "This slice uses an in-memory specialist catalog, not PostgreSQL.",
-            },
-          ],
-          patterns: ["@procurement/db", "mcp/*", "apps/web", "playwright", "bullmq"],
+          patterns: ["mcp/*", "apps/web", "playwright"],
         },
       ],
     },

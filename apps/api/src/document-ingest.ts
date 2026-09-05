@@ -22,6 +22,7 @@ import {
 import { silentLogger, type Logger } from "@procurement/observability";
 import { getBlob } from "./blobs.js";
 import type { IngestProgressHub } from "./ingest-progress.js";
+import type { BlobStore } from "./object-store.js";
 
 export interface SpecialistDocumentIngestPort {
   ingest: (card: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>;
@@ -30,6 +31,7 @@ export interface SpecialistDocumentIngestPort {
 export interface ProcurementDocumentIngestOptions {
   caller: McpToolCaller;
   blobDirectory: string;
+  blobStore?: BlobStore;
   logger?: Logger;
   timeoutMs?: number;
   progress?: IngestProgressHub;
@@ -79,11 +81,12 @@ export function createProcurementDocumentIngest(
               requestId,
               client,
               blobDirectory: options.blobDirectory,
+              ...(options.blobStore === undefined ? {} : { blobStore: options.blobStore }),
               nativeExtractor,
               scanExtractor,
               usesVision: scan.usesVision,
               logger,
-              progress: options.progress,
+              ...(options.progress === undefined ? {} : { progress: options.progress }),
               procurementId: card.id,
             }),
           );
@@ -105,6 +108,7 @@ async function ingestOne(input: {
   requestId: ReturnType<typeof RequestId.parse>;
   client: ProcurementMcpClient;
   blobDirectory: string;
+  blobStore?: BlobStore;
   nativeExtractor: RoutingDocumentExtractor;
   scanExtractor: RoutingDocumentExtractor;
   usesVision: boolean;
@@ -147,6 +151,9 @@ async function ingestOne(input: {
           note: "Файл скачан, но не найден в хранилище.",
         }),
       );
+    }
+    if (input.blobStore !== undefined) {
+      await input.blobStore.put(downloaded.hash, bytes);
     }
     input.progress?.fileIndexing(input.procurementId, input.sourceUrl, 0);
     let extraction;

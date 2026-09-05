@@ -8,6 +8,7 @@ export default defineConfig({
     // Tests run against sources so a build is not a prerequisite for testing.
     alias: {
       "@procurement/contracts": fromRoot("./packages/contracts/src/index.ts"),
+      "@procurement/db": fromRoot("./packages/db/src/index.ts"),
       "@procurement/domain": fromRoot("./packages/domain/src/index.ts"),
       "@procurement/observability": fromRoot("./packages/observability/src/index.ts"),
       "@procurement/mcp-client": fromRoot("./packages/mcp-client/src/index.ts"),

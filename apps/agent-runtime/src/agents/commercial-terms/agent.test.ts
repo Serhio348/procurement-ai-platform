@@ -22,7 +22,7 @@ const now = "2026-09-03T07:00:00.000Z";
 const hashDigital = "a".repeat(64);
 const hashScan = "b".repeat(64);
 const digitalText = "Техническое задание. Аванс 30 процентов.";
-const ambiguousText = "Порядок расчётов: оплата после поставки оборудования.";
+const ambiguousText = "Порядок расчётов и оплата согласовываются отдельным договором.";
 
 describe("CommercialTermsAgent", () => {
   it("extracts an explicit advance percent without calling the model or telegram", async () => {

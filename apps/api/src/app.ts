@@ -38,6 +38,7 @@ import {
 import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
+import type { BlobStore } from "./object-store.js";
 
 export interface SpecialistSearchHitsPort {
   search: (limit: number, keywords: readonly string[]) => Promise<readonly SearchHit[]>;
@@ -56,6 +57,8 @@ export interface BuildApiOptions {
   documentIngest?: SpecialistDocumentIngestPort;
   liveProcurementsOnly?: boolean;
   persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
+  persistCases?: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
+  blobStore?: BlobStore;
   clock?: () => string;
   ingestProgress?: ReturnType<typeof createIngestProgressHub>;
 }
@@ -71,8 +74,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
   const clock = options.clock ?? (() => new Date().toISOString());
   const persist = async (): Promise<void> => {
-    if (options.persistWorkspace === undefined) return;
-    await options.persistWorkspace(workspace.snapshot());
+    if (options.persistWorkspace !== undefined) {
+      await options.persistWorkspace(workspace.snapshot());
+    }
+    if (options.persistCases !== undefined) {
+      await options.persistCases(catalog.procurements());
+    }
   };
 
   const listed = (): SpecialistProcurementCardValue[] => {
@@ -110,6 +117,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       relevantCount: selected.cards.length - skippedRejected,
       discardedCount: selected.discardedCount + skippedRejected,
     });
+    await persist();
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
       relevantCount: selected.cards.length - skippedRejected,
@@ -174,6 +182,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         skippedDecidedCount,
       });
     }
+    if (addedCount > 0) await persist();
     return SpecialistDiscoveryResponse.parse({
       ran: true,
       reason: "ok",
@@ -404,7 +413,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (document === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    const bytes = await getBlob(blobDirectory, params.hash);
+    const bytes =
+      options.blobStore === undefined
+        ? await getBlob(blobDirectory, params.hash)
+        : await options.blobStore.get(params.hash);
     if (bytes === undefined) {
       return reply.code(404).send({ error: "blob_missing" });
     }

@@ -687,3 +687,22 @@ export const notificationOutbox = pgTable(
     index("notification_outbox_dispatch_idx").on(table.status, table.availableAt),
   ],
 );
+
+/** Console workspace snapshot. Specialist working profiles are data, not DomainProfile rows. */
+export const specialistWorkspaces = pgTable("specialist_workspaces", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  snapshot: jsonb("snapshot").notNull(),
+  updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+});
+
+/** Live/fixture specialist cards. Document hashes live on document_versions. */
+export const specialistCases = pgTable(
+  "specialist_cases",
+  {
+    id: uuid("id").primaryKey(),
+    sourceProcurementId: varchar("source_procurement_id", { length: 256 }).notNull(),
+    card: jsonb("card").notNull(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("specialist_cases_source_uq").on(table.sourceProcurementId)],
+);

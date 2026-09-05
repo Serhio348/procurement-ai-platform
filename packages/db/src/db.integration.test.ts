@@ -1,11 +1,12 @@
-import { ProcedureCard } from "@procurement/contracts";
+import { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyBootstrap } from "./bootstrap.js";
 import { createDatabase, type Database } from "./client.js";
 import { migrateDatabase } from "./migrate.js";
 import { createRepositories } from "./repositories.js";
-import { domainProfiles, procurements, seedRuns } from "./schema.js";
+import { documentVersions, domainProfiles, procurements, seedRuns } from "./schema.js";
+import { blobStorageKey, createSpecialistStore } from "./specialist-store.js";
 
 const testDatabaseUrl = process.env["TEST_DATABASE_URL"];
 const integration = describe.skipIf(testDatabaseUrl === undefined);
@@ -118,6 +119,60 @@ integration("PostgreSQL migrations and invariants", () => {
         and event_key = 'integration:event-1'
     `);
     expect(unchanged.rows[0]?.current).toBe("announced");
+  });
+
+  it("stores specialist cases and document hashes without file bytes", async () => {
+    const store = createSpecialistStore(db);
+    const hash = "b".repeat(64);
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      title: "Кабель для persist",
+      status: "unknown",
+      statusLabel: "неизвестен",
+      url: "https://goszakupki.by/auction/view/901",
+      sourceProcurementId: "auction/901-persist",
+      live: true,
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/901",
+          hash,
+          sizeBytes: 12,
+          status: "hashed",
+          note: "application/pdf",
+        },
+      ],
+    });
+
+    await store.saveWorkspace({
+      profiles: [
+        {
+          id: "00000000-0000-4000-8000-000000000902",
+          name: "Persist",
+          purpose: "",
+          description: "",
+          instructions: "",
+          keywords: ["кабель"],
+          excludeKeywords: [],
+          watchNewProcurements: false,
+        },
+      ],
+      activeProfileId: "00000000-0000-4000-8000-000000000902",
+      decisions: [],
+    });
+    await store.saveCases([card]);
+
+    const loadedWorkspace = await store.loadWorkspace();
+    const loadedCases = await store.loadCases();
+    const versions = await db
+      .select()
+      .from(documentVersions)
+      .where(eq(documentVersions.hash, hash));
+
+    expect(loadedWorkspace?.profiles[0]?.name).toBe("Persist");
+    expect(loadedCases.map((item) => item.sourceProcurementId)).toContain("auction/901-persist");
+    expect(versions[0]?.hash).toBe(hash);
+    expect(versions[0]?.storageKey).toBe(blobStorageKey(hash));
   });
 
   it("rejects a fact that is committed without evidence", async () => {

@@ -175,4 +175,51 @@ describe("ProcurementsApp", () => {
     expect(screen.getByText(/Документы ещё не брали/)).toBeTruthy();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
+
+  it("records a specialist choice and hides a rejected case from the list", async () => {
+    const user = userEvent.setup();
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Комплектная трансформаторная подстанция",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/001",
+      sourceProcurementId: "auction-001",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[found]}
+                decide={async (_id, kind) =>
+                  kind === "reject" ? [] : [{ ...found, triage: kind }]
+                }
+              />
+            }
+          />
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp
+                items={[found]}
+                decide={async (_id, kind) =>
+                  kind === "reject" ? [] : [{ ...found, triage: kind }]
+                }
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Отслеживать" }));
+    expect(screen.getByText("отслеживаем")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Не нужно" }));
+    expect(screen.getByText("Закупка скрыта и больше не будет предлагаться.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();
+  });
 });

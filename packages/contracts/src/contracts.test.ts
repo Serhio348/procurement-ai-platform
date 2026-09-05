@@ -27,6 +27,7 @@ import { NotificationSendRequest, TelegramSendRequest } from "./notification.js"
 import { ReportOutput } from "./report.js";
 import { DomainSearchCandidate } from "./domain-search.js";
 import { ProcurementGetStatusResponse, ProcurementSearchRequest } from "./source-port.js";
+import { SpecialistWorkingProfile } from "./specialist.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const now = "2026-08-25T09:00:00.000Z";
@@ -513,6 +514,16 @@ describe("notification delivery contracts", () => {
       dedupeKey: "case-1:status",
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("specialist working profile", () => {
+  it("starts with watch off so saving a profile cannot start discovery by itself", () => {
+    const parsed = SpecialistWorkingProfile.parse({
+      name: "Щиты",
+      keywords: ["НКУ"],
+    });
+    expect(parsed.watchNewProcurements).toBe(false);
   });
 });
 

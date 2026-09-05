@@ -116,4 +116,26 @@ describe("GoszakupkiBySource", () => {
       "/tenders/posted?TendersSearch%5Btext%5D=%D1%82%D1%80%D0%B0%D0%BD%D1%81%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%82%D0%BE%D1%80&TendersSearch%5Bcreated_from%5D=01.09.2026&TendersSearch%5Bcreated_to%5D=02.09.2026",
     );
   });
+
+  it("does not query the next profile keyword after the requested limit is filled", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["трансформатор", "кабель"],
+        limit: 1,
+      }),
+    );
+
+    expect(result.hits).toHaveLength(1);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).toContain("трансформатор");
+    expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).not.toContain("кабель");
+  });
 });

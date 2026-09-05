@@ -70,7 +70,9 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
           rows.set(row.hit.sourceProcurementId, row);
         }
         if (!parsed.hasNextPage) break;
+        if (rows.size >= query.offset + query.limit) break;
       }
+      if (rows.size >= query.offset + query.limit) break;
     }
 
     const hits = [...rows.values()]

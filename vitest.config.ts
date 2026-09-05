@@ -10,6 +10,7 @@ export default defineConfig({
       "@procurement/contracts": fromRoot("./packages/contracts/src/index.ts"),
       "@procurement/domain": fromRoot("./packages/domain/src/index.ts"),
       "@procurement/observability": fromRoot("./packages/observability/src/index.ts"),
+      "@procurement/mcp-client": fromRoot("./packages/mcp-client/src/index.ts"),
     },
   },
   test: {

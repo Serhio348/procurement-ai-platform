@@ -4,6 +4,7 @@ import type {
   SpecialistCaseDocument,
   SpecialistProcurementCard,
   SpecialistSearchResponse,
+  SpecialistTriageKind,
 } from "@procurement/contracts";
 import { Shell } from "../shell/Shell.js";
 
@@ -39,12 +40,25 @@ export function documentStatusLabel(document: SpecialistCaseDocument): string {
   }
 }
 
+export function triageLabel(kind: SpecialistTriageKind): string {
+  switch (kind) {
+    case "monitor":
+      return "отслеживаем";
+    case "participate":
+      return "участвуем";
+    case "reject":
+      return "не нужно";
+  }
+}
+
 export function ProcurementsApp({
   items: catalog,
   search,
+  decide,
 }: {
   items: readonly SpecialistProcurementCard[];
   search?: () => Promise<SpecialistSearchResponse>;
+  decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -67,8 +81,28 @@ export function ProcurementsApp({
       setNotice(
         `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}.`,
       );
-    } catch {
-      setNotice("Не удалось выполнить поиск по профилю.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Не удалось выполнить поиск по профилю.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDecide(kind: SpecialistTriageKind): Promise<void> {
+    if (decide === undefined || selected === undefined || busy) return;
+    setBusy(true);
+    try {
+      const next = await decide(selected.id, kind);
+      setItems(next);
+      if (kind === "reject") {
+        setNotice("Закупка скрыта и больше не будет предлагаться.");
+        const remaining = next[0];
+        await navigate(remaining === undefined ? "/procurements" : `/procurements/${remaining.id}`);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Не удалось сохранить решение.");
     } finally {
       setBusy(false);
     }
@@ -112,6 +146,9 @@ export function ProcurementsApp({
                         <span className="inbox-title">{item.title}</span>
                         <span className="inbox-marks">
                           {item.live ? <span className="live-mark">живая</span> : null}
+                          {item.triage === undefined ? null : (
+                            <span className="triage-mark">{triageLabel(item.triage)}</span>
+                          )}
                           {item.latestChange?.urgent === true ? (
                             <span className="urgent-mark">Срочно</span>
                           ) : null}
@@ -172,6 +209,40 @@ export function ProcurementsApp({
                   </div>
                 )}
               </dl>
+              {decide === undefined ? null : (
+                <div className="triage-actions">
+                  <button
+                    type="button"
+                    className="search-profile"
+                    disabled={busy}
+                    onClick={() => {
+                      void runDecide("monitor");
+                    }}
+                  >
+                    Отслеживать
+                  </button>
+                  <button
+                    type="button"
+                    className="search-profile"
+                    disabled={busy}
+                    onClick={() => {
+                      void runDecide("participate");
+                    }}
+                  >
+                    Участвовать
+                  </button>
+                  <button
+                    type="button"
+                    className="search-profile"
+                    disabled={busy}
+                    onClick={() => {
+                      void runDecide("reject");
+                    }}
+                  >
+                    Не нужно
+                  </button>
+                </div>
+              )}
               {selected.actions.length === 0 ? null : (
                 <>
                   <h3>Что сделано</h3>

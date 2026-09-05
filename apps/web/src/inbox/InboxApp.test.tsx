@@ -36,7 +36,7 @@ describe("InboxApp", () => {
     );
   });
 
-  it("shows a quiet empty state and keeps profile/task sections disabled", () => {
+  it("shows a quiet empty state and keeps the tasks section disabled", () => {
     render(
       <MemoryRouter>
         <InboxApp entries={[]} />
@@ -44,7 +44,7 @@ describe("InboxApp", () => {
     );
 
     expect(screen.getAllByText("Новых изменений нет").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Профили/ })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("link", { name: "Профили" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Задачи/ })).toHaveProperty("disabled", true);
   });
 });

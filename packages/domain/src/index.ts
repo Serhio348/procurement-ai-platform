@@ -18,3 +18,5 @@ export * from "./search/cheap-classify.js";
 export * from "./search/search-cards.js";
 export * from "./specialist/case.js";
 export * from "./specialist/catalog.js";
+export * from "./specialist/triage.js";
+export * from "./specialist/workspace.js";

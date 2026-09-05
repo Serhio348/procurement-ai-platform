@@ -259,3 +259,49 @@ h3 {
   border: 1px solid #d5dae2;
   padding: 12px;
 }
+
+.triage-mark {
+  flex: none;
+  font-size: 11px;
+  color: #3a5d86;
+  background: #e8eef6;
+  border: 1px solid #b7c4d4;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.triage-actions,
+.profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.profile-page {
+  padding: 16px 20px 24px;
+  max-width: 640px;
+}
+
+.profile-form {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.profile-form input,
+.profile-form textarea {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid #d5dae2;
+  border-radius: 4px;
+}
+
+.search-profile.is-watching {
+  background: #e8f3ec;
+  border-color: #b7d4c2;
+}

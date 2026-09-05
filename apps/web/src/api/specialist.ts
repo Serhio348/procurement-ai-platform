@@ -2,9 +2,13 @@ import {
   SpecialistInboxListResponse,
   SpecialistProcurementListResponse,
   SpecialistSearchResponse,
+  SpecialistWorkingProfile,
   type SpecialistInboxEntry,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistProfileWrite,
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
+  type SpecialistTriageKind,
+  type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
 } from "@procurement/contracts";
 
 export async function fetchInbox(fetcher: typeof fetch = fetch): Promise<readonly SpecialistInboxEntry[]> {
@@ -34,7 +38,78 @@ export async function searchProcurements(
     body: JSON.stringify({}),
   });
   if (!response.ok) {
-    throw new Error("Не удалось выполнить поиск по профилю");
+    throw new Error(await searchFailureMessage(response));
   }
   return SpecialistSearchResponse.parse(await response.json());
+}
+
+export async function fetchProfile(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistWorkingProfileValue> {
+  const response = await fetcher("/api/profile");
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить профиль");
+  }
+  return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function saveProfile(
+  input: SpecialistProfileWrite,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistWorkingProfileValue> {
+  const response = await fetcher("/api/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error("Не удалось сохранить профиль");
+  }
+  return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function setProfileWatch(
+  watchNewProcurements: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistWorkingProfileValue> {
+  const response = await fetcher("/api/profile/watch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ watchNewProcurements }),
+  });
+  if (!response.ok) {
+    throw new Error("Не удалось изменить слежение за новыми закупками");
+  }
+  return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function decideProcurement(
+  id: string,
+  kind: SpecialistTriageKind,
+  fetcher: typeof fetch = fetch,
+): Promise<readonly SpecialistProcurementCardValue[]> {
+  const response = await fetcher(`/api/procurements/${id}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind }),
+  });
+  if (!response.ok) {
+    throw new Error("Не удалось сохранить решение по закупке");
+  }
+  return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
+export async function searchFailureMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (body.error === "source_unavailable") {
+      return "Площадка goszakupki.by сейчас недоступна.";
+    }
+    if (body.error === "search_timeout") {
+      return "Поиск на площадке занял слишком много времени.";
+    }
+  } catch {
+    return "Не удалось выполнить поиск по профилю.";
+  }
+  return "Не удалось выполнить поиск по профилю.";
 }

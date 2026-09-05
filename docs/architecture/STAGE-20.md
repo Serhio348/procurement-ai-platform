@@ -119,5 +119,6 @@ HTTP:
 
 ## 12. Следующий этап
 
-Живой `procurement.search` за тем же HTTP-контрактом, либо PostgreSQL
-outbox для inbox, либо редактор профиля.
+Живой `procurement.search` за тем же HTTP-контрактом реализован, см.
+[`STAGE-21.md`](STAGE-21.md). Дальше — документы найденных процедур,
+PostgreSQL outbox или редактор профиля.

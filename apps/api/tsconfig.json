@@ -9,7 +9,8 @@
   "references": [
     { "path": "../../packages/contracts" },
     { "path": "../../packages/domain" },
-    { "path": "../../packages/observability" }
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/mcp-client" }
   ],
   "include": ["src/**/*.ts"]
 }

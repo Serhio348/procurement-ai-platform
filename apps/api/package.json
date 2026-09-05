@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Specialist HTTP API: inbox events and procurement cards. Fixture catalog by default.",
+  "description": "Specialist HTTP API: inbox, procurement cards, and profile search via fixture or Procurement MCP.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -21,7 +21,9 @@
     "@procurement/contracts": "0.1.0",
     "@procurement/domain": "0.1.0",
     "@procurement/observability": "0.1.0",
-    "fastify": "^5.6.0"
+    "fastify": "^5.6.0",
+    "@procurement/mcp-client": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2"

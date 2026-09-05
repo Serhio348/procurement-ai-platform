@@ -42,6 +42,23 @@ describe("selectRelevantSearchCards", () => {
     expect(selected.cards[0]?.actions[0]?.detail).toContain("подстанция");
     expect(selected.cards[0]?.actions[0]?.detail).toContain("Документы ещё не брали");
     expect(selected.cards[0]?.id).toBe(uuidFromHex("fixture:auction-001"));
+    expect(selected.cards[0]?.live).toBe(false);
+  });
+
+  it("marks goszakupki.by hits as live cases", () => {
+    const selected = selectRelevantSearchCards(
+      [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/3629820",
+          url: "https://goszakupki.by/auction/view/3629820",
+          title: "2БКТПБ 400кВА-10/0,4 кВ",
+        }),
+      ],
+      profile,
+      20,
+    );
+    expect(selected.cards[0]?.live).toBe(true);
   });
 
   it("lets an exclude keyword discard a hit even when a profile keyword is present", () => {

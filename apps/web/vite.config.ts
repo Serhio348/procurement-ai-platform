@@ -16,7 +16,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": "http://127.0.0.1:3001",
+      "/api": {
+        target: "http://127.0.0.1:3001",
+        timeout: 180_000,
+        proxyTimeout: 180_000,
+      },
     },
   },
 });

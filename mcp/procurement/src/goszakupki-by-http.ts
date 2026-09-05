@@ -115,8 +115,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     } catch (error) {
       this.#recordFailure();
       if (error instanceof SourceAccessError) throw error;
-      const reason = error instanceof Error ? error.message : "unknown transport error";
-      throw new SourceAccessError("goszakupki_by", reason);
+      throw new SourceAccessError("goszakupki_by", transportReason(error));
     }
   }
 
@@ -308,6 +307,12 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
       this.#consecutiveFailures = 0;
     }
   }
+}
+
+function transportReason(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown transport error";
+  const cause = error.cause instanceof Error ? error.cause.message : undefined;
+  return cause === undefined || cause.length === 0 ? error.message : `${error.message}: ${cause}`;
 }
 
 export function configureSystemCa(): void {

@@ -107,6 +107,7 @@ export function cardFromRelevantHit(
     statusLabel: hit.sourceStatus ?? statusLabel("unknown"),
     url: hit.url,
     sourceProcurementId: hit.sourceProcurementId,
+    live: hit.sourceId === "goszakupki_by",
     ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
     ...(label === undefined ? {} : { amountLabel: label }),
     actions: [

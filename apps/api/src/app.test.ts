@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { SpecialistProcurementCard } from "@procurement/contracts";
+import { SearchHit, SpecialistProcurementCard } from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
+import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildSpecialistApi } from "./app.js";
 import { putBlob } from "./blobs.js";
@@ -87,6 +88,50 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("does not seed fixture stubs or the captured dump when only live cases are listed", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      liveProcurementsOnly: true,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/3629820",
+            url: "https://goszakupki.by/auction/view/3629820",
+            title: "2БКТПБ 400кВА-10/0,4 кВ",
+          }),
+        ],
+      },
+    });
+
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const before = await app.inject({ method: "GET", url: "/api/procurements" });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { limit: 5 },
+    });
+    const items = JSON.parse(searched.body).items as Array<{
+      title: string;
+      live?: boolean;
+      sourceProcurementId: string;
+    }>;
+
+    expect(JSON.parse(inbox.body).items).toEqual([]);
+    expect(JSON.parse(before.body).items).toEqual([]);
+    expect(searched.statusCode).toBe(200);
+    expect(items).toEqual([
+      expect.objectContaining({
+        live: true,
+        sourceProcurementId: "auction/3629820",
+        title: "2БКТПБ 400кВА-10/0,4 кВ",
+      }),
+    ]);
+    expect(items.some((item) => item.title === "Бытовой щиток")).toBe(false);
+
+    await app.close();
+  });
+
   it("returns delivery and warranty from the live Word TZ and does not treat 99.5% cap as advance", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     const list = await app.inject({ method: "GET", url: "/api/procurements" });
@@ -151,6 +196,117 @@ describe("specialist API", () => {
       payload: { limit: 0 },
     });
     expect(invalid.statusCode).toBe(400);
+
+    await app.close();
+  });
+
+  it("searches with saved profile keywords and does not re-list a rejected procedure", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"], excludeKeywords: [] },
+    });
+    const watchOff = await app.inject({ method: "GET", url: "/api/profile" });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { limit: 20 },
+    });
+    const found = JSON.parse(searched.body).items as Array<{
+      id: string;
+      title: string;
+      sourceProcurementId: string;
+    }>;
+    const cable = found.find((item) => item.title === "Кабель силовой");
+    const rejected = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cable?.id ?? ""}/decision`,
+      payload: { kind: "reject" },
+    });
+    const afterReject = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { limit: 20 },
+    });
+    const remaining = JSON.parse(afterReject.body).items as Array<{ title: string }>;
+
+    expect(saved.statusCode).toBe(200);
+    expect(JSON.parse(watchOff.body).watchNewProcurements).toBe(false);
+    expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
+    expect(searched.statusCode).toBe(200);
+    expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
+      false,
+    );
+    expect(cable).toBeDefined();
+    expect(rejected.statusCode).toBe(200);
+    expect(remaining.some((item) => item.title === "Кабель силовой")).toBe(false);
+
+    await app.close();
+  });
+
+  it("does not discover new procurements until watch is turned on and then skips judged ids", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+
+    const idle = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const enabled = await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const first = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const items = JSON.parse(first.body).items as Array<{ id: string; title: string }>;
+    const substation = items.find((item) => item.title === "Комплектная трансформаторная подстанция");
+    const decided = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${substation?.id ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    const second = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+
+    expect(idle.statusCode).toBe(200);
+    expect(JSON.parse(idle.body).ran).toBe(false);
+    expect(JSON.parse(idle.body).reason).toBe("watch_off");
+    expect(JSON.parse(idle.body).items).toEqual([]);
+    expect(enabled.statusCode).toBe(200);
+    expect(JSON.parse(enabled.body).watchNewProcurements).toBe(true);
+    expect(first.statusCode).toBe(200);
+    expect(JSON.parse(first.body).ran).toBe(true);
+    expect(JSON.parse(first.body).addedCount).toBeGreaterThanOrEqual(1);
+    expect(substation).toBeDefined();
+    expect(decided.statusCode).toBe(200);
+    expect(JSON.parse(second.body).ran).toBe(true);
+    expect(JSON.parse(second.body).addedCount).toBe(0);
+    expect(JSON.parse(second.body).skippedDecidedCount).toBeGreaterThanOrEqual(1);
+
+    await app.close();
+  });
+
+  it("maps a blocked live source to 503 without inventing search hits", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => {
+          throw new McpToolCallError(
+            "source_unavailable",
+            "procurement.search",
+            "Source is blocked",
+          );
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response.body).error).toBe("source_unavailable");
+    const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+    expect(JSON.parse(listed.body).items).toEqual([]);
 
     await app.close();
   });

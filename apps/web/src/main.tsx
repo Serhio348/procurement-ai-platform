@@ -1,6 +1,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { fetchInbox, fetchProcurements, searchProcurements } from "./api/specialist.js";
+import {
+  decideProcurement,
+  fetchInbox,
+  fetchProcurements,
+  fetchProfile,
+  saveProfile,
+  searchProcurements,
+  setProfileWatch,
+} from "./api/specialist.js";
 import { SpecialistApp } from "./SpecialistApp.js";
 import "./styles.css";
 
@@ -12,10 +20,22 @@ if (root === null) {
 const mount = createRoot(root);
 
 try {
-  const [inbox, procurements] = await Promise.all([fetchInbox(), fetchProcurements()]);
+  const [inbox, procurements, profile] = await Promise.all([
+    fetchInbox(),
+    fetchProcurements(),
+    fetchProfile(),
+  ]);
   mount.render(
     <StrictMode>
-      <SpecialistApp inbox={inbox} procurements={procurements} search={searchProcurements} />
+      <SpecialistApp
+        inbox={inbox}
+        procurements={procurements}
+        profile={profile}
+        search={searchProcurements}
+        saveProfile={saveProfile}
+        setProfileWatch={setProfileWatch}
+        decide={decideProcurement}
+      />
     </StrictMode>,
   );
 } catch {

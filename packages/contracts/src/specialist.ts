@@ -92,6 +92,10 @@ export const SpecialistCaseDocument = z.object({
 });
 export type SpecialistCaseDocument = z.infer<typeof SpecialistCaseDocument>;
 
+/** Specialist choice on a found procedure. Not a 0–100 score. */
+export const SpecialistTriageKind = z.enum(["monitor", "participate", "reject"]);
+export type SpecialistTriageKind = z.infer<typeof SpecialistTriageKind>;
+
 export const SpecialistProcurementCard = z.object({
   id: ProcurementId,
   title: z.string().min(1),
@@ -112,6 +116,8 @@ export const SpecialistProcurementCard = z.object({
   missing: z.array(z.string()).default([]),
   extractNotes: z.array(z.string()).default([]),
   extractPreview: z.string().optional(),
+  /** Latest specialist choice; absent means the case is still waiting. */
+  triage: SpecialistTriageKind.optional(),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
 
@@ -132,6 +138,55 @@ export const SpecialistSearchResponse = z.object({
   items: z.array(SpecialistProcurementCard),
 });
 export type SpecialistSearchResponse = z.infer<typeof SpecialistSearchResponse>;
+
+export const SpecialistTriageDecision = z.object({
+  sourceProcurementId: z.string().min(1),
+  kind: SpecialistTriageKind,
+  madeAt: IsoDateTime,
+});
+export type SpecialistTriageDecision = z.infer<typeof SpecialistTriageDecision>;
+
+/**
+ * Console working copy of a Domain Profile. Watch is off until the specialist
+ * presses the dedicated button; saving keywords must not start discovery.
+ */
+export const SpecialistWorkingProfile = z.object({
+  name: z.string().min(1).max(200),
+  keywords: z.array(z.string().min(1)).max(50).default([]),
+  excludeKeywords: z.array(z.string().min(1)).max(50).default([]),
+  watchNewProcurements: z.boolean().default(false),
+});
+export type SpecialistWorkingProfile = z.infer<typeof SpecialistWorkingProfile>;
+
+export const SpecialistProfileWrite = SpecialistWorkingProfile.omit({
+  watchNewProcurements: true,
+});
+export type SpecialistProfileWrite = z.infer<typeof SpecialistProfileWrite>;
+
+export const SpecialistWatchWrite = z.object({
+  watchNewProcurements: z.boolean(),
+});
+export type SpecialistWatchWrite = z.infer<typeof SpecialistWatchWrite>;
+
+export const SpecialistDecisionWrite = z.object({
+  kind: SpecialistTriageKind,
+});
+export type SpecialistDecisionWrite = z.infer<typeof SpecialistDecisionWrite>;
+
+export const SpecialistWorkspaceState = z.object({
+  profile: SpecialistWorkingProfile,
+  decisions: z.array(SpecialistTriageDecision).default([]),
+});
+export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
+
+export const SpecialistDiscoveryResponse = z.object({
+  ran: z.boolean(),
+  reason: z.enum(["watch_off", "no_keywords", "ok"]),
+  addedCount: z.number().int().nonnegative(),
+  skippedDecidedCount: z.number().int().nonnegative(),
+  items: z.array(SpecialistProcurementCard),
+});
+export type SpecialistDiscoveryResponse = z.infer<typeof SpecialistDiscoveryResponse>;
 
 export const SpecialistLiveRun = z.object({
   capturedAt: IsoDateTime,

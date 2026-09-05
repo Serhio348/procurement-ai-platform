@@ -1,6 +1,6 @@
-import { SpecialistInboxListResponse, SpecialistSearchResponse } from "@procurement/contracts";
+import { SpecialistInboxListResponse, SpecialistSearchResponse, SpecialistWorkingProfile } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { fetchInbox, searchProcurements } from "./specialist.js";
+import { fetchInbox, fetchProfile, searchFailureMessage, searchProcurements } from "./specialist.js";
 
 describe("fetchInbox", () => {
   it("parses the specialist inbox payload from the API", async () => {
@@ -28,6 +28,26 @@ describe("fetchInbox", () => {
     );
     expect(inbox).toHaveLength(1);
     expect(inbox[0]?.title).toBe("Поставка КТПБ");
+  });
+});
+
+describe("fetchProfile", () => {
+  it("loads the working profile without treating watch as already on", async () => {
+    const profile = await fetchProfile(async () =>
+      new Response(
+        JSON.stringify(
+          SpecialistWorkingProfile.parse({
+            name: "Электротехническое оборудование",
+            keywords: ["КТПБ"],
+            excludeKeywords: [],
+            watchNewProcurements: false,
+          }),
+        ),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    expect(profile.watchNewProcurements).toBe(false);
+    expect(profile.keywords).toEqual(["КТПБ"]);
   });
 });
 
@@ -62,5 +82,15 @@ describe("searchProcurements", () => {
     expect(body).toBe("{}");
     expect(result.relevantCount).toBe(1);
     expect(result.items[0]?.title).toBe("Комплектная трансформаторная подстанция");
+  });
+
+  it("explains a blocked live source in Russian instead of a generic failure", async () => {
+    const message = await searchFailureMessage(
+      new Response(JSON.stringify({ error: "source_unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(message).toContain("goszakupki.by");
   });
 });

@@ -16,10 +16,12 @@ export function Shell({ children }: { children: ReactNode }) {
           >
             Закупки
           </NavLink>
-          <button type="button" className="nav-soon" disabled title="Скоро">
+          <NavLink
+            to="/profiles"
+            className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
+          >
             Профили
-            <span className="nav-soon-mark">скоро</span>
-          </button>
+          </NavLink>
           <button type="button" className="nav-soon" disabled title="Скоро">
             Задачи
             <span className="nav-soon-mark">скоро</span>

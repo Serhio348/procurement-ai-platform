@@ -107,7 +107,14 @@ export async function bootstrapFromEnvironment(): Promise<void> {
   }
 }
 
-const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("/bootstrap.ts") ?? false;
-if (invokedDirectly) {
+function invokedAsCli(scriptBase: string): boolean {
+  return process.argv.some((arg) => {
+    const normalized = arg.replaceAll("\\", "/");
+    return normalized.endsWith(`/${scriptBase}`) || normalized.endsWith(scriptBase);
+  });
+}
+
+if (invokedAsCli("bootstrap.ts") || invokedAsCli("bootstrap.js")) {
   await bootstrapFromEnvironment();
+  process.stderr.write("PostgreSQL bootstrap applied\n");
 }

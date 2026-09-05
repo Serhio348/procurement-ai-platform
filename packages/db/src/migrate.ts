@@ -12,11 +12,19 @@ export async function migrateDatabase(connectionString: string): Promise<void> {
   }
 }
 
-const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("/migrate.ts") ?? false;
-if (invokedDirectly) {
+/** tsx/npm put `src/migrate.ts` in argv, not always a leading slash. */
+function invokedAsCli(scriptBase: string): boolean {
+  return process.argv.some((arg) => {
+    const normalized = arg.replaceAll("\\", "/");
+    return normalized.endsWith(`/${scriptBase}`) || normalized.endsWith(scriptBase);
+  });
+}
+
+if (invokedAsCli("migrate.ts") || invokedAsCli("migrate.js")) {
   const databaseUrl = process.env["DATABASE_URL"];
   if (databaseUrl === undefined || databaseUrl.length === 0) {
     throw new Error("DATABASE_URL is required");
   }
   await migrateDatabase(databaseUrl);
+  process.stderr.write("PostgreSQL migrations applied\n");
 }

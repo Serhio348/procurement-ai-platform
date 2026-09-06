@@ -1,0 +1,15 @@
+[Unit]
+Description=Procurement specialist API
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/procurement-ai-platform
+ExecStart=/usr/bin/npm run start -w @procurement/api
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

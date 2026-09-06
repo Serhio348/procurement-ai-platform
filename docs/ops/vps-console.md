@@ -70,8 +70,8 @@ apt install -y ca-certificates curl git nginx apache2-utils
 | `ca-certificates` | проверка HTTPS |
 | `curl` | скачать ключи Docker и Node |
 | `git` | клон с GitHub |
-| `nginx` | вход с улицы: порт 80, пароль, раздача консоли |
-| `apache2-utils` | команда `htpasswd` для пароля клиента |
+| `nginx` | вход с улицы: порт 80, статика и прокси `/api` |
+| `apache2-utils` | не обязателен, пока нет пароля nginx |
 
 ### 2.1. Docker Engine и Compose
 
@@ -233,74 +233,20 @@ npm run db:bootstrap
 
 ---
 
-## 6. Пароль на вход (один на фирму)
+## 6. nginx: с улицы только порт 80
 
-Это не учётки в программе. Браузер спросит логин и пароль **до**
-консоли. Один комплект на всю фирму.
+Вход в программу (логин специалиста) — отдельный этап, не nginx.
+Пока его нет, кто знает IP — откроет консоль. Для теста так и задумано.
 
-Придумайте логин и пароль клиента. Команда спросит пароль два раза
-(звёздочек не будет):
+Консоль — статика из `apps/web/dist`. Запросы `/api` идут на Fastify
+`127.0.0.1:3001`. Vite на 5173 клиентам не открываем.
 
-```bash
-htpasswd -c /etc/nginx/.htpasswd-procurement specialist
-```
-
-`specialist` — логин, который введёт клиент. Файл `-c` создаёт заново:
-повторный `-c` сотрёт старых пользователей. Добавить второго:
+Конфиг лежит в репозитории: `infra/nginx/procurement.conf`.
+Путь `root` в нём — `/root/procurement-ai-platform/...`. Если клон
+в другом каталоге, поправьте одну строку в копии на сервере.
 
 ```bash
-htpasswd /etc/nginx/.htpasswd-procurement drugoy_login
-```
-
----
-
-## 7. nginx: с улицы только порт 80
-
-Консоль собирается в статику. Браузер ходит на `/`, запросы `/api`
-проксируются на Fastify `127.0.0.1:3001`. Vite на 5173 клиентам
-**не** открываем.
-
-```bash
-nano /etc/nginx/sites-available/procurement
-```
-
-Вставьте целиком (IP в `server_name` замените на свой; можно оставить
-`_` — тогда подойдёт любой адрес):
-
-```nginx
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    auth_basic "Procurement";
-    auth_basic_user_file /etc/nginx/.htpasswd-procurement;
-
-    client_max_body_size 32m;
-
-    root /root/procurement-ai-platform/apps/web/dist;
-    index index.html;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Authorization "";
-        proxy_read_timeout 180s;
-        proxy_send_timeout 180s;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
-
-`Authorization ""` — чтобы пароль nginx не улетал в API.
-
-Включить сайт, выключить дефолтный, проверить конфиг:
-
-```bash
+cp /root/procurement-ai-platform/infra/nginx/procurement.conf /etc/nginx/sites-available/procurement
 rm -f /etc/nginx/sites-enabled/default
 ln -sfn /etc/nginx/sites-available/procurement /etc/nginx/sites-enabled/procurement
 nginx -t
@@ -314,30 +260,11 @@ systemctl reload nginx
 ## 8. Автозапуск API после перезагрузки
 
 API слушает только `127.0.0.1:3001`. С улицы его не видно.
+Юнит лежит в `infra/systemd/procurement-api.service`.
+`WorkingDirectory` там — `/root/procurement-ai-platform`.
 
 ```bash
-nano /etc/systemd/system/procurement-api.service
-```
-
-```ini
-[Unit]
-Description=Procurement specialist API
-After=docker.service network.target
-Requires=docker.service
-
-[Service]
-Type=simple
-WorkingDirectory=/root/procurement-ai-platform
-ExecStart=/usr/bin/npm run start -w @procurement/api
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
+cp /root/procurement-ai-platform/infra/systemd/procurement-api.service /etc/systemd/system/procurement-api.service
 systemctl daemon-reload
 systemctl enable --now procurement-api
 systemctl status procurement-api --no-pager
@@ -378,8 +305,7 @@ ufw status
 ## 10. Что дать клиенту
 
 1. Ссылка: `http://IP-сервера` (пример: `http://193.47.42.49`).
-2. Логин и пароль из шага 6.
-3. Коротко: открыть ссылку → ввести пароль → профиль → поиск.
+2. Коротко: открыть ссылку → профиль → поиск.
 
 Не давать: SSH, пароль `root`, токен GitHub, ключ DeepSeek.
 
@@ -387,8 +313,7 @@ ufw status
 Сертификат и домен — отдельный шаг (не в этой инструкции).
 
 Проверка с телефона **не** по Wi‑Fi офиса, а с мобильного интернета:
-открыть ту же ссылку. Если пускает и после пароля видна консоль —
-сервер доступен из Беларуси.
+открыть ту же ссылку. Если видна консоль — сервер доступен из Беларуси.
 
 ---
 
@@ -430,7 +355,6 @@ git pull
 | Статус контейнеров | `cd /root/procurement-ai-platform && docker compose -f infra/docker-compose.yml ps` |
 | Перезапуск базы | `docker compose -f infra/docker-compose.yml restart` |
 | Проверка nginx | `nginx -t && systemctl reload nginx` |
-| Сменить пароль клиента | `htpasswd /etc/nginx/.htpasswd-procurement specialist` |
 
 ---
 
@@ -457,8 +381,8 @@ curl -I --max-time 20 https://goszakupki.by
 
 **502 Bad Gateway.** API не запущен: `systemctl status procurement-api`.
 
-**После пароля пустая страница.** В логе API нет `listening` — смотреть
-`journalctl`. Часто забыли `npm run build` или Docker не поднялся.
+**Пустая страница / нет связи с API.** В логе API нет `listening` —
+смотреть `journalctl`. Часто забыли `npm run build` или Docker не поднялся.
 
 **После перезагрузки сервера нет базы.** Docker должен быть `enabled`
 (ставится с пакетом). Затем `systemctl start procurement-api`.

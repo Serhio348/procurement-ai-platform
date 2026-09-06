@@ -13,5 +13,6 @@
     "types": ["vite/client", "node"],
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../../tests/fixtures/specialist/inbox.json"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../tests/fixtures/specialist/inbox.json"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

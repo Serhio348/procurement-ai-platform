@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from "react";
-import { BrowserRouter, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
   SpecialistInboxEntry,
   SpecialistIngestProgress,
@@ -81,6 +81,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<InboxApp entries={props.inbox} />} />
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/register" element={<Navigate to="/" replace />} />
+        <Route path="/forgot-password" element={<Navigate to="/" replace />} />
+        <Route path="/reset-password" element={<Navigate to="/" replace />} />
         <Route
           path="/profiles"
           element={

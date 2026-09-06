@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { signIn } from "../api/auth.js";
 import { AuthScreen } from "./AuthScreen.js";
 import { useAuthSession } from "./AuthSession.js";
+import { openConsolePath } from "./open-console.js";
 
 export function LoginPage() {
   const { setUser } = useAuthSession();
@@ -16,7 +17,9 @@ export function LoginPage() {
     setBusy(true);
     setError(undefined);
     try {
-      setUser(await signIn(email, password));
+      const next = await signIn(email, password);
+      openConsolePath();
+      setUser(next);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось войти");
     } finally {

@@ -128,10 +128,11 @@ classic token с правом `repo`. Пароль от сайта GitHub в `gi
 
 На сервере:
 
+Проект живёт в `/opt`, не в `/root`: nginx не читает домашнюю папку root.
+
 ```bash
-cd /root
-git clone https://github.com/Serhio348/procurement-ai-platform.git
-cd procurement-ai-platform
+git clone git@github.com:Serhio348/procurement-ai-platform.git /opt/procurement-ai-platform
+cd /opt/procurement-ai-platform
 git checkout main
 cp .env.example .env
 ```
@@ -154,7 +155,7 @@ git log -1 --oneline
 Открыть редактор:
 
 ```bash
-nano /root/procurement-ai-platform/.env
+nano /opt/procurement-ai-platform/.env
 ```
 
 `Ctrl+O` — сохранить, Enter, `Ctrl+X` — выход.
@@ -182,7 +183,7 @@ Postgres и MinIO в `.env` **до** первого `docker compose up`.
 Проверка, что live включён:
 
 ```bash
-grep PROCUREMENT_SOURCE_MODE /root/procurement-ai-platform/.env
+grep PROCUREMENT_SOURCE_MODE /opt/procurement-ai-platform/.env
 ```
 
 Ожидание: `live`, не `fixture`.
@@ -194,7 +195,7 @@ grep PROCUREMENT_SOURCE_MODE /root/procurement-ai-platform/.env
 В каталоге проекта:
 
 ```bash
-cd /root/procurement-ai-platform
+cd /opt/procurement-ai-platform
 npm install --include=dev
 ```
 
@@ -223,7 +224,7 @@ docker compose -f infra/docker-compose.yml ps
 
 ```bash
 set -a
-source /root/procurement-ai-platform/.env
+source /opt/procurement-ai-platform/.env
 set +a
 npm run db:migrate
 npm run db:bootstrap
@@ -242,11 +243,10 @@ npm run db:bootstrap
 `127.0.0.1:3001`. Vite на 5173 клиентам не открываем.
 
 Конфиг лежит в репозитории: `infra/nginx/procurement.conf`.
-Путь `root` в нём — `/root/procurement-ai-platform/...`. Если клон
-в другом каталоге, поправьте одну строку в копии на сервере.
+Каталог сайта в нём — `/opt/procurement-ai-platform/apps/web/dist`.
 
 ```bash
-cp /root/procurement-ai-platform/infra/nginx/procurement.conf /etc/nginx/sites-available/procurement
+cp /opt/procurement-ai-platform/infra/nginx/procurement.conf /etc/nginx/sites-available/procurement
 rm -f /etc/nginx/sites-enabled/default
 ln -sfn /etc/nginx/sites-available/procurement /etc/nginx/sites-enabled/procurement
 nginx -t
@@ -261,10 +261,14 @@ systemctl reload nginx
 
 API слушает только `127.0.0.1:3001`. С улицы его не видно.
 Юнит лежит в `infra/systemd/procurement-api.service`.
-`WorkingDirectory` там — `/root/procurement-ai-platform`.
+Процесс идёт от пользователя `procurement`, каталог — `/opt/procurement-ai-platform`.
 
 ```bash
-cp /root/procurement-ai-platform/infra/systemd/procurement-api.service /etc/systemd/system/procurement-api.service
+id procurement || useradd --system --home /opt/procurement-ai-platform --shell /usr/sbin/nologin procurement
+chown -R procurement:procurement /opt/procurement-ai-platform
+chmod o+x /opt/procurement-ai-platform /opt/procurement-ai-platform/apps /opt/procurement-ai-platform/apps/web
+chmod -R o+rX /opt/procurement-ai-platform/apps/web/dist
+cp /opt/procurement-ai-platform/infra/systemd/procurement-api.service /etc/systemd/system/procurement-api.service
 systemctl daemon-reload
 systemctl enable --now procurement-api
 systemctl status procurement-api --no-pager
@@ -322,7 +326,7 @@ ufw status
 На сервере:
 
 ```bash
-cd /root/procurement-ai-platform
+cd /opt/procurement-ai-platform
 git pull
 npm install --include=dev
 npm run build
@@ -352,7 +356,7 @@ git pull
 |---|---|
 | Лог API | `journalctl -u procurement-api -f` |
 | Перезапуск API | `systemctl restart procurement-api` |
-| Статус контейнеров | `cd /root/procurement-ai-platform && docker compose -f infra/docker-compose.yml ps` |
+| Статус контейнеров | `cd /opt/procurement-ai-platform && docker compose -f infra/docker-compose.yml ps` |
 | Перезапуск базы | `docker compose -f infra/docker-compose.yml restart` |
 | Проверка nginx | `nginx -t && systemctl reload nginx` |
 

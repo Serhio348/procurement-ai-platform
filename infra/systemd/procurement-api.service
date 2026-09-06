@@ -5,7 +5,9 @@ Requires=docker.service
 
 [Service]
 Type=simple
-WorkingDirectory=/root/procurement-ai-platform
+User=procurement
+Group=procurement
+WorkingDirectory=/opt/procurement-ai-platform
 ExecStart=/usr/bin/npm run start -w @procurement/api
 Restart=always
 RestartSec=5

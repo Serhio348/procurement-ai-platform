@@ -4,6 +4,7 @@ import { SourceId } from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
 import { createLogger } from "@procurement/observability";
 import { buildSpecialistApi } from "./app.js";
+import { createSmtpMailPort } from "./auth/mail.js";
 import { resolveBlobDirectory } from "./blobs.js";
 import { startDiscoveryRepeat } from "./discovery-queue.js";
 import { discoveryTransport } from "./discovery-transport.js";
@@ -47,6 +48,16 @@ async function main(): Promise<void> {
           sourceId: SourceId.parse("goszakupki_by"),
           logger,
         });
+  const bootstrapEmail = process.env["AUTH_BOOTSTRAP_EMAIL"]?.trim() ?? "";
+  const bootstrapPassword = process.env["AUTH_BOOTSTRAP_PASSWORD"] ?? "";
+  if (bootstrapEmail.length > 0 && bootstrapPassword.length >= 8) {
+    await persistence.authDirectory.bootstrapAdmin(
+      bootstrapEmail,
+      bootstrapPassword,
+      "Администратор",
+    );
+  }
+  const authMail = createSmtpMailPort(process.env);
   const app = await buildSpecialistApi({
     catalog,
     workspace,
@@ -56,6 +67,14 @@ async function main(): Promise<void> {
     persistWorkspace: persistence.persistWorkspace,
     persistCases: persistence.persistCases,
     ingestProgress,
+    authDirectory: persistence.authDirectory,
+    ...(authMail === undefined ? {} : { authMail }),
+    authCookieSecure: process.env["AUTH_COOKIE_SECURE"] === "1",
+    authPublicUrl:
+      process.env["AUTH_PUBLIC_URL"] ?? process.env["BETTER_AUTH_URL"] ?? "http://127.0.0.1:5173",
+    ...(process.env["INTERNAL_API_TOKEN"] === undefined
+      ? {}
+      : { internalApiToken: process.env["INTERNAL_API_TOKEN"] }),
     ...(searchHits === undefined ? {} : { searchHits }),
     ...(mcp === undefined
       ? {}

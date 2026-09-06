@@ -28,6 +28,9 @@ import {
 import { McpToolCallError } from "@procurement/mcp-client";
 import { silentLogger, type Logger } from "@procurement/observability";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import type { AuthDirectory } from "./auth/directory.js";
+import type { AuthMailPort } from "./auth/mail.js";
+import { registerAuth } from "./auth/register.js";
 import {
   contentDisposition,
   contentTypeForName,
@@ -61,6 +64,11 @@ export interface BuildApiOptions {
   blobStore?: BlobStore;
   clock?: () => string;
   ingestProgress?: ReturnType<typeof createIngestProgressHub>;
+  authDirectory?: AuthDirectory;
+  authMail?: AuthMailPort;
+  authCookieSecure?: boolean;
+  authPublicUrl?: string;
+  internalApiToken?: string;
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
@@ -92,6 +100,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   };
 
   const app = Fastify({ logger: false });
+  registerAuth(app, {
+    ...(options.authDirectory === undefined ? {} : { directory: options.authDirectory }),
+    ...(options.authMail === undefined ? {} : { mail: options.authMail }),
+    ...(options.authCookieSecure === undefined ? {} : { cookieSecure: options.authCookieSecure }),
+    ...(options.authPublicUrl === undefined ? {} : { publicUrl: options.authPublicUrl }),
+    ...(options.internalApiToken === undefined ? {} : { internalApiToken: options.internalApiToken }),
+  });
 
   async function runManualSearch(limit: number): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace.profile();

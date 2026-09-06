@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   consoleCapability,
+  hasActiveAdmin,
   mayAdministerUsers,
   mayReadSpecialistApi,
   mayWriteSpecialistApi,
@@ -32,5 +33,15 @@ describe("capability gates", () => {
     expect(mayWriteSpecialistApi("write")).toBe(true);
     expect(mayAdministerUsers("write")).toBe(false);
     expect(mayAdministerUsers("admin")).toBe(true);
+  });
+
+  it("refuses to drop the last active admin", () => {
+    expect(
+      hasActiveAdmin([
+        { role: "admin", accessStatus: "revoked" },
+        { role: "specialist", accessStatus: "active" },
+      ]),
+    ).toBe(false);
+    expect(hasActiveAdmin([{ role: "admin", accessStatus: "active" }])).toBe(true);
   });
 });

@@ -3,6 +3,9 @@ import {
   createSpecialistStore,
   type Database,
 } from "@procurement/db";
+import type { AuthDirectory } from "./auth/directory.js";
+import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
+import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
 import type { SpecialistCatalog } from "@procurement/domain";
 import { SpecialistWorkspace } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
@@ -15,6 +18,7 @@ import { loadWorkspaceFile, saveWorkspaceFile } from "./workspace-file.js";
 export interface SpecialistPersistence {
   workspace: SpecialistWorkspace;
   postgres: boolean;
+  authDirectory: AuthDirectory;
   hydrateCatalog: (catalog: SpecialistCatalog) => Promise<void>;
   persistWorkspace: (state: SpecialistWorkspaceState) => Promise<void>;
   persistCases: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
@@ -75,6 +79,10 @@ export async function openSpecialistPersistence(options: {
   return {
     workspace,
     postgres: store !== undefined,
+    authDirectory:
+      connected === undefined
+        ? createMemoryAuthDirectory()
+        : createPostgresAuthDirectory(connected.db),
     async hydrateCatalog(catalog) {
       if (store === undefined) return;
       const cards = await store.loadCases();

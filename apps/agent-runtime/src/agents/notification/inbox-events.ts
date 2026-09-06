@@ -7,16 +7,21 @@ export interface SpecialistInboxEvents {
 export class HttpSpecialistInboxEvents implements SpecialistInboxEvents {
   readonly #baseUrl: string;
   readonly #fetch: typeof fetch;
+  readonly #internalToken: string | undefined;
 
-  constructor(options: { baseUrl: string; fetchImpl?: typeof fetch }) {
+  constructor(options: { baseUrl: string; fetchImpl?: typeof fetch; internalToken?: string }) {
     this.#baseUrl = options.baseUrl.replace(/\/$/, "");
     this.#fetch = options.fetchImpl ?? fetch;
+    this.#internalToken = options.internalToken;
   }
 
   async record(item: InboxFixtureItem): Promise<void> {
     const response = await this.#fetch(`${this.#baseUrl}/api/inbox/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.#internalToken === undefined ? {} : { "x-internal-token": this.#internalToken }),
+      },
       body: JSON.stringify(item),
     });
     if (!response.ok) {

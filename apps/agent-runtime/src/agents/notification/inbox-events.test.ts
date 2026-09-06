@@ -7,8 +7,12 @@ describe("HttpSpecialistInboxEvents", () => {
     const posts: string[] = [];
     const events = new HttpSpecialistInboxEvents({
       baseUrl: "http://127.0.0.1:3001",
+      internalToken: "secret-token",
       fetchImpl: async (url, init) => {
         posts.push(`${String(init?.method)} ${String(url)}`);
+        expect((init?.headers as { "x-internal-token"?: string })["x-internal-token"]).toBe(
+          "secret-token",
+        );
         return new Response(JSON.stringify({ items: [] }), { status: 201 });
       },
     });

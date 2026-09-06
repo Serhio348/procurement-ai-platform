@@ -25,3 +25,9 @@ export function mayWriteSpecialistApi(capability: ConsoleCapability): boolean {
 export function mayAdministerUsers(capability: ConsoleCapability): boolean {
   return capability === "admin";
 }
+
+export function hasActiveAdmin(
+  users: readonly { role: SpecialistRole | null; accessStatus: AccessStatus }[],
+): boolean {
+  return users.some((user) => user.accessStatus === "active" && user.role === "admin");
+}

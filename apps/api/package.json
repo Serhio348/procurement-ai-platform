@@ -27,10 +27,13 @@
     "@procurement/mcp-documents": "0.1.0",
     "@procurement/observability": "0.1.0",
     "bullmq": "^5.61.0",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.6.0",
-    "ioredis": "^5.8.1"
+    "ioredis": "^5.8.1",
+    "nodemailer": "^10.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2"
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.1"
   }
 }

@@ -44,6 +44,7 @@
 - [`docs/architecture/STAGE-23.md`](docs/architecture/STAGE-23.md) — несколько профилей
 - [`docs/architecture/STAGE-24.md`](docs/architecture/STAGE-24.md) — документы после «Участвовать»
 - [`docs/architecture/STAGE-25.md`](docs/architecture/STAGE-25.md) — PostgreSQL, MinIO и Redis для консоли
+- [`docs/architecture/STAGE-26.md`](docs/architecture/STAGE-26.md) — вход, регистрация и одобрение доступа
 
 ---
 
@@ -177,7 +178,7 @@ docs/architecture/ Документы этапов
 - Этап 10 — MonitoringAgent: diff статуса, сроков и документов по правилам профиля
 - Этап 11 — ReportAgent: markdown-отчёт из проверенных фактов, без выдуманной оценки
 - Этап 12 — NotificationAgent: inbox и telegram.send уже сформированного текста
-- Этап 13 — веб-интерфейс: inbox срочных ChangeEvent, без чата и без логина
+- Этап 13 — веб-интерфейс: inbox срочных ChangeEvent, без чата
 - Этап 14 — живой inbox через Fastify API
 - Этап 15 — список закупок и карточка кейса
 - Этап 16 — живой прогон одной закупки с goszakupki.by
@@ -190,6 +191,7 @@ docs/architecture/ Документы этапов
 - Этап 23 — несколько профилей, пустые поля, слежение на каждом
 - Этап 24 — документы найденной процедуры после «Участвовать»
 - Этап 25 — консоль: хеши в PostgreSQL, файлы в MinIO, discovery в Redis
+- Этап 26 — вход, открытая регистрация, admin выдаёт роль
 
 Не начато: документы на «Отслеживать» (только хеши),
 PostgreSQL outbox для inbox, входящий Telegram-бот.

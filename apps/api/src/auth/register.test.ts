@@ -3,10 +3,10 @@ import { buildSpecialistApi } from "../app.js";
 import { createMemoryAuthDirectory } from "./memory-directory.js";
 import { SESSION_COOKIE } from "./cookie.js";
 
-function cookieHeader(response: { headers: { "set-cookie"?: string | string[] } }): string {
+function cookieHeader(response: { headers: Record<string, unknown> }): string {
   const raw = response.headers["set-cookie"];
   const first = Array.isArray(raw) ? raw[0] : raw;
-  return first?.split(";")[0] ?? "";
+  return typeof first === "string" ? (first.split(";")[0] ?? "") : "";
 }
 
 describe("specialist auth API", () => {

@@ -1,18 +1,30 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 
-const scrypt = promisify(scryptCallback);
 const KEY_LENGTH = 32;
 const N = 16384;
 const R = 8;
 const P = 1;
 
+function scryptKey(
+  password: string,
+  salt: Buffer,
+  keyLength: number,
+  options: { N: number; r: number; p: number },
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(password, salt, keyLength, options, (error, derived) => {
+      if (error !== null) {
+        reject(error);
+        return;
+      }
+      resolve(derived);
+    });
+  });
+}
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = await scrypt(password, salt, KEY_LENGTH, { N, r: R, p: P });
-  if (!(key instanceof Buffer)) {
-    throw new Error("scrypt returned a non-buffer key");
-  }
+  const key = await scryptKey(password, salt, KEY_LENGTH, { N, r: R, p: P });
   return `scrypt$${String(N)}$${String(R)}$${String(P)}$${salt.toString("hex")}$${key.toString("hex")}`;
 }
 
@@ -35,7 +47,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   }
   const salt = Buffer.from(saltHex, "hex");
   const expected = Buffer.from(keyHex, "hex");
-  const actual = await scrypt(password, salt, expected.length, { N: n, r, p });
-  if (!(actual instanceof Buffer) || actual.length !== expected.length) return false;
+  const actual = await scryptKey(password, salt, expected.length, { N: n, r, p });
+  if (actual.length !== expected.length) return false;
   return timingSafeEqual(actual, expected);
 }

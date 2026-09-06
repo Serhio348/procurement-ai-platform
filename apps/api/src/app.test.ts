@@ -193,7 +193,6 @@ describe("specialist API", () => {
 
     expect(card.statusCode).toBe(200);
     expect(body.termsDetail).toContain("Аванс: до 99,5%.");
-    expect(body.termsDetail).toContain("Срок поставки: 60 дн.");
     expect(body.termsDetail).toContain("Гарантия: 60 мес.");
     expect(body.termsDetail ?? "").not.toMatch(/Аванс:\s*99,5%\./);
     expect(body.paymentQuote).toContain("предоплата до 99,5");

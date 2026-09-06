@@ -82,22 +82,18 @@ export function AdminApp() {
                 user={user}
                 role={roles[user.id] ?? user.role ?? "specialist"}
                 onRole={(role) => setRoles((current) => ({ ...current, [user.id]: role }))}
-                onChangeRole={
-                  user.accessStatus === "active"
-                    ? async () => {
+                {...(user.accessStatus === "active"
+                  ? {
+                      onChangeRole: async () => {
                         setListed(await changeUserRole(user.id, roles[user.id] ?? "specialist"));
                         await refresh();
-                      }
-                    : undefined
-                }
-                onRevoke={
-                  user.accessStatus === "active"
-                    ? async () => {
+                      },
+                      onRevoke: async () => {
                         setListed(await revokeUser(user.id));
                         await refresh();
-                      }
-                    : undefined
-                }
+                      },
+                    }
+                  : {})}
               />
             ))}
           </ul>

@@ -216,7 +216,8 @@ describe("ProcurementsApp", () => {
 
     const link = screen.getByRole("link", { name: "zapros-filtra.doc" });
     expect(link.getAttribute("href")).toBe(`/api/documents/${"a".repeat(64)}`);
-    expect(link.getAttribute("download")).toBe("zapros-filtra.doc");
+    expect(link.getAttribute("target")).toBe("procurement-office-download");
+    expect(link.getAttribute("download")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Текст документа" })).toBeNull();
     expect(screen.getByRole("heading", { level: 3, name: "Коммерческие условия" })).toBeTruthy();
     expect(screen.getByText(/Оплата: по факту поставки/)).toBeTruthy();

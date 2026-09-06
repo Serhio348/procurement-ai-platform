@@ -26,6 +26,8 @@ export function documentOpensInline(document: SpecialistCaseDocument): boolean {
   return document.name.toLowerCase().endsWith(".pdf");
 }
 
+const officeDownloadFrame = "procurement-office-download";
+
 export function documentStatusLabel(document: SpecialistCaseDocument): string {
   const extraction = document.extraction;
   if (extraction === undefined) {
@@ -431,6 +433,11 @@ export function ProcurementsApp({
                   {selected.documents.length === 0 ? null : (
                     <div>
                       <h3>Документы</h3>
+                      <iframe
+                        name={officeDownloadFrame}
+                        title="Загрузка документа"
+                        hidden
+                      />
                       <ul className="doc-list">
                         {selected.documents.map((document) => (
                           <li key={document.sourceUrl}>
@@ -439,7 +446,7 @@ export function ProcurementsApp({
                                 {document.name}
                               </a>
                             ) : (
-                              <a href={documentHref(document)} download={document.name}>
+                              <a href={documentHref(document)} target={officeDownloadFrame}>
                                 {document.name}
                               </a>
                             )}

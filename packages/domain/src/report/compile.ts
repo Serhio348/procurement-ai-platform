@@ -99,12 +99,12 @@ function compileCommercial(
   }
   if (terms.paymentDeadlineDays !== undefined) {
     lines.push(
-      `Срок оплаты: ${formatDayCount(terms.paymentDeadlineDays.value, unitForFact(facts, "commercial.payment_deadline_days"))}.`,
+      `Срок оплаты: ${formatDayCount(terms.paymentDeadlineDays.value, unitForFact(facts, "commercial.payment_deadline_days"))}`,
     );
   }
   if (terms.deliveryPeriodDays !== undefined) {
     lines.push(
-      `Срок поставки: ${formatDayCount(terms.deliveryPeriodDays.value, unitForFact(facts, "commercial.delivery_period_days"))}.`,
+      `Срок поставки: ${formatDayCount(terms.deliveryPeriodDays.value, unitForFact(facts, "commercial.delivery_period_days"))}`,
     );
   }
   if (terms.warrantyMonths !== undefined) {

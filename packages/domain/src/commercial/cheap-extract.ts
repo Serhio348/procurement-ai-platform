@@ -224,6 +224,7 @@ function classifyWithinDuration(left: string, right = ""): "payment" | "delivery
   if (looksLikeBidDeadline(nearLeft) || looksLikeBidDeadline(nearRight)) return "note";
   if (looksLikePaymentDeadline(nearLeft) || looksLikePaymentDeadline(nearRight)) return "payment";
   if (looksLikeDeliveryPeriod(nearLeft) || looksLikeDeliveryPeriod(nearRight)) return "delivery";
+  if (looksLikeContractStart(nearRight) && !looksLikePaymentDeadline(nearLeft)) return "delivery";
   const heading = lastDurationHeading(left);
   if (heading !== undefined) return heading;
   if (looksLikePaymentDeadline(left) && !looksLikeDeliveryPeriod(left)) return "payment";
@@ -252,7 +253,13 @@ function looksLikePaymentDeadline(text: string): boolean {
 }
 
 function looksLikeDeliveryPeriod(text: string): boolean {
-  return /(?:срок(?:и)?\s+)?(?:поставк|поставл|поставить|отгруз|доставк|изготовлен)/iu.test(text);
+  return /(?:срок(?:и)?\s+)?(?:поставк|поставл|поставить|отгруз|доставк|изготовлен|передан|передач)|товар\s+должен/iu.test(
+    text,
+  );
+}
+
+function looksLikeContractStart(text: string): boolean {
+  return /с\s+(?:даты|момента)\s+(?:заключен|подписания\s+договор)/iu.test(text);
 }
 
 function lastDurationHeading(left: string): "payment" | "delivery" | undefined {

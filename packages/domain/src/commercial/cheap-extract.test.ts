@@ -226,6 +226,29 @@ describe("cheapExtractCommercialClaims", () => {
     expect(cheapExtractCommercialNotes({ text }).some((note) => note.startsWith("Срок:"))).toBe(false);
   });
 
+  it("reads «передан в течение N дней с даты заключения договора» as delivery", () => {
+    const claims = cheapExtractCommercialClaims({
+      hash,
+      page: 1,
+      text: "Товар передается Покупателю в течение 30 календарных дней с даты заключения договора.",
+    });
+    expect(claims.filter((item) => item.key === "commercial.delivery_period_days")).toEqual([
+      expect.objectContaining({ value: 30, unit: "calendar_days" }),
+    ]);
+    expect(claims.some((item) => item.key === "commercial.payment_deadline_days")).toBe(false);
+  });
+
+  it("reads «в течение N дней с даты заключения договора» as delivery when payment words are absent", () => {
+    const claims = cheapExtractCommercialClaims({
+      hash,
+      page: 1,
+      text: "Исполнение осуществляется в течение 30 календарных дней с даты заключения договора.",
+    });
+    expect(claims.filter((item) => item.key === "commercial.delivery_period_days")).toEqual([
+      expect.objectContaining({ value: 30, unit: "calendar_days" }),
+    ]);
+  });
+
   it("reads «в течение N дней с даты поставки» as payment even without the word оплата nearby", () => {
     const claims = cheapExtractCommercialClaims({
       hash,

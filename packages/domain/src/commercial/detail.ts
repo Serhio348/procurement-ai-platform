@@ -39,10 +39,10 @@ export function formatCommercialDetailLines(
     lines.push(paymentKindLabel(kind));
   }
   if (paymentDays.length === 1) {
-    lines.push(`Срок оплаты: ${formatDayCount(paymentDays[0]!, unitForNumber(claims, "commercial.payment_deadline_days", paymentDays[0]!))}.`);
+    lines.push(`Срок оплаты: ${formatDayCount(paymentDays[0]!, unitForNumber(claims, "commercial.payment_deadline_days", paymentDays[0]!))}`);
   }
   if (deliveryDays.length === 1) {
-    lines.push(`Срок поставки: ${formatDayCount(deliveryDays[0]!, unitForNumber(claims, "commercial.delivery_period_days", deliveryDays[0]!))}.`);
+    lines.push(`Срок поставки: ${formatDayCount(deliveryDays[0]!, unitForNumber(claims, "commercial.delivery_period_days", deliveryDays[0]!))}`);
   }
   if (warranty.length === 1) {
     lines.push(`Гарантия: ${String(warranty[0])} мес.`);
@@ -104,11 +104,19 @@ function lineCoversNote(line: string, note: string): boolean {
   if (line.startsWith("Оплата:") && /по факту поставк|условия оплаты/u.test(folded) && !hasDuration) {
     return true;
   }
-  if (line.startsWith("Срок оплаты:") && /срок оплаты|в\s+течени/u.test(folded) && /\d+.*дн/u.test(line)) {
-    return true;
+  const lineDays = durationDayCount(line);
+  const noteDays = durationDayCount(note);
+  if (line.startsWith("Срок оплаты:")) {
+    if (/срок поставки|поставить|передан|изготовлен/u.test(folded)) return false;
+    return lineDays !== undefined && noteDays === lineDays;
   }
-  if (line.startsWith("Срок поставки:") && folded.includes("срок поставки") && /\d+.*дн/u.test(line)) {
-    return true;
+  if (line.startsWith("Срок поставки:")) {
+    if (/срок оплаты|расч[её]т|перечисл/u.test(folded)) return false;
+    return lineDays !== undefined && noteDays === lineDays;
   }
   return false;
+}
+
+function durationDayCount(text: string): string | undefined {
+  return text.match(/(\d{1,3})\s*(?:календарн|банковск|рабоч)?\p{L}*\s*дн/u)?.[1];
 }

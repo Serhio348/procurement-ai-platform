@@ -321,20 +321,43 @@ h3 {
 }
 
 .doc-list li {
-  margin: 0 0 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: start;
+  margin: 0 0 10px;
 }
 
-.doc-list li span {
-  margin-left: 8px;
+.doc-list a,
+.doc-file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.doc-file-meta {
+  grid-column: 1 / -1;
+  margin: 0;
   color: #5c6778;
 }
 
 .case-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 20px;
   margin-top: 12px;
-  min-height: 0;
+  min-width: 0;
+  align-items: start;
+}
+
+.case-columns > * {
+  min-width: 0;
+}
+
+@media (max-width: 1320px) {
+  .case-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .doc-open {
@@ -360,13 +383,23 @@ h3 {
 }
 
 .doc-read-mark {
-  margin-left: 8px;
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
   color: #2d5a3d;
   background: #e8f3ec;
   border: 1px solid #b7d4c2;
-  padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.doc-read-mark svg {
+  display: block;
+  width: 11px;
+  height: 11px;
 }
 
 .ingest-progress {
@@ -420,6 +453,8 @@ h3 {
 
 .change-body {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
   font: inherit;
   background: #fff;

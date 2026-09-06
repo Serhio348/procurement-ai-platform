@@ -80,7 +80,7 @@ export function ingestFileProgressLabel(file: SpecialistIngestFileProgress): str
     case "indexing":
       return `индексация ${String(ingestFileWeight(file.state, file.percent))}%`;
     case "read":
-      return "прочитано агентом";
+      return "Прочитано агентом";
     case "skipped":
       return "агент не разбирал";
     case "failed":
@@ -101,6 +101,23 @@ export function ingestProgressCaption(progress: SpecialistIngestProgress): strin
     return `Индексация «${current.name}» — ${String(ingestFileWeight(current.state, current.percent))}%`;
   }
   return `Индексация ${String(progress.percent)}%`;
+}
+
+function DocumentReadMark() {
+  return (
+    <span className="doc-read-mark" title="Прочитано агентом" aria-label="Прочитано агентом">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M3.2 8.2 6.1 11l6.7-7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
 }
 
 function DocumentNameLink({ document }: { document: SpecialistCaseDocument }) {
@@ -321,7 +338,11 @@ export function ProcurementsApp({
                       <span className="inbox-row-top">
                         <span className="inbox-title">{item.title}</span>
                         <span className="inbox-marks">
-                          {item.live ? <span className="live-mark">живая</span> : null}
+                          {item.live ? (
+                            <span className="live-mark" title="Карточка с площадки">
+                              live
+                            </span>
+                          ) : null}
                           {item.triage === undefined ? null : (
                             <span className={`triage-mark is-${item.triage}`}>
                               {triageLabel(item.triage)}
@@ -473,13 +494,15 @@ export function ProcurementsApp({
                       return (
                         <li key={file.sourceUrl}>
                           {document === undefined ? (
-                            <span>{file.name}</span>
+                            <span className="doc-file-name">{file.name}</span>
                           ) : (
                             <DocumentNameLink document={document} />
                           )}
-                          <span className={file.state === "read" ? "doc-read-mark" : undefined}>
-                            {ingestFileProgressLabel(file)}
-                          </span>
+                          {file.state === "read" ? (
+                            <DocumentReadMark />
+                          ) : (
+                            <span className="doc-file-meta">{ingestFileProgressLabel(file)}</span>
+                          )}
                         </li>
                       );
                     })}
@@ -499,10 +522,8 @@ export function ProcurementsApp({
                         {selected.documents.map((document) => (
                           <li key={document.sourceUrl}>
                             <DocumentNameLink document={document} />
-                            {specialistDocumentWasRead(document) ? (
-                              <span className="doc-read-mark">прочитано агентом</span>
-                            ) : null}
-                            <span>{documentStatusLabel(document)}</span>
+                            {specialistDocumentWasRead(document) ? <DocumentReadMark /> : null}
+                            <span className="doc-file-meta">{documentStatusLabel(document)}</span>
                           </li>
                         ))}
                       </ul>

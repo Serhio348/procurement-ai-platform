@@ -173,6 +173,8 @@ describe("ProcurementsApp", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /Живой КТПБ/ }));
+    expect(screen.getByText("live")).toBeTruthy();
+    expect(screen.queryByText("живая")).toBeNull();
     expect(screen.getByRole("link", { name: "Документация.pdf" }).getAttribute("href")).toBe(
       `/api/documents/${hash}`,
     );
@@ -544,7 +546,7 @@ describe("ProcurementsApp", () => {
         ],
       },
     ]);
-    expect(await screen.findByText("прочитано агентом")).toBeTruthy();
+    expect(await screen.findByLabelText("Прочитано агентом")).toBeTruthy();
     expect(screen.getByText(/Прочитано агентом: 1 из 1/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "договор.doc" }).getAttribute("href")).toBe(
       `/api/documents/${"a".repeat(64)}`,

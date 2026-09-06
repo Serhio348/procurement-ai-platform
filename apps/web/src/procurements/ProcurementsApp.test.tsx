@@ -12,6 +12,7 @@ import fixture from "../../../../tests/fixtures/specialist/inbox.json";
 import {
   documentHref,
   documentStatusLabel,
+  ingestFileAsDocument,
   ingestFileProgressLabel,
   ingestProgressCaption,
   ProcurementsApp,
@@ -54,6 +55,24 @@ describe("ProcurementsApp", () => {
     });
     expect(label).toBe("· 75264 байт");
     expect(label).not.toContain("sha256");
+  });
+
+  it("turns a finished ingest file into a hashed document without a reload", () => {
+    expect(
+      ingestFileAsDocument(
+        {
+          name: "договор.doc",
+          sourceUrl: "https://example.test/files/1",
+          state: "read",
+          percent: 100,
+          hash: "a".repeat(64),
+        },
+        [],
+      ),
+    ).toMatchObject({
+      name: "договор.doc",
+      hash: "a".repeat(64),
+    });
   });
 
   it("names indexing percent and a finished file as read by the agent", () => {
@@ -527,5 +546,142 @@ describe("ProcurementsApp", () => {
     ]);
     expect(await screen.findByText("прочитано агентом")).toBeTruthy();
     expect(screen.getByText(/Прочитано агентом: 1 из 1/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "договор.doc" }).getAttribute("href")).toBe(
+      `/api/documents/${"a".repeat(64)}`,
+    );
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("opens a finished file as soon as the hash is known, without a reload", async () => {
+    const user = userEvent.setup();
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Комплект фильтров",
+      status: "unknown",
+      statusLabel: "Подача предложений",
+      url: "https://example.test/marketing/1",
+      sourceProcurementId: "marketing/1",
+    });
+    const decide = (): Promise<SpecialistProcurementCard[]> => new Promise(() => undefined);
+
+    render(
+      <MemoryRouter initialEntries={[`/procurements/${found.id}`]}>
+        <Routes>
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp
+                items={[found]}
+                decide={decide}
+                ingestProgress={async () =>
+                  SpecialistIngestProgress.parse({
+                    procurementId: found.id,
+                    phase: "indexing",
+                    total: 1,
+                    downloaded: 1,
+                    indexed: 1,
+                    readCount: 1,
+                    percent: 100,
+                    currentName: "договор.doc",
+                    files: [
+                      {
+                        name: "договор.doc",
+                        sourceUrl: "https://example.test/files/1",
+                        state: "read",
+                        percent: 100,
+                        hash: "a".repeat(64),
+                      },
+                    ],
+                  })
+                }
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Участвовать" }));
+    expect(await screen.findByRole("link", { name: "договор.doc" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "договор.doc" }).getAttribute("href")).toBe(
+      `/api/documents/${"a".repeat(64)}`,
+    );
+  });
+
+  it("does not keep the finished indexing bar when another procurement is selected", async () => {
+    const user = userEvent.setup();
+    const first = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Насос для системы очистки воды",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://example.test/request/1",
+      sourceProcurementId: "request/1",
+    });
+    const second = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://example.test/auction/2",
+      sourceProcurementId: "auction/2",
+    });
+    let finish: ((items: SpecialistProcurementCard[]) => void) | undefined;
+    const decide = (): Promise<SpecialistProcurementCard[]> =>
+      new Promise((resolve) => {
+        finish = resolve;
+      });
+
+    render(
+      <MemoryRouter initialEntries={[`/procurements/${first.id}`]}>
+        <Routes>
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp
+                items={[first, second]}
+                decide={decide}
+                ingestProgress={async () =>
+                  SpecialistIngestProgress.parse({
+                    procurementId: first.id,
+                    phase: "done",
+                    total: 1,
+                    downloaded: 1,
+                    indexed: 1,
+                    readCount: 1,
+                    percent: 100,
+                    currentName: "договор.doc",
+                    files: [
+                      {
+                        name: "договор.doc",
+                        sourceUrl: "https://example.test/files/1",
+                        state: "read",
+                        percent: 100,
+                      },
+                    ],
+                  })
+                }
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Участвовать" }));
+    expect(await screen.findByRole("progressbar")).toBeTruthy();
+    expect(screen.getAllByText(/Индексация 100%/).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Кабель силовой/ }));
+    expect(screen.getByRole("heading", { level: 2, name: "Кабель силовой" })).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByText(/Индексация 100%/)).toBeNull();
+
+    finish?.([
+      { ...first, triage: "participate" },
+      second,
+    ]);
+    expect(await screen.findByText("участвуем")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 });

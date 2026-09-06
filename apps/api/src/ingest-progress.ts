@@ -11,11 +11,12 @@ export interface IngestProgressHub {
   begin: (procurementId: string) => void;
   listed: (procurementId: string, files: readonly { name: string; sourceUrl: string }[]) => void;
   fileDownloading: (procurementId: string, sourceUrl: string) => void;
-  fileIndexing: (procurementId: string, sourceUrl: string, percent: number) => void;
+  fileIndexing: (procurementId: string, sourceUrl: string, percent: number, hash?: string) => void;
   fileFinished: (
     procurementId: string,
     sourceUrl: string,
     state: Extract<SpecialistIngestFileState, "read" | "skipped" | "failed">,
+    hash?: string,
   ) => void;
   done: (procurementId: string) => void;
   fail: (procurementId: string) => void;
@@ -104,16 +105,25 @@ export function createIngestProgressHub(): IngestProgressHub {
     fileDownloading(procurementId, sourceUrl) {
       replaceFile(procurementId, sourceUrl, { state: "downloading", percent: 10 }, "downloading");
     },
-    fileIndexing(procurementId, sourceUrl, percent) {
+    fileIndexing(procurementId, sourceUrl, percent, hash) {
       replaceFile(
         procurementId,
         sourceUrl,
-        { state: "indexing", percent: Math.min(100, Math.max(0, Math.round(percent))) },
+        {
+          state: "indexing",
+          percent: Math.min(100, Math.max(0, Math.round(percent))),
+          ...(hash === undefined ? {} : { hash }),
+        },
         "indexing",
       );
     },
-    fileFinished(procurementId, sourceUrl, state) {
-      replaceFile(procurementId, sourceUrl, { state, percent: 100 }, "indexing");
+    fileFinished(procurementId, sourceUrl, state, hash) {
+      replaceFile(
+        procurementId,
+        sourceUrl,
+        { state, percent: 100, ...(hash === undefined ? {} : { hash }) },
+        "indexing",
+      );
     },
     done(procurementId) {
       const previous = current(procurementId);

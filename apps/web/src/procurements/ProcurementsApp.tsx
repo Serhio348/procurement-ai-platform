@@ -26,6 +26,23 @@ export function documentOpensInline(document: SpecialistCaseDocument): boolean {
   return document.name.toLowerCase().endsWith(".pdf");
 }
 
+export function ingestFileAsDocument(
+  file: SpecialistIngestFileProgress,
+  documents: readonly SpecialistCaseDocument[],
+): SpecialistCaseDocument | undefined {
+  const known = documents.find((item) => item.sourceUrl === file.sourceUrl);
+  if (known !== undefined && (known.hash !== undefined || known.downloadUrl !== undefined)) {
+    return known;
+  }
+  if (file.hash === undefined) return undefined;
+  return {
+    name: file.name,
+    sourceUrl: file.sourceUrl,
+    hash: file.hash,
+    status: "hashed",
+  };
+}
+
 const officeDownloadFrame = "procurement-office-download";
 
 export function documentStatusLabel(document: SpecialistCaseDocument): string {
@@ -86,6 +103,21 @@ export function ingestProgressCaption(progress: SpecialistIngestProgress): strin
   return `Индексация ${String(progress.percent)}%`;
 }
 
+function DocumentNameLink({ document }: { document: SpecialistCaseDocument }) {
+  if (documentOpensInline(document)) {
+    return (
+      <a href={documentHref(document)} target="_blank" rel="noreferrer">
+        {document.name}
+      </a>
+    );
+  }
+  return (
+    <a href={documentHref(document)} target={officeDownloadFrame}>
+      {document.name}
+    </a>
+  );
+}
+
 export function triageLabel(kind: SpecialistTriageKind): string {
   switch (kind) {
     case "monitor":
@@ -142,12 +174,19 @@ export function ProcurementsApp({
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
+  const ingestGeneration = useRef(0);
   const catalogRef = useRef(catalog);
   if (catalogRef.current !== catalog) {
     catalogRef.current = catalog;
     setItems(catalog);
   }
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
+  const ingestForSelected =
+    selected !== undefined &&
+    progress !== undefined &&
+    progress.procurementId === selected.id
+      ? progress
+      : undefined;
   const showCommercial =
     selected !== undefined &&
     (selected.termsDetail !== undefined ||
@@ -179,10 +218,13 @@ export function ProcurementsApp({
     if (decide === undefined || selected === undefined || busy) return;
     setBusy(true);
     setBusyKind(kind);
+    const procurementId = selected.id;
+    const generation = ++ingestGeneration.current;
     const pullProgress = (): void => {
       if (ingestProgress === undefined) return;
-      void ingestProgress(selected.id)
+      void ingestProgress(procurementId)
         .then((next) => {
+          if (ingestGeneration.current !== generation) return;
           setProgress(next);
         })
         .catch(() => undefined);
@@ -213,6 +255,7 @@ export function ProcurementsApp({
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Не удалось сохранить решение.");
     } finally {
+      ingestGeneration.current += 1;
       if (timer !== undefined) window.clearInterval(timer);
       setProgress(undefined);
       setBusy(false);
@@ -372,9 +415,9 @@ export function ProcurementsApp({
                     }}
                   >
                     {busyKind === "participate"
-                      ? (progress === undefined
+                      ? (ingestForSelected === undefined
                         ? "Скачиваем документы…"
-                        : ingestProgressCaption(progress))
+                        : ingestProgressCaption(ingestForSelected))
                       : "Участвовать"}
                   </button>
                   <button
@@ -400,32 +443,46 @@ export function ProcurementsApp({
                   </ul>
                 </>
               )}
-              {progress === undefined ? null : (
+              {ingestForSelected === undefined ? null : (
                 <div className="ingest-progress" aria-live="polite">
-                  <div className="ingest-progress-label">{ingestProgressCaption(progress)}</div>
+                  <div className="ingest-progress-label">{ingestProgressCaption(ingestForSelected)}</div>
                   <div
                     className="ingest-progress-bar"
                     role="progressbar"
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-valuenow={progress.percent}
+                    aria-valuenow={ingestForSelected.percent}
                   >
-                    <span style={{ width: `${String(progress.percent)}%` }} />
+                    <span style={{ width: `${String(ingestForSelected.percent)}%` }} />
                   </div>
                 </div>
               )}
-              {progress !== undefined && progress.files.length > 0 ? (
+              {ingestForSelected !== undefined &&
+              ingestForSelected.files.length > 0 &&
+              selected.documents.length === 0 ? (
                 <>
                   <h3>Документы</h3>
+                  <iframe
+                    name={officeDownloadFrame}
+                    title="Загрузка документа"
+                    hidden
+                  />
                   <ul className="doc-list">
-                    {progress.files.map((file) => (
-                      <li key={file.sourceUrl}>
-                        <span>{file.name}</span>
-                        <span className={file.state === "read" ? "doc-read-mark" : undefined}>
-                          {ingestFileProgressLabel(file)}
-                        </span>
-                      </li>
-                    ))}
+                    {ingestForSelected.files.map((file) => {
+                      const document = ingestFileAsDocument(file, selected.documents);
+                      return (
+                        <li key={file.sourceUrl}>
+                          {document === undefined ? (
+                            <span>{file.name}</span>
+                          ) : (
+                            <DocumentNameLink document={document} />
+                          )}
+                          <span className={file.state === "read" ? "doc-read-mark" : undefined}>
+                            {ingestFileProgressLabel(file)}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </>
               ) : selected.documents.length === 0 && !showCommercial ? null : (
@@ -441,15 +498,7 @@ export function ProcurementsApp({
                       <ul className="doc-list">
                         {selected.documents.map((document) => (
                           <li key={document.sourceUrl}>
-                            {documentOpensInline(document) ? (
-                              <a href={documentHref(document)} target="_blank" rel="noreferrer">
-                                {document.name}
-                              </a>
-                            ) : (
-                              <a href={documentHref(document)} target={officeDownloadFrame}>
-                                {document.name}
-                              </a>
-                            )}
+                            <DocumentNameLink document={document} />
                             {specialistDocumentWasRead(document) ? (
                               <span className="doc-read-mark">прочитано агентом</span>
                             ) : null}

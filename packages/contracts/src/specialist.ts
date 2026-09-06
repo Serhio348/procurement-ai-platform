@@ -201,6 +201,7 @@ export const SpecialistIngestFileProgress = z.object({
   sourceUrl: z.string().url(),
   state: SpecialistIngestFileState,
   percent: z.number().int().min(0).max(100),
+  hash: Sha256.optional(),
 });
 export type SpecialistIngestFileProgress = z.infer<typeof SpecialistIngestFileProgress>;
 

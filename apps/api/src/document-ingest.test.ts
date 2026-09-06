@@ -80,6 +80,7 @@ describe("createProcurementDocumentIngest", () => {
     expect(next.documents[0]?.hash).toBe(hash);
     expect(progress.snapshot(card.id).phase).toBe("done");
     expect(progress.snapshot(card.id).files[0]?.state).toMatch(/read|skipped/);
+    expect(progress.snapshot(card.id).files[0]?.hash).toBe(hash);
     expect(callTool.mock.calls.map((item) => item[0])).toEqual([
       "procurement.get_documents",
       "procurement.download",

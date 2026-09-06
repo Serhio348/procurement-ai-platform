@@ -122,7 +122,12 @@ async function ingestOne(input: {
     ...(input.listedDownloadUrl === undefined ? {} : { downloadUrl: input.listedDownloadUrl }),
   };
   const finish = (document: SpecialistCaseDocumentValue): SpecialistCaseDocumentValue => {
-    input.progress?.fileFinished(input.procurementId, input.sourceUrl, ingestFileFinishState(document));
+    input.progress?.fileFinished(
+      input.procurementId,
+      input.sourceUrl,
+      ingestFileFinishState(document),
+      document.hash,
+    );
     return document;
   };
   try {
@@ -155,7 +160,7 @@ async function ingestOne(input: {
     if (input.blobStore !== undefined) {
       await input.blobStore.put(downloaded.hash, bytes);
     }
-    input.progress?.fileIndexing(input.procurementId, input.sourceUrl, 0);
+    input.progress?.fileIndexing(input.procurementId, input.sourceUrl, 0, downloaded.hash);
     let extraction;
     try {
       extraction = await recognizeSpecialistDocument({

@@ -37,6 +37,7 @@ export const AuthSessionUser = z.object({
   role: SpecialistRole.nullable(),
   accessStatus: AccessStatus,
   pendingUserCount: z.number().int().nonnegative().optional(),
+  errorEventCount: z.number().int().nonnegative().optional(),
 });
 export type AuthSessionUser = z.infer<typeof AuthSessionUser>;
 
@@ -70,3 +71,32 @@ export const AdminRoleWrite = z.object({
   role: SpecialistRole,
 });
 export type AdminRoleWrite = z.infer<typeof AdminRoleWrite>;
+
+export const AdminJournalKind = z.enum(["access", "search", "documents", "discovery", "platform"]);
+export type AdminJournalKind = z.infer<typeof AdminJournalKind>;
+
+export const AdminJournalLevel = z.enum(["info", "error"]);
+export type AdminJournalLevel = z.infer<typeof AdminJournalLevel>;
+
+export const AdminJournalEntry = z.object({
+  id: z.string().uuid(),
+  at: IsoDateTime,
+  kind: AdminJournalKind,
+  level: AdminJournalLevel,
+  message: z.string().min(1).max(2000),
+  actorName: z.string().max(200).optional(),
+  actorEmail: z.string().email().optional(),
+  sourceProcurementId: z.string().max(256).optional(),
+});
+export type AdminJournalEntry = z.infer<typeof AdminJournalEntry>;
+
+export const AdminJournalWrite = AdminJournalEntry.omit({ id: true, at: true }).extend({
+  at: IsoDateTime.optional(),
+});
+export type AdminJournalWrite = z.infer<typeof AdminJournalWrite>;
+
+export const AdminJournalListResponse = z.object({
+  items: z.array(AdminJournalEntry),
+  errorCount: z.number().int().nonnegative(),
+});
+export type AdminJournalListResponse = z.infer<typeof AdminJournalListResponse>;

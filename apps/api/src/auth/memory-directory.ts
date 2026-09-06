@@ -3,11 +3,13 @@ import type { AccessStatus, SpecialistRole } from "@procurement/contracts";
 import { hasActiveAdmin } from "@procurement/domain";
 import {
   RESET_TTL_MS,
+  SESSION_TOUCH_MS,
   SESSION_TTL_MS,
   normalizeEmail,
   publicAuthRecord,
   type AuthDirectory,
   type AuthRecord,
+  type ClosedAuthSession,
 } from "./directory.js";
 import { AuthConflictError } from "./errors.js";
 import { hashPassword, verifyPassword } from "./password.js";
@@ -21,6 +23,8 @@ interface StoredSession {
   userId: string;
   tokenHash: string;
   expiresAt: number;
+  startedAt: number;
+  lastSeenAt: number;
 }
 
 interface StoredReset {
@@ -104,10 +108,13 @@ export function createMemoryAuthDirectory(now: () => Date = () => new Date()): A
 
     async createSession(userId) {
       const token = randomToken();
+      const startedAt = now().getTime();
       sessions.set(hashToken(token), {
         userId,
         tokenHash: hashToken(token),
-        expiresAt: now().getTime() + SESSION_TTL_MS,
+        expiresAt: startedAt + SESSION_TTL_MS,
+        startedAt,
+        lastSeenAt: startedAt,
       });
       return token;
     },
@@ -116,22 +123,38 @@ export function createMemoryAuthDirectory(now: () => Date = () => new Date()): A
       const hashed = hashToken(token);
       const session = sessions.get(hashed);
       if (session === undefined) return undefined;
-      if (session.expiresAt <= now().getTime()) {
+      const current = now().getTime();
+      if (session.expiresAt <= current) {
         sessions.delete(hashed);
         return undefined;
+      }
+      if (current - session.lastSeenAt >= SESSION_TOUCH_MS) {
+        session.lastSeenAt = current;
       }
       const user = users.get(session.userId);
       return user === undefined ? undefined : publicAuthRecord(user);
     },
 
     async deleteSession(token) {
-      sessions.delete(hashToken(token));
+      const hashed = hashToken(token);
+      const session = sessions.get(hashed);
+      if (session === undefined) return undefined;
+      sessions.delete(hashed);
+      return closedSession(session);
     },
 
     async deleteSessionsForUser(userId) {
+      await this.closeSessionsForUser(userId);
+    },
+
+    async closeSessionsForUser(userId) {
+      const closed: ClosedAuthSession[] = [];
       for (const [key, session] of sessions) {
-        if (session.userId === userId) sessions.delete(key);
+        if (session.userId !== userId) continue;
+        closed.push(closedSession(session));
+        sessions.delete(key);
       }
+      return closed;
     },
 
     async countUsers() {
@@ -214,5 +237,13 @@ export function createMemoryAuthDirectory(now: () => Date = () => new Date()): A
       await this.deleteSessionsForUser(user.id);
       return true;
     },
+  };
+}
+
+function closedSession(session: StoredSession): ClosedAuthSession {
+  return {
+    userId: session.userId,
+    startedAt: new Date(session.startedAt).toISOString(),
+    lastSeenAt: new Date(session.lastSeenAt).toISOString(),
   };
 }

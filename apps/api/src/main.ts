@@ -13,6 +13,7 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadDotEnv } from "./load-env.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
 import { createBlobStoreFromEnv, objectStoreKind } from "./object-store.js";
+import { recordJournal } from "./admin/journal.js";
 import { openSpecialistPersistence } from "./persist.js";
 import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
     blobStore,
     persistWorkspace: persistence.persistWorkspace,
     persistCases: persistence.persistCases,
+    journal: persistence.journal,
     ingestProgress,
     authDirectory: persistence.authDirectory,
     ...(authMail === undefined ? {} : { authMail }),
@@ -117,6 +119,11 @@ async function main(): Promise<void> {
       logger.warn("Redis discovery unavailable; using in-process interval", {
         error: error instanceof Error ? error.message : String(error),
       });
+      await recordJournal(persistence.journal, {
+        kind: "platform",
+        level: "error",
+        message: "Redis для слежения недоступен. Поиск новых закупок идёт внутри процесса.",
+      });
     }
   }
   if (redisRepeat === undefined && transport.kind !== "off") {
@@ -124,6 +131,11 @@ async function main(): Promise<void> {
     timer = setInterval(() => {
       void app.runDiscovery().catch((error: unknown) => {
         logger.error("Specialist discovery failed", error);
+        void recordJournal(persistence.journal, {
+          kind: "discovery",
+          level: "error",
+          message: "Фоновый поиск новых закупок не выполнен.",
+        });
       });
     }, intervalMs);
   }

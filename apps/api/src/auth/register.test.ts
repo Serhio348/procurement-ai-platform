@@ -1,3 +1,4 @@
+import { McpToolCallError } from "@procurement/mcp-client";
 import { describe, expect, it } from "vitest";
 import { buildSpecialistApi } from "../app.js";
 import { createMemoryAuthDirectory } from "./memory-directory.js";
@@ -76,6 +77,26 @@ describe("specialist auth API", () => {
       payload: { role: "viewer" },
     });
     expect(approved.statusCode).toBe(200);
+
+    const journal = await app.inject({
+      method: "GET",
+      url: "/api/admin/journal",
+      headers: { cookie: cookieHeader(adminIn) },
+    });
+    const session = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { cookie: cookieHeader(adminIn) },
+    });
+    const log = JSON.parse(journal.body) as {
+      errorCount: number;
+      items: Array<{ kind: string; message: string }>;
+    };
+    expect(journal.statusCode).toBe(200);
+    expect(log.items.some((item) => item.kind === "access" && item.message.includes("одобрил"))).toBe(
+      true,
+    );
+    expect(JSON.parse(session.body).user.errorEventCount).toBe(0);
 
     const viewerInbox = await app.inject({
       method: "GET",
@@ -171,6 +192,93 @@ describe("specialist auth API", () => {
     expect(denied.statusCode).toBe(401);
     expect(allowed.statusCode).toBe(201);
     expect(cookieHeader(allowed).startsWith(SESSION_COOKIE)).toBe(false);
+    await app.close();
+  });
+
+  it("shows a search outage on the admin journal and the error counter", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const app = await buildSpecialistApi({
+      authDirectory: directory,
+      searchHits: {
+        search: async () => {
+          throw new McpToolCallError("source_unavailable", "procurement.search", "blocked");
+        },
+      },
+    });
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const cookie = cookieHeader(adminIn);
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      headers: { cookie },
+      payload: { name: "Кабель", keywords: ["кабель"], purpose: "", description: "", instructions: "", excludeKeywords: [] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      headers: { cookie },
+      payload: {},
+    });
+    const journal = await app.inject({
+      method: "GET",
+      url: "/api/admin/journal",
+      headers: { cookie },
+    });
+    const session = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { cookie },
+    });
+
+    expect(searched.statusCode).toBe(503);
+    expect(journal.statusCode).toBe(200);
+    expect(JSON.parse(journal.body).errorCount).toBe(1);
+    expect(JSON.parse(journal.body).items[0]?.message).toContain("goszakupki.by");
+    expect(JSON.parse(session.body).user.errorEventCount).toBe(1);
+    await app.close();
+  });
+
+  it("journals who signed in and how long they stayed", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const app = await buildSpecialistApi({ authDirectory: directory });
+
+    const firstIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    expect(firstIn.statusCode).toBe(200);
+    await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-out",
+      headers: { cookie: cookieHeader(firstIn) },
+    });
+
+    const secondIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const journal = await app.inject({
+      method: "GET",
+      url: "/api/admin/journal",
+      headers: { cookie: cookieHeader(secondIn) },
+    });
+    const messages = (JSON.parse(journal.body) as { items: Array<{ message: string }> }).items.map(
+      (item) => item.message,
+    );
+
+    expect(journal.statusCode).toBe(200);
+    expect(messages.some((message) => message.includes("вошёл в консоль"))).toBe(true);
+    expect(messages.some((message) => message.includes("вышел") && message.includes("В системе"))).toBe(
+      true,
+    );
     await app.close();
   });
 });

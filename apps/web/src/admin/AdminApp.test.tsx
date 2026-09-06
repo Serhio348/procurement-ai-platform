@@ -44,6 +44,20 @@ describe("AdminApp", () => {
       if (String(url) === "/api/admin/users") {
         return json({ items: [pending], pendingCount: 1 });
       }
+      if (String(url) === "/api/admin/journal") {
+        return json({
+          items: [
+            {
+              id: "00000000-0000-4000-8000-000000000301",
+              at: "2026-09-06T12:00:00.000Z",
+              kind: "search",
+              level: "error",
+              message: "Площадка goszakupki.by недоступна",
+            },
+          ],
+          errorCount: 1,
+        });
+      }
       return new Response("missing", { status: 404 });
     });
 
@@ -54,6 +68,8 @@ describe("AdminApp", () => {
     );
 
     expect(await screen.findByText("Иван")).toBeTruthy();
+    expect(screen.getByText("Журнал (ошибки: 1)")).toBeTruthy();
+    expect(screen.getByText("Площадка goszakupki.by недоступна")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Отклонить" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Одобрить" }));
     expect(approvals).toEqual([{ role: "specialist" }]);

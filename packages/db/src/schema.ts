@@ -745,10 +745,40 @@ export const authSessions = pgTable(
     tokenHash: varchar("token_hash", { length: 64 }).notNull(),
     expiresAt: timestamptz("expires_at").notNull(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
+    lastSeenAt: timestamptz("last_seen_at").notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("auth_sessions_token_uq").on(table.tokenHash),
     index("auth_sessions_user_idx").on(table.userId),
+  ],
+);
+
+export const adminJournalKind = pgEnum("admin_journal_kind", [
+  "access",
+  "search",
+  "documents",
+  "discovery",
+  "platform",
+]);
+
+export const adminJournalLevel = pgEnum("admin_journal_level", ["info", "error"]);
+
+/** Append-only ops/audit log for the admin console. Application code must not update or delete rows. */
+export const adminJournal = pgTable(
+  "admin_journal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: timestamptz("at").notNull().defaultNow(),
+    kind: adminJournalKind("kind").notNull(),
+    level: adminJournalLevel("level").notNull(),
+    message: text("message").notNull(),
+    actorName: varchar("actor_name", { length: 200 }),
+    actorEmail: varchar("actor_email", { length: 320 }),
+    sourceProcurementId: varchar("source_procurement_id", { length: 256 }),
+  },
+  (table) => [
+    index("admin_journal_at_idx").on(table.at),
+    index("admin_journal_level_at_idx").on(table.level, table.at),
   ],
 );
 

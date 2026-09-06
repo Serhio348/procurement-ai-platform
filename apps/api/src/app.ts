@@ -34,6 +34,11 @@ import {
 import { McpToolCallError } from "@procurement/mcp-client";
 import { silentLogger, type Logger } from "@procurement/observability";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import {
+  createMemoryAdminJournal,
+  recordJournal,
+  type AdminJournalPort,
+} from "./admin/journal.js";
 import type { AuthDirectory } from "./auth/directory.js";
 import type { AuthMailPort } from "./auth/mail.js";
 import { registerAuth } from "./auth/register.js";
@@ -75,6 +80,7 @@ export interface BuildApiOptions {
   authCookieSecure?: boolean;
   authPublicUrl?: string;
   internalApiToken?: string;
+  journal?: AdminJournalPort;
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
@@ -88,6 +94,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
   const clock = options.clock ?? (() => new Date().toISOString());
+  const journal = options.journal ?? createMemoryAdminJournal();
   const persist = async (): Promise<void> => {
     if (options.persistWorkspace !== undefined) {
       await options.persistWorkspace(workspace.snapshot());
@@ -113,6 +120,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     ...(options.authCookieSecure === undefined ? {} : { cookieSecure: options.authCookieSecure }),
     ...(options.authPublicUrl === undefined ? {} : { publicUrl: options.authPublicUrl }),
     ...(options.internalApiToken === undefined ? {} : { internalApiToken: options.internalApiToken }),
+    journal,
   });
 
   async function runManualSearch(limit: number): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
@@ -180,6 +188,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         hits = await searchHits.search(limit, profile.keywords);
       } catch (error) {
         logger.error("Specialist discovery search failed", error);
+        await recordJournal(journal, {
+          kind: "discovery",
+          level: "error",
+          message: "Фоновый поиск новых закупок не выполнен.",
+        });
         throw error;
       }
       const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
@@ -332,6 +345,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     try {
       return await runDiscovery(parsed.data.limit);
     } catch (error) {
+      await noteSearchFailure(journal, error);
       return mapSearchError(reply, error);
     }
   });
@@ -400,6 +414,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         logger.error("Specialist inbox document ingest failed", error, {
           sourceProcurementId: card.sourceProcurementId,
         });
+        await recordJournal(journal, {
+          kind: "documents",
+          level: "error",
+          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
+          sourceProcurementId: card.sourceProcurementId,
+        });
       }
     }
 
@@ -434,6 +454,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return await runManualSearch(parsed.data.limit);
     } catch (error) {
       logger.error("Specialist profile search failed", error);
+      await noteSearchFailure(journal, error);
       return mapSearchError(reply, error);
     }
   });
@@ -458,6 +479,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       } catch (error) {
         ingestProgress.fail(card.id);
         logger.error("Specialist participate document ingest failed", error, {
+          sourceProcurementId: card.sourceProcurementId,
+        });
+        await recordJournal(journal, {
+          kind: "documents",
+          level: "error",
+          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
           sourceProcurementId: card.sourceProcurementId,
         });
       }
@@ -525,6 +552,16 @@ function withTriage(
   const triage = workspace.latestKind(card.sourceProcurementId);
   if (triage === undefined) return SpecialistProcurementCard.parse(card);
   return SpecialistProcurementCard.parse({ ...card, triage });
+}
+
+async function noteSearchFailure(journal: AdminJournalPort, error: unknown): Promise<void> {
+  const message =
+    error instanceof McpToolCallError && error.kind === "source_unavailable"
+      ? "Площадка goszakupki.by недоступна"
+      : error instanceof McpToolCallError && error.kind === "timeout"
+        ? "Поиск на площадке занял слишком много времени"
+        : "Поиск по профилю не выполнен";
+  await recordJournal(journal, { kind: "search", level: "error", message });
 }
 
 function mapSearchError(reply: FastifyReply, error: unknown) {

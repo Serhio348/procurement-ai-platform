@@ -5,11 +5,13 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
   RESET_TTL_MS,
+  SESSION_TOUCH_MS,
   SESSION_TTL_MS,
   normalizeEmail,
   publicAuthRecord,
   type AuthDirectory,
   type AuthRecord,
+  type ClosedAuthSession,
 } from "./directory.js";
 import { AuthConflictError } from "./errors.js";
 import { toIsoDateTime } from "./instant.js";
@@ -133,6 +135,7 @@ export function createPostgresAuthDirectory(
         tokenHash: hashToken(token),
         expiresAt: new Date(now().getTime() + SESSION_TTL_MS).toISOString(),
         createdAt,
+        lastSeenAt: createdAt,
       });
       return token;
     },
@@ -143,6 +146,7 @@ export function createPostgresAuthDirectory(
         .select({
           user: authUsers,
           expiresAt: authSessions.expiresAt,
+          lastSeenAt: authSessions.lastSeenAt,
         })
         .from(authSessions)
         .innerJoin(authUsers, eq(authSessions.userId, authUsers.id))
@@ -154,15 +158,38 @@ export function createPostgresAuthDirectory(
         await db.delete(authSessions).where(eq(authSessions.tokenHash, hashed));
         return undefined;
       }
+      const lastSeen = new Date(row.lastSeenAt).getTime();
+      if (now().getTime() - lastSeen >= SESSION_TOUCH_MS) {
+        await db
+          .update(authSessions)
+          .set({ lastSeenAt: now().toISOString() })
+          .where(eq(authSessions.tokenHash, hashed));
+      }
       return toRecord(row.user);
     },
 
     async deleteSession(token) {
-      await db.delete(authSessions).where(eq(authSessions.tokenHash, hashToken(token)));
+      const hashed = hashToken(token);
+      const rows = await db
+        .select()
+        .from(authSessions)
+        .where(eq(authSessions.tokenHash, hashed))
+        .limit(1);
+      const row = rows[0];
+      if (row === undefined) return undefined;
+      await db.delete(authSessions).where(eq(authSessions.tokenHash, hashed));
+      return toClosedSession(row);
     },
 
     async deleteSessionsForUser(userId) {
+      await this.closeSessionsForUser(userId);
+    },
+
+    async closeSessionsForUser(userId) {
+      const rows = await db.select().from(authSessions).where(eq(authSessions.userId, userId));
+      if (rows.length === 0) return [];
       await db.delete(authSessions).where(eq(authSessions.userId, userId));
+      return rows.map(toClosedSession);
     },
 
     async countUsers() {
@@ -267,6 +294,18 @@ export function createPostgresAuthDirectory(
       await this.deleteSessionsForUser(reset.userId);
       return true;
     },
+  };
+}
+
+function toClosedSession(row: {
+  userId: string;
+  createdAt: string;
+  lastSeenAt: string;
+}): ClosedAuthSession {
+  return {
+    userId: row.userId,
+    startedAt: toIsoDateTime(row.createdAt),
+    lastSeenAt: toIsoDateTime(row.lastSeenAt),
   };
 }
 

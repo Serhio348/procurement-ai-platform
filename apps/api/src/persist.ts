@@ -3,6 +3,12 @@ import {
   createSpecialistStore,
   type Database,
 } from "@procurement/db";
+import {
+  createMemoryAdminJournal,
+  createPostgresAdminJournal,
+  recordJournal,
+  type AdminJournalPort,
+} from "./admin/journal.js";
 import type { AuthDirectory } from "./auth/directory.js";
 import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
@@ -22,6 +28,7 @@ export interface SpecialistPersistence {
   hydrateCatalog: (catalog: SpecialistCatalog) => Promise<void>;
   persistWorkspace: (state: SpecialistWorkspaceState) => Promise<void>;
   persistCases: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
+  journal: AdminJournalPort;
   close: () => Promise<void>;
 }
 
@@ -51,6 +58,19 @@ export async function openSpecialistPersistence(options: {
   const workspace =
     fromDb === undefined ? fileWorkspace : SpecialistWorkspace.parse(fromDb);
 
+  const journal =
+    connected === undefined
+      ? createMemoryAdminJournal()
+      : createPostgresAdminJournal(connected.db);
+  const configuredUrl = options.databaseUrl?.trim() ?? "";
+  if (configuredUrl.length > 0 && connected === undefined) {
+    await recordJournal(journal, {
+      kind: "platform",
+      level: "error",
+      message: "PostgreSQL недоступен. Состояние консоли остаётся на диске.",
+    });
+  }
+
   if (store !== undefined && fromDb === undefined) {
     await store.saveWorkspace(workspace.snapshot());
   }
@@ -62,6 +82,11 @@ export async function openSpecialistPersistence(options: {
       await store.saveWorkspace(state);
     } catch (error) {
       options.logger.error("PostgreSQL workspace save failed; disk copy remains", error);
+      await recordJournal(journal, {
+        kind: "platform",
+        level: "error",
+        message: "Не удалось записать профиль в PostgreSQL. Копия на диске сохранена.",
+      });
     }
   };
 
@@ -73,6 +98,11 @@ export async function openSpecialistPersistence(options: {
       await store.saveCases(cards);
     } catch (error) {
       options.logger.error("PostgreSQL case save failed", error);
+      await recordJournal(journal, {
+        kind: "platform",
+        level: "error",
+        message: "Не удалось записать карточку закупки в PostgreSQL.",
+      });
     }
   };
 
@@ -92,6 +122,7 @@ export async function openSpecialistPersistence(options: {
     },
     persistWorkspace,
     persistCases,
+    journal,
     async close() {
       if (connected !== undefined) await connected.pool.end();
     },

@@ -8,6 +8,7 @@ import { BrandMark } from "./BrandMark.js";
 export function Shell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuthSession();
   const pending = user?.pendingUserCount ?? 0;
+  const errors = user?.errorEventCount ?? 0;
   const inboxAlert = useInboxAlertCount();
 
   return (
@@ -46,6 +47,9 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               Администрирование
               {pending > 0 ? <span className="nav-badge">{pending}</span> : null}
+              {errors > 0 ? (
+                <span className="nav-alarm-mark">ошибки {String(errors)}</span>
+              ) : null}
             </NavLink>
           ) : null}
           <button type="button" className="nav-soon" disabled title="Скоро">

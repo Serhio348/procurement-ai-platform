@@ -8,7 +8,11 @@ import {
   AuthSessionResponse,
   AuthSignUpWrite,
   type AuthSessionUser,
+  type SpecialistRole,
 } from "@procurement/contracts";
+import { listedJournal, recordJournal, type AdminJournalPort } from "../admin/journal.js";
+import { formatPresenceDuration } from "../admin/presence.js";
+import type { ClosedAuthSession } from "./directory.js";
 import {
   consoleCapability,
   mayAdministerUsers,
@@ -37,6 +41,7 @@ export interface RegisterAuthOptions {
   cookieSecure?: boolean;
   publicUrl?: string;
   internalApiToken?: string;
+  journal?: AdminJournalPort;
 }
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -47,6 +52,7 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
   const cookieSecure = options.cookieSecure === true;
   const publicUrl = (options.publicUrl ?? "http://127.0.0.1:5173").replace(/\/$/, "");
   const internalToken = options.internalApiToken?.trim() ?? "";
+  const journal = options.journal;
 
   const resolveUser = async (request: FastifyRequest): Promise<AuthRecord | undefined> => {
     if (directory === undefined) return TEST_SPECIALIST_SESSION;
@@ -61,6 +67,10 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
       user.role === "admin" && user.accessStatus === "active" && directory !== undefined
         ? await directory.pendingCount()
         : undefined;
+    const errorEventCount =
+      user.role === "admin" && user.accessStatus === "active" && journal !== undefined
+        ? await journal.errorCount()
+        : undefined;
     return {
       id: user.id,
       email: user.email,
@@ -68,6 +78,7 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
       role: user.role,
       accessStatus: user.accessStatus,
       ...(pendingUserCount === undefined ? {} : { pendingUserCount }),
+      ...(errorEventCount === undefined ? {} : { errorEventCount }),
     };
   };
 
@@ -125,6 +136,11 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     try {
       const user = await directory.signUp(parsed.data);
       await setSession(reply, user);
+      await recordJournal(journal, {
+        kind: "access",
+        level: "info",
+        message: `Заявка на доступ: ${user.name} (${user.email})`,
+      });
       return AuthSessionResponse.parse({ user: await toSessionUser(user) });
     } catch (error) {
       return mapAuthError(reply, error);
@@ -143,14 +159,31 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     if (user === undefined) {
       return reply.code(401).send({ error: "invalid_credentials" });
     }
+    const previous = await directory.closeSessionsForUser(user.id);
+    for (const closed of previous) {
+      await recordPresence(journal, user, closed, "закрыл предыдущую сессию");
+    }
     await setSession(reply, user);
+    await recordJournal(journal, {
+      kind: "access",
+      level: "info",
+      message: `${user.name} (${user.email}) вошёл в консоль`,
+      actorName: user.name,
+      actorEmail: user.email,
+    });
     return AuthSessionResponse.parse({ user: await toSessionUser(user) });
   });
 
   app.post("/api/auth/sign-out", async (request, reply) => {
     if (directory !== undefined) {
       const token = readCookie(headerValue(request.headers.cookie), SESSION_COOKIE);
-      if (token !== undefined) await directory.deleteSession(token);
+      if (token !== undefined) {
+        const user = await directory.getBySessionToken(token);
+        const closed = await directory.deleteSession(token);
+        if (user !== undefined && closed !== undefined) {
+          await recordPresence(journal, user, closed, "вышел");
+        }
+      }
     }
     reply.header("set-cookie", clearSessionCookie(cookieSecure));
     return AuthSessionResponse.parse({ user: null });
@@ -201,28 +234,53 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     return asAdminUserList(await directory.listUsers());
   });
 
+  app.get("/api/admin/journal", async () => {
+    if (journal === undefined) return listedJournal([], 0);
+    return listedJournal(await journal.list(), await journal.errorCount());
+  });
+
   app.post("/api/admin/users/:id/approve", async (request, reply) => {
-    return mutateAdminUser(request, reply, directory, async (store, id, body) => {
+    return mutateAdminUser(request, reply, directory, journal, resolveUser, async (store, id, body) => {
       const parsed = AdminApproveWrite.safeParse(body);
       if (!parsed.success) return { error: "invalid_request" as const };
       return store.approve(id, parsed.data.role);
-    });
+    }, (actor, target) =>
+      `${actorName(actor)} одобрил доступ: ${target.name} (${target.email}) → ${specialistRoleLabel(target.role)}`,
+    );
   });
 
   app.post("/api/admin/users/:id/reject", async (request, reply) => {
-    return mutateAdminUser(request, reply, directory, (store, id) => store.reject(id));
+    return mutateAdminUser(
+      request,
+      reply,
+      directory,
+      journal,
+      resolveUser,
+      (store, id) => store.reject(id),
+      (actor, target) => `${actorName(actor)} отклонил заявку: ${target.name} (${target.email})`,
+    );
   });
 
   app.post("/api/admin/users/:id/revoke", async (request, reply) => {
-    return mutateAdminUser(request, reply, directory, (store, id) => store.revoke(id));
+    return mutateAdminUser(
+      request,
+      reply,
+      directory,
+      journal,
+      resolveUser,
+      (store, id) => store.revoke(id),
+      (actor, target) => `${actorName(actor)} отозвал доступ: ${target.name} (${target.email})`,
+    );
   });
 
   app.patch("/api/admin/users/:id", async (request, reply) => {
-    return mutateAdminUser(request, reply, directory, async (store, id, body) => {
+    return mutateAdminUser(request, reply, directory, journal, resolveUser, async (store, id, body) => {
       const parsed = AdminRoleWrite.safeParse(body);
       if (!parsed.success) return { error: "invalid_request" as const };
       return store.changeRole(id, parsed.data.role);
-    });
+    }, (actor, target) =>
+      `${actorName(actor)} сменил роль: ${target.name} (${target.email}) → ${specialistRoleLabel(target.role)}`,
+    );
   });
 }
 
@@ -230,11 +288,14 @@ async function mutateAdminUser(
   request: FastifyRequest,
   reply: FastifyReply,
   directory: AuthDirectory | undefined,
+  journal: AdminJournalPort | undefined,
+  resolveUser: (request: FastifyRequest) => Promise<AuthRecord | undefined>,
   act: (
     directory: AuthDirectory,
     id: string,
     body: unknown,
   ) => Promise<AuthRecord | undefined | { error: "invalid_request" }>,
+  describe: (actor: AuthRecord | undefined, target: AuthRecord) => string,
 ): Promise<unknown> {
   if (directory === undefined) {
     return reply.code(503).send({ error: "auth_unavailable" });
@@ -248,10 +309,45 @@ async function mutateAdminUser(
     if (result === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
+    const actor = await resolveUser(request);
+    await recordJournal(journal, {
+      kind: "access",
+      level: "info",
+      message: describe(actor, result),
+      ...(actor === undefined
+        ? {}
+        : { actorName: actor.name, actorEmail: actor.email }),
+    });
     return asAdminUserList(await directory.listUsers());
   } catch (error) {
     return mapAuthError(reply, error);
   }
+}
+
+function actorName(actor: AuthRecord | undefined): string {
+  return actor?.name ?? "Администратор";
+}
+
+async function recordPresence(
+  journal: AdminJournalPort | undefined,
+  user: AuthRecord,
+  closed: ClosedAuthSession,
+  verb: string,
+): Promise<void> {
+  await recordJournal(journal, {
+    kind: "access",
+    level: "info",
+    message: `${user.name} (${user.email}) ${verb}. В системе ${formatPresenceDuration(closed.startedAt, closed.lastSeenAt)}.`,
+    actorName: user.name,
+    actorEmail: user.email,
+  });
+}
+
+function specialistRoleLabel(role: SpecialistRole | null): string {
+  if (role === "admin") return "Администратор";
+  if (role === "specialist") return "Специалист";
+  if (role === "viewer") return "Наблюдатель";
+  return "Без роли";
 }
 
 function asAdminUserList(records: readonly AuthRecord[]) {

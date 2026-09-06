@@ -948,6 +948,11 @@ h3 {
   overflow: hidden;
 }
 
+.admin-row.is-journal-error {
+  background: #f8eeee;
+  border-color: #c4a8a8;
+}
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;

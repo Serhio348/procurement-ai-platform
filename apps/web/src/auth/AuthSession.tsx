@@ -38,6 +38,16 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, []);
 
+  useEffect(() => {
+    if (user?.role !== "admin") return undefined;
+    const timer = setInterval(() => {
+      void fetchSession()
+        .then(setUser)
+        .catch(() => undefined);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [user?.role]);
+
   const value = useMemo<AuthSessionValue>(
     () => ({
       user,

@@ -22,6 +22,20 @@
       "when": 1788205342797,
       "tag": "0002_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788205342798,
+      "tag": "0003_admin_journal",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788205342799,
+      "tag": "0004_session_last_seen",
+      "breakpoints": true
     }
   ]
 }

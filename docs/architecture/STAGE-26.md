@@ -32,7 +32,8 @@ Admin → POST /api/admin/users/:id/approve { role }
   → access_status=active
 ```
 
-- Сессия: httpOnly cookie `procurement.sid`, токен в базе как sha256.
+- Сессия: httpOnly cookie `procurement.sid`, токен в базе как sha256,
+  срок **сутки** — и cookie, и `expires_at`. Не скользящая.
 - Пароль: scrypt. Роль с клиента при регистрации отбрасывается.
 - Тесты API без каталога получают встроенную сессию specialist, чтобы
   не требовать Docker.

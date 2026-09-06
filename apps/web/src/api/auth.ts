@@ -1,8 +1,10 @@
 import {
   AdminApproveWrite,
+  AdminJournalListResponse,
   AdminRoleWrite,
   AdminUserListResponse,
   AuthSessionResponse,
+  type AdminJournalListResponse as AdminJournalListResponseValue,
   type AdminUserListResponse as AdminUserListResponseValue,
   type AuthSessionUser,
   type SpecialistRole,
@@ -100,6 +102,16 @@ export async function resetPassword(
   if (!response.ok) {
     throw new Error("Ссылка недействительна или пароль слишком короткий");
   }
+}
+
+export async function fetchAdminJournal(
+  fetcher: typeof fetch = fetch,
+): Promise<AdminJournalListResponseValue> {
+  const response = await fetcher("/api/admin/journal", withCredentials());
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить журнал");
+  }
+  return AdminJournalListResponse.parse(await response.json());
 }
 
 export async function fetchAdminUsers(

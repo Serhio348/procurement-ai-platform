@@ -57,4 +57,22 @@ describe("createMemoryAuthDirectory", () => {
     const user = await directory.signIn({ email: "user@example.com", password: "new-password" });
     expect(user?.email).toBe("user@example.com");
   });
+
+  it("returns the last seen time when a session is closed", async () => {
+    let current = Date.parse("2026-09-06T12:00:00.000Z");
+    const directory = createMemoryAuthDirectory(() => new Date(current));
+    const created = await directory.signUp({
+      email: "user@example.com",
+      name: "Иван",
+      password: "secret-password",
+    });
+    const token = await directory.createSession(created.id);
+    current += 7 * 60_000;
+    await directory.getBySessionToken(token);
+    const closed = await directory.deleteSession(token);
+
+    expect(closed?.userId).toBe(created.id);
+    expect(closed?.startedAt).toBe("2026-09-06T12:00:00.000Z");
+    expect(closed?.lastSeenAt).toBe("2026-09-06T12:07:00.000Z");
+  });
 });

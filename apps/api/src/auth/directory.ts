@@ -14,13 +14,20 @@ export interface AuthRecord {
   createdAt: string;
 }
 
+export interface ClosedAuthSession {
+  userId: string;
+  startedAt: string;
+  lastSeenAt: string;
+}
+
 export interface AuthDirectory {
   signUp: (input: AuthSignUpWrite) => Promise<AuthRecord>;
   signIn: (input: AuthCredentialsWrite) => Promise<AuthRecord | undefined>;
   createSession: (userId: string) => Promise<string>;
   getBySessionToken: (token: string) => Promise<AuthRecord | undefined>;
-  deleteSession: (token: string) => Promise<void>;
+  deleteSession: (token: string) => Promise<ClosedAuthSession | undefined>;
   deleteSessionsForUser: (userId: string) => Promise<void>;
+  closeSessionsForUser: (userId: string) => Promise<ClosedAuthSession[]>;
   countUsers: () => Promise<number>;
   bootstrapAdmin: (email: string, password: string, name: string) => Promise<AuthRecord | undefined>;
   listUsers: () => Promise<AuthRecord[]>;
@@ -33,7 +40,8 @@ export interface AuthDirectory {
   resetPassword: (token: string, password: string) => Promise<boolean>;
 }
 
-export const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+export const SESSION_TOUCH_MS = 60 * 1000;
 export const RESET_TTL_MS = 60 * 60 * 1000;
 
 export function normalizeEmail(email: string): string {

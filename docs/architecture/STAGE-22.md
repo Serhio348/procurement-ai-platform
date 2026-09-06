@@ -51,8 +51,8 @@ Discovery (интервал API)
   PostgreSQL. Таблицы `domain_profiles` / `decisions` этапа 2 остаются
   целевым хранилищем; этот срез не требует Docker.
 - Интервал discovery — `SPECIALIST_DISCOVERY_INTERVAL_MS` (по умолчанию
-  10 минут). Watch выключен: таймер может тикать, `runDiscovery` сразу
-  возвращает `watch_off`.
+  час). Watch выключен: таймер может тикать, `runDiscovery` сразу
+  возвращает `watch_off`. Успешный проход пишется в журнал админки.
 
 Два мониторинга не смешиваются:
 

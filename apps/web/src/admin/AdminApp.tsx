@@ -5,6 +5,7 @@ import type {
   AdminJournalListResponse,
   AdminUser,
   AdminUserListResponse,
+  SpecialistProfileListResponse,
   SpecialistRole,
 } from "@procurement/contracts";
 import {
@@ -15,6 +16,7 @@ import {
   rejectUser,
   revokeUser,
 } from "../api/auth.js";
+import { fetchProfiles } from "../api/specialist.js";
 import { accessMessage, journalKindLabel, roleLabel } from "../auth/labels.js";
 import { useAuthSession } from "../auth/AuthSession.js";
 import { Shell } from "../shell/Shell.js";
@@ -24,6 +26,7 @@ import {
   adminPaneLead,
   adminPanePath,
   journalForPane,
+  lastDiscoveryEntry,
   parseAdminPane,
 } from "./panes.js";
 
@@ -35,14 +38,20 @@ export function AdminApp() {
   const { refresh } = useAuthSession();
   const [listed, setListed] = useState<AdminUserListResponse | undefined>();
   const [journal, setJournal] = useState<AdminJournalListResponse | undefined>();
+  const [profiles, setProfiles] = useState<SpecialistProfileListResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [roles, setRoles] = useState<Record<string, SpecialistRole>>({});
 
   async function load(): Promise<void> {
     try {
-      const [next, log] = await Promise.all([fetchAdminUsers(), fetchAdminJournal()]);
+      const [next, log, listedProfiles] = await Promise.all([
+        fetchAdminUsers(),
+        fetchAdminJournal(),
+        fetchProfiles().catch(() => undefined),
+      ]);
       setListed(next);
       setJournal(log);
+      setProfiles(listedProfiles);
       setRoles((current) => {
         const merged = { ...current };
         for (const user of next.items) {
@@ -69,6 +78,8 @@ export function AdminApp() {
   const journalItems = journalForPane(journal?.items ?? [], pane);
   const errorCount = journal?.errorCount ?? 0;
   const presenceCount = journalForPane(journal?.items ?? [], "presence").length;
+  const lastDiscovery = lastDiscoveryEntry(journal?.items ?? []);
+  const watching = profiles?.items.filter((item) => item.watchNewProcurements) ?? [];
 
   return (
     <Shell>
@@ -93,12 +104,61 @@ export function AdminApp() {
                 {adminPaneLabel(item)}
                 {item === "access" && pending.length > 0 ? ` (${String(pending.length)})` : ""}
                 {item === "presence" && presenceCount > 0 ? ` (${String(presenceCount)})` : ""}
+                {item === "discovery" && lastDiscovery?.level === "error" ? " !" : ""}
                 {item === "errors" && errorCount > 0 ? ` (${String(errorCount)})` : ""}
               </NavLink>
             ))}
           </nav>
         </section>
-        {pane === "access" ? (
+        {pane === "discovery" ? (
+          <>
+            <section className="profile-section">
+              <h2>Последний сбор</h2>
+              {lastDiscovery === undefined ? (
+                <p className="profile-empty-queries">Ещё не было успешного прохода. Сбор идёт раз в час, если на профиле включено слежение.</p>
+              ) : (
+                <>
+                  <p className="profile-list-meta">{formatJournalTime(lastDiscovery.at)}</p>
+                  <p>{lastDiscovery.message}</p>
+                </>
+              )}
+              <p className="profile-hint">Интервал: каждый час.</p>
+            </section>
+            <section className="profile-section">
+              <h2>Профили со слежением</h2>
+              {watching.length === 0 ? (
+                <p className="profile-empty-queries">Ни на одном профиле слежение не включено. Сбор тогда ничего не ищет.</p>
+              ) : (
+                <ul className="admin-list">
+                  {watching.map((item) => (
+                    <li key={item.id} className="admin-row">
+                      <div>
+                        <strong>{item.name.trim() === "" ? "Без названия" : item.name}</strong>
+                        <p className="profile-list-meta">
+                          {item.keywords.length > 0
+                            ? item.keywords.join(", ")
+                            : "Нет ключевых слов — этот профиль сбор пропускает."}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="profile-section">
+              <h2>Проходы</h2>
+              {journalItems.length === 0 ? (
+                <p className="profile-empty-queries">Записей нет.</p>
+              ) : (
+                <ul className="admin-list">
+                  {journalItems.map((item) => (
+                    <JournalRow key={item.id} item={item} />
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        ) : pane === "access" ? (
           <>
             <section className="profile-section">
               <h2>Заявки {pending.length > 0 ? `(${String(pending.length)})` : ""}</h2>

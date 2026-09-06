@@ -49,6 +49,7 @@ import {
   getBlob,
   isSha256Hex,
 } from "./blobs.js";
+import { discoveryDoneMessage } from "./discovery-transport.js";
 import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
@@ -219,6 +220,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
     }
     if (addedCount > 0) await persist();
+    await recordJournal(journal, {
+      kind: "discovery",
+      level: "info",
+      message: discoveryDoneMessage({
+        profileNames: ready.map((item) => profileDisplayName(item)),
+        addedCount,
+        skippedDecidedCount,
+      }),
+    });
     return SpecialistDiscoveryResponse.parse({
       ran: true,
       reason: "ok",

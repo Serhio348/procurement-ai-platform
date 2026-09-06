@@ -1,6 +1,6 @@
 import type { AdminJournalEntry } from "@procurement/contracts";
 
-export const ADMIN_PANES = ["access", "presence", "errors", "journal"] as const;
+export const ADMIN_PANES = ["access", "presence", "discovery", "errors", "journal"] as const;
 
 export type AdminPane = (typeof ADMIN_PANES)[number];
 
@@ -17,6 +17,7 @@ export function adminPanePath(pane: AdminPane): string {
 export function adminPaneLabel(pane: AdminPane): string {
   if (pane === "access") return "Доступ";
   if (pane === "presence") return "Входы";
+  if (pane === "discovery") return "Слежение";
   if (pane === "errors") return "Ошибки";
   return "Журнал";
 }
@@ -25,6 +26,9 @@ export function adminPaneLead(pane: AdminPane): string {
   if (pane === "access") return "Заявки на вход и роли. Кто был в системе — во вкладке «Входы».";
   if (pane === "presence") {
     return "Кто вошёл и сколько был в системе. Время — до последнего запроса, не до закрытия вкладки.";
+  }
+  if (pane === "discovery") {
+    return "Фоновый сбор с площадки раз в час. Здесь видно, когда он последний раз прошёл.";
   }
   if (pane === "errors") return "Сбои поиска, слежения и документов. Счётчик — за 7 дней.";
   return "Полная лента обслуживания. Сырой журнал сервера сюда не выводим.";
@@ -40,6 +44,13 @@ export function journalForPane(
 ): readonly AdminJournalEntry[] {
   if (pane === "access") return [];
   if (pane === "presence") return items.filter(isPresenceEntry);
+  if (pane === "discovery") return items.filter((item) => item.kind === "discovery");
   if (pane === "errors") return items.filter((item) => item.level === "error");
   return items;
+}
+
+export function lastDiscoveryEntry(
+  items: readonly AdminJournalEntry[],
+): AdminJournalEntry | undefined {
+  return items.find((item) => item.kind === "discovery");
 }

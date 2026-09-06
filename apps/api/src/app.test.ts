@@ -10,6 +10,7 @@ import {
 import { SpecialistCatalog } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryAdminJournal } from "./admin/journal.js";
 import { buildSpecialistApi } from "./app.js";
 import { putBlob } from "./blobs.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
@@ -532,7 +533,8 @@ describe("specialist API", () => {
   });
 
   it("does not discover new procurements until watch is turned on and then skips judged ids", async () => {
-    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+    const journal = createMemoryAdminJournal();
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog(), journal });
 
     await app.inject({
       method: "PUT",
@@ -584,6 +586,11 @@ describe("specialist API", () => {
         (item) => item.procurementId === substation?.id,
       ),
     ).toBe(false);
+    const log = await journal.list();
+    expect(log.some((item) => item.kind === "discovery" && item.message.includes("Фоновый поиск выполнен"))).toBe(
+      true,
+    );
+    expect(log.some((item) => item.message.includes("watch_off"))).toBe(false);
 
     await app.close();
   });

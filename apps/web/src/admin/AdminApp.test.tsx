@@ -23,6 +23,19 @@ describe("AdminApp", () => {
     expect(approvals).toEqual([{ role: "specialist" }]);
   });
 
+  it("opens watch without mixing it with access requests", async () => {
+    const user = userEvent.setup();
+    stubAdminFetch([]);
+    renderAdmin("/admin/access");
+
+    expect(await screen.findByText("Иван")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "Слежение" }));
+    expect(await screen.findAllByText(/Фоновый поиск выполнен/)).not.toHaveLength(0);
+    expect(screen.getAllByText("Кабель").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Иван")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Одобрить" })).toBeNull();
+  });
+
   it("opens errors without mixing them with access requests", async () => {
     const user = userEvent.setup();
     stubAdminFetch([]);
@@ -82,6 +95,13 @@ function stubAdminFetch(approvals: unknown[]) {
       return json({
         items: [
           {
+            id: "00000000-0000-4000-8000-000000000302",
+            at: "2026-09-06T12:00:00.000Z",
+            kind: "discovery",
+            level: "info",
+            message: "Фоновый поиск выполнен (Кабель). Добавлено 2, уже решённых пропущено 1.",
+          },
+          {
             id: "00000000-0000-4000-8000-000000000301",
             at: "2026-09-06T12:00:00.000Z",
             kind: "search",
@@ -90,6 +110,23 @@ function stubAdminFetch(approvals: unknown[]) {
           },
         ],
         errorCount: 1,
+      });
+    }
+    if (String(url) === "/api/profiles") {
+      return json({
+        items: [
+          {
+            id: "00000000-0000-4000-8000-000000000401",
+            name: "Кабель",
+            purpose: "",
+            description: "",
+            instructions: "",
+            keywords: ["кабель"],
+            excludeKeywords: [],
+            watchNewProcurements: true,
+          },
+        ],
+        activeProfileId: "00000000-0000-4000-8000-000000000401",
       });
     }
     return new Response("missing", { status: 404 });

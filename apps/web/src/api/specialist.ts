@@ -14,9 +14,10 @@ import {
   type SpecialistIngestProgress as SpecialistIngestProgressValue,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
 } from "@procurement/contracts";
+import { withCredentials } from "./http.js";
 
 export async function fetchInbox(fetcher: typeof fetch = fetch): Promise<readonly SpecialistInboxEntry[]> {
-  const response = await fetcher("/api/inbox");
+  const response = await fetcher("/api/inbox", withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось загрузить входящие");
   }
@@ -26,7 +27,7 @@ export async function fetchInbox(fetcher: typeof fetch = fetch): Promise<readonl
 export async function fetchProcurements(
   fetcher: typeof fetch = fetch,
 ): Promise<readonly SpecialistProcurementCardValue[]> {
-  const response = await fetcher("/api/procurements");
+  const response = await fetcher("/api/procurements", withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось загрузить закупки");
   }
@@ -36,11 +37,14 @@ export async function fetchProcurements(
 export async function searchProcurements(
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistSearchResponseValue> {
-  const response = await fetcher("/api/procurements/search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+  const response = await fetcher(
+    "/api/procurements/search",
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+  );
   if (!response.ok) {
     throw new Error(await searchFailureMessage(response));
   }
@@ -50,7 +54,7 @@ export async function searchProcurements(
 export async function fetchProfile(
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
-  const response = await fetcher("/api/profile");
+  const response = await fetcher("/api/profile", withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось загрузить профиль");
   }
@@ -60,7 +64,7 @@ export async function fetchProfile(
 export async function fetchProfiles(
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistProfileListResponseValue> {
-  const response = await fetcher("/api/profiles");
+  const response = await fetcher("/api/profiles", withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось загрузить профили");
   }
@@ -70,7 +74,7 @@ export async function fetchProfiles(
 export async function createProfile(
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
-  const response = await fetcher("/api/profiles", { method: "POST" });
+  const response = await fetcher("/api/profiles", withCredentials({ method: "POST" }));
   if (!response.ok) {
     throw new Error("Не удалось создать профиль");
   }
@@ -81,7 +85,7 @@ export async function deleteProfile(
   id: string,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistProfileListResponseValue> {
-  const response = await fetcher(`/api/profiles/${id}`, { method: "DELETE" });
+  const response = await fetcher(`/api/profiles/${id}`, withCredentials({ method: "DELETE" }));
   if (!response.ok) {
     throw new Error(
       response.status === 409
@@ -96,7 +100,7 @@ export async function activateProfile(
   id: string,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
-  const response = await fetcher(`/api/profiles/${id}/activate`, { method: "POST" });
+  const response = await fetcher(`/api/profiles/${id}/activate`, withCredentials({ method: "POST" }));
   if (!response.ok) {
     throw new Error("Не удалось выбрать профиль");
   }
@@ -108,11 +112,14 @@ export async function saveProfile(
   input: SpecialistProfileWrite,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
-  const response = await fetcher(`/api/profiles/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
+  const response = await fetcher(
+    `/api/profiles/${id}`,
+    withCredentials({
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
   if (!response.ok) {
     throw new Error("Не удалось сохранить профиль");
   }
@@ -123,11 +130,14 @@ export async function setProfileWatch(
   watchNewProcurements: boolean,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
-  const response = await fetcher("/api/profile/watch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ watchNewProcurements }),
-  });
+  const response = await fetcher(
+    "/api/profile/watch",
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ watchNewProcurements }),
+    }),
+  );
   if (!response.ok) {
     throw new Error("Не удалось изменить слежение за новыми закупками");
   }
@@ -138,7 +148,7 @@ export async function fetchIngestProgress(
   id: string,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistIngestProgressValue> {
-  const response = await fetcher(`/api/procurements/${id}/ingest-progress`);
+  const response = await fetcher(`/api/procurements/${id}/ingest-progress`, withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось получить прогресс индексации");
   }
@@ -150,11 +160,14 @@ export async function decideProcurement(
   kind: SpecialistTriageKind,
   fetcher: typeof fetch = fetch,
 ): Promise<readonly SpecialistProcurementCardValue[]> {
-  const response = await fetcher(`/api/procurements/${id}/decision`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind }),
-  });
+  const response = await fetcher(
+    `/api/procurements/${id}/decision`,
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    }),
+  );
   if (!response.ok) {
     throw new Error("Не удалось сохранить решение по закупке");
   }

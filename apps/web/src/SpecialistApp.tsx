@@ -10,6 +10,7 @@ import type {
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
+import { AdminApp } from "./admin/AdminApp.js";
 import { InboxApp } from "./inbox/InboxApp.js";
 import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
@@ -152,6 +153,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             />
           }
         />
+        <Route path="/admin" element={<AdminApp />} />
         <Route
           path="/procurements/:id"
           element={

@@ -93,6 +93,33 @@ describe("specialist auth API", () => {
     await app.close();
   });
 
+  it("lists a pending signup when createdAt is a PostgreSQL timestamptz", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const pending = await directory.signUp({
+      email: "ivan@example.com",
+      name: "Иван",
+      password: "secret-password",
+    });
+    directory.listUsers = async () => [
+      { ...pending, createdAt: "2026-09-06 12:00:00+00" },
+    ];
+    const app = await buildSpecialistApi({ authDirectory: directory });
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/admin/users",
+      headers: { cookie: cookieHeader(adminIn) },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.body).items[0]?.email).toBe("ivan@example.com");
+    await app.close();
+  });
+
   it("requires the internal token for inbox events when it is configured", async () => {
     const app = await buildSpecialistApi({
       authDirectory: createMemoryAuthDirectory(),

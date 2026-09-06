@@ -12,6 +12,7 @@ import {
   type AuthRecord,
 } from "./directory.js";
 import { AuthConflictError } from "./errors.js";
+import { toIsoDateTime } from "./instant.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { hashToken, randomToken } from "./token.js";
 
@@ -29,7 +30,7 @@ function toRecord(row: {
     name: row.name,
     role: row.role,
     accessStatus: row.accessStatus,
-    createdAt: row.createdAt,
+    createdAt: toIsoDateTime(row.createdAt),
   });
 }
 

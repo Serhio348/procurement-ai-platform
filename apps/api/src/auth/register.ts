@@ -18,6 +18,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { SESSION_TTL_MS, type AuthDirectory, type AuthRecord } from "./directory.js";
 import { AuthConflictError } from "./errors.js";
+import { toIsoDateTime } from "./instant.js";
 import { clearSessionCookie, readCookie, SESSION_COOKIE, sessionCookie } from "./cookie.js";
 import type { AuthMailPort } from "./mail.js";
 
@@ -197,11 +198,7 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     if (directory === undefined) {
       return reply.code(503).send({ error: "auth_unavailable" });
     }
-    const items = await directory.listUsers();
-    return AdminUserListResponse.parse({
-      items,
-      pendingCount: items.filter((item) => item.accessStatus === "pending").length,
-    });
+    return asAdminUserList(await directory.listUsers());
   });
 
   app.post("/api/admin/users/:id/approve", async (request, reply) => {
@@ -251,14 +248,21 @@ async function mutateAdminUser(
     if (result === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    const items = await directory.listUsers();
-    return AdminUserListResponse.parse({
-      items,
-      pendingCount: items.filter((item) => item.accessStatus === "pending").length,
-    });
+    return asAdminUserList(await directory.listUsers());
   } catch (error) {
     return mapAuthError(reply, error);
   }
+}
+
+function asAdminUserList(records: readonly AuthRecord[]) {
+  const items = records.map((item) => ({
+    ...item,
+    createdAt: toIsoDateTime(item.createdAt),
+  }));
+  return AdminUserListResponse.parse({
+    items,
+    pendingCount: items.filter((item) => item.accessStatus === "pending").length,
+  });
 }
 
 function mapAuthError(reply: FastifyReply, error: unknown) {

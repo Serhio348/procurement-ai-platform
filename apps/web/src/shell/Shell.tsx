@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuthSession } from "../auth/AuthSession.js";
 import { roleLabel } from "../auth/labels.js";
@@ -10,6 +10,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const pending = user?.pendingUserCount ?? 0;
   const errors = user?.errorEventCount ?? 0;
   const inboxAlert = useInboxAlertCount();
+  const atAdmin = useLocation().pathname.startsWith("/admin");
 
   return (
     <div className="shell">
@@ -42,8 +43,8 @@ export function Shell({ children }: { children: ReactNode }) {
           </NavLink>
           {user?.role === "admin" ? (
             <NavLink
-              to="/admin"
-              className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
+              to="/admin/access"
+              className={() => (atAdmin ? "nav-current" : "nav-link")}
             >
               Администрирование
               {pending > 0 ? <span className="nav-badge">{pending}</span> : null}

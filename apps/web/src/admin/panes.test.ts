@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { journalForPane, parseAdminPane, type AdminPane } from "./panes.js";
+import type { AdminJournalEntry } from "@procurement/contracts";
+
+function entry(
+  id: string,
+  kind: AdminJournalEntry["kind"],
+  level: AdminJournalEntry["level"],
+  message: string,
+): AdminJournalEntry {
+  return {
+    id,
+    at: "2026-09-06T12:00:00.000Z",
+    kind,
+    level,
+    message,
+  };
+}
+
+const feed = [
+  entry("1", "access", "info", "Иван (ivan@example.com) вошёл в консоль"),
+  entry("2", "access", "info", "Иван (ivan@example.com) вышел. В системе 12 мин."),
+  entry("3", "access", "info", "Администратор одобрил доступ Ивана"),
+  entry("4", "search", "error", "Площадка goszakupki.by недоступна"),
+] as const;
+
+describe("admin panes", () => {
+  it("keeps people, presence, and outages on separate windows", () => {
+    expect(parseAdminPane("errors")).toBe("errors");
+    expect(parseAdminPane("unknown")).toBeUndefined();
+    expect(messages("presence")).toEqual([
+      "Иван (ivan@example.com) вошёл в консоль",
+      "Иван (ivan@example.com) вышел. В системе 12 мин.",
+    ]);
+    expect(messages("errors")).toEqual(["Площадка goszakupki.by недоступна"]);
+    expect(messages("access")).toEqual([]);
+    expect(messages("journal")).toHaveLength(4);
+  });
+});
+
+function messages(pane: AdminPane): string[] {
+  return journalForPane(feed, pane).map((item) => item.message);
+}

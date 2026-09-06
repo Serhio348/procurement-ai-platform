@@ -930,6 +930,17 @@ h3 {
   max-width: 100%;
 }
 
+.admin-panes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.admin-panes a {
+  text-decoration: none;
+}
+
 .admin-list {
   display: grid;
   gap: 10px;

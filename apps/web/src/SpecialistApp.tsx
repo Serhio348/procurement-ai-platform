@@ -213,7 +213,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             />
           }
         />
-        <Route path="/admin" element={<AdminApp />} />
+        <Route path="/admin/:pane?" element={<AdminApp />} />
         <Route
           path="/procurements/:id"
           element={

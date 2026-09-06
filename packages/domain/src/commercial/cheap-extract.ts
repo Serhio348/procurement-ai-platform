@@ -157,8 +157,9 @@ function extractWithinDuration(page: {
     const phrase = match[0]?.trim().replace(/\s+/g, " ");
     if (phrase === undefined || phrase.length === 0) continue;
     const index = match.index ?? 0;
-    const left = page.text.slice(Math.max(0, index - 160), index);
-    const kind = classifyWithinDuration(left);
+    const left = page.text.slice(Math.max(0, index - 280), index);
+    const right = page.text.slice(index + phrase.length, index + phrase.length + 80);
+    const kind = classifyWithinDuration(left, right);
     const several = match[1] !== undefined;
     const raw = match[2];
     if (several) {
@@ -217,14 +218,51 @@ function severalDayFlavor(phrase: string): string {
   return "";
 }
 
-function classifyWithinDuration(left: string): "payment" | "delivery" | "note" {
-  if (
-    /по\s+факту|оплат|расч[её]т|перечисл|платежн|казнач|после\s+поставк/iu.test(left)
-  ) {
-    return "payment";
-  }
-  if (/(?:срок(?:и)?\s+)?(?:поставк|изготовлен)/iu.test(left)) return "delivery";
+function classifyWithinDuration(left: string, right = ""): "payment" | "delivery" | "note" {
+  const nearLeft = lastClause(left);
+  const nearRight = firstClause(right);
+  if (looksLikeBidDeadline(nearLeft) || looksLikeBidDeadline(nearRight)) return "note";
+  if (looksLikePaymentDeadline(nearLeft) || looksLikePaymentDeadline(nearRight)) return "payment";
+  if (looksLikeDeliveryPeriod(nearLeft) || looksLikeDeliveryPeriod(nearRight)) return "delivery";
+  const heading = lastDurationHeading(left);
+  if (heading !== undefined) return heading;
+  if (looksLikePaymentDeadline(left) && !looksLikeDeliveryPeriod(left)) return "payment";
+  if (looksLikeDeliveryPeriod(left) && !looksLikePaymentDeadline(left)) return "delivery";
   return "note";
+}
+
+function lastClause(left: string): string {
+  const parts = left.split(/[.\n;]/u);
+  return (parts.at(-1) ?? left).slice(-120);
+}
+
+function firstClause(right: string): string {
+  const stop = right.search(/[.\n;]/u);
+  return (stop === -1 ? right : right.slice(0, stop)).slice(0, 80);
+}
+
+function looksLikeBidDeadline(text: string): boolean {
+  return /срок(?:и)?\s+подач|подач\p{L}*\s+заяв/iu.test(text);
+}
+
+function looksLikePaymentDeadline(text: string): boolean {
+  return /по\s+факту|оплат|расч[её]т|перечисл|платеж|казнач|аванс|предоплат|после\s+поставк|с\s+(?:даты|момента)\s+поставк|накладн|подписания\s+акта|акта\s+прием/iu.test(
+    text,
+  );
+}
+
+function looksLikeDeliveryPeriod(text: string): boolean {
+  return /(?:срок(?:и)?\s+)?(?:поставк|поставл|поставить|отгруз|доставк|изготовлен)/iu.test(text);
+}
+
+function lastDurationHeading(left: string): "payment" | "delivery" | undefined {
+  const matches = [
+    ...left.matchAll(/срок(?:и)?\s+оплат|порядок\s+расч|условия\s+оплат/giu),
+    ...left.matchAll(/срок(?:и)?\s+поставк|срок(?:и)?\s+изготовлен/giu),
+  ];
+  const last = matches.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).at(-1)?.[0];
+  if (last === undefined) return undefined;
+  return /оплат|расч/iu.test(last) ? "payment" : "delivery";
 }
 
 interface CheapPattern {

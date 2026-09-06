@@ -168,4 +168,46 @@ describe("applyParticipateDocuments", () => {
     expect(next.termsDetail).toContain("Срок оплаты: в течение нескольких дней.");
     expect(next.termsDetail ?? "").not.toMatch(/Срок оплаты:\s*\d+\s*дн/);
   });
+
+  it("does not print two bare «Срок» lines for payment and delivery", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Станция обезжелезивания",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://example.test/auction/3",
+      sourceProcurementId: "auction/3",
+    });
+    const next = applyParticipateDocuments(card, [
+      SpecialistCaseDocument.parse({
+        name: "dogovor.doc",
+        sourceUrl: "https://example.test/files/dogovor.doc",
+        hash: "a".repeat(64),
+        status: "hashed",
+        extraction: {
+          status: "extracted",
+          kind: "office_text",
+          pageCount: 1,
+          letterCount: 180,
+          confidence: 1,
+          ocrApplied: false,
+          textPreview: "поставить товар в течение 30 календарных дней",
+          pages: [
+            {
+              page: 1,
+              text:
+                "Гарантийный срок 24 месяца.\nПоставщик обязуется поставить товар в течение 30 календарных дней с даты заключения договора.\nРасчеты производятся в течение 15 календарных дней с даты поставки.",
+              ocrApplied: false,
+              confidence: 1,
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(next.termsDetail).toContain("Гарантия: 24 мес.");
+    expect(next.termsDetail).toContain("Срок поставки: 30 календарных дн.");
+    expect(next.termsDetail).toContain("Срок оплаты: 15 календарных дн.");
+    expect(next.termsDetail ?? "").not.toMatch(/^Срок:/m);
+  });
 });

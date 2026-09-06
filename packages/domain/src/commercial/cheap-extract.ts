@@ -49,7 +49,24 @@ export function cheapExtractCommercialClaims(page: {
       );
     }
   }
-  return [...claims, ...extractZeroAdvance(page), ...extractOnDelivery(page)];
+  return dedupeClaimValues([
+    ...claims,
+    ...extractZeroAdvance(page),
+    ...extractOnDelivery(page),
+    ...extractWithinDuration(page).claims,
+  ]);
+}
+
+function dedupeClaimValues(claims: CommercialClaimValue[]): CommercialClaimValue[] {
+  const seen = new Set<string>();
+  const unique: CommercialClaimValue[] = [];
+  for (const claim of claims) {
+    const id = `${claim.key}:${String(claim.value)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(claim);
+  }
+  return unique;
 }
 
 const commercialNoteSource =
@@ -63,6 +80,9 @@ export function cheapExtractCommercialNotes(page: { text: string }): string[] {
     const quote = match[0]?.trim().replace(/\s+/g, " ");
     if (quote === undefined || quote.length === 0 || notes.includes(quote)) continue;
     notes.push(quote);
+  }
+  for (const note of extractWithinDuration({ hash: "a".repeat(64), page: 1, text: page.text }).notes) {
+    if (!notes.includes(note)) notes.push(note);
   }
   return notes;
 }
@@ -122,6 +142,68 @@ function extractOnDelivery(page: {
   return claims;
 }
 
+const withinDaysSource =
+  "в\\s+течени[еи]\\s+(?:(нескольких)|(\\d{1,3}))(?:\\s*\\([^)]{0,40}\\))?(?:\\s+(?:календарн|банковск|рабоч)\\p{L}*)?\\s*дн\\p{L}*";
+
+function extractWithinDuration(page: {
+  hash: string;
+  page: number;
+  text: string;
+}): { claims: CommercialClaimValue[]; notes: string[] } {
+  const claims: CommercialClaimValue[] = [];
+  const notes: string[] = [];
+  const regex = new RegExp(withinDaysSource, "giu");
+  for (const match of page.text.matchAll(regex)) {
+    const phrase = match[0]?.trim().replace(/\s+/g, " ");
+    if (phrase === undefined || phrase.length === 0) continue;
+    const index = match.index ?? 0;
+    const left = page.text.slice(Math.max(0, index - 160), index);
+    const kind = classifyWithinDuration(left);
+    const several = match[1] !== undefined;
+    const raw = match[2];
+    if (several) {
+      const note =
+        kind === "payment"
+          ? "Срок оплаты: в течение нескольких дней."
+          : kind === "delivery"
+            ? "Срок поставки: в течение нескольких дней."
+            : "Срок: в течение нескольких дней.";
+      if (!notes.includes(note)) notes.push(note);
+      continue;
+    }
+    if (raw === undefined) continue;
+    const value = days(raw);
+    if (value === undefined) continue;
+    if (kind === "note") {
+      const note = `Срок: ${phrase}.`;
+      if (!notes.includes(note)) notes.push(note);
+      continue;
+    }
+    claims.push(
+      CommercialClaim.parse({
+        key: kind === "delivery" ? "commercial.delivery_period_days" : "commercial.payment_deadline_days",
+        value,
+        unit: "days",
+        confidence: 0.9,
+        hash: page.hash,
+        page: page.page,
+        quote: phrase,
+      }),
+    );
+  }
+  return { claims, notes };
+}
+
+function classifyWithinDuration(left: string): "payment" | "delivery" | "note" {
+  if (
+    /по\s+факту|оплат|расч[её]т|перечисл|платежн|казнач|после\s+поставк/iu.test(left)
+  ) {
+    return "payment";
+  }
+  if (/(?:срок(?:и)?\s+)?(?:поставк|изготовлен)/iu.test(left)) return "delivery";
+  return "note";
+}
+
 interface CheapPattern {
   key: CommercialClaimValue["key"];
   unit: string;
@@ -131,7 +213,7 @@ interface CheapPattern {
 
 /** JS `\\w` is ASCII; contest wording is Cyrillic (`гарантийный`, `календарных`). */
 const daysAfterNumber =
-  "(\\d{1,3})(?:\\s*\\([^)]{0,40}\\))?(?:\\s+(?:календарн|банковск)\\p{L}*)?\\s*дн\\p{L}*";
+  "(\\d{1,3})(?:\\s*\\([^)]{0,40}\\))?(?:\\s+(?:календарн|банковск|рабоч)\\p{L}*)?\\s*дн\\p{L}*";
 const monthsAfterNumber = "(\\d{1,3})(?:\\s*\\([^)]{0,40}\\))?\\s*мес\\p{L}*";
 
 const patterns: readonly CheapPattern[] = [
@@ -153,6 +235,14 @@ const patterns: readonly CheapPattern[] = [
     key: "commercial.payment_deadline_days",
     unit: "days",
     source: `оплат(?:а|ы|е|ой)[^\\n.]{0,40}?${daysAfterNumber}`,
+    parse: days,
+  },
+  {
+    key: "commercial.payment_deadline_days",
+    unit: "days",
+    // Treasury wording: «по факту поставки в течение 10 банковских дней».
+    // Do not use bare «поставк» — that would steal delivery period days.
+    source: `(?:по\\s+факту\\s+поставк\\p{L}*|оплат\\p{L}*\\s+после\\s+поставк\\p{L}*)[^\\n.]{0,80}?в\\s+течени[еи]\\s+${daysAfterNumber}`,
     parse: days,
   },
   {

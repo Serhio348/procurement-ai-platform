@@ -89,7 +89,13 @@ function isPaymentKind(value: string): value is PaymentKind {
 
 function lineCoversNote(line: string, note: string): boolean {
   const folded = note.toLowerCase();
-  if (line.startsWith("Оплата:") && /по факту|оплат/u.test(folded)) return true;
+  const hasDuration = /в\s+течени|нескольк|\d+\s*дн/u.test(folded);
+  if (line.startsWith("Оплата:") && /по факту поставк|условия оплаты/u.test(folded) && !hasDuration) {
+    return true;
+  }
+  if (line.startsWith("Срок оплаты:") && /срок оплаты|в\s+течени/u.test(folded) && /\d+\s*дн/u.test(line)) {
+    return true;
+  }
   if (line.startsWith("Срок поставки:") && folded.includes("срок поставки") && /\d+\s*дн/u.test(line)) {
     return true;
   }

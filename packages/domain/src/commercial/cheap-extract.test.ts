@@ -124,6 +124,82 @@ describe("cheapExtractCommercialClaims", () => {
     );
   });
 
+  it("reads payment days after «по факту поставки в течение N банковских дней»", () => {
+    const claims = cheapExtractCommercialClaims({
+      hash,
+      page: 1,
+      text:
+        "Расчеты за товар за счет средств районного бюджета производятся платежными поручениями путем перечисления денежных средств со счетов органа казначейства на расчетный счет «Поставщика», по факту поставки в течение 10 банковских дней на основании товарно-транспортной накладной",
+    });
+    expect(claims.filter((item) => item.key === "commercial.payment_kind")).toEqual([
+      expect.objectContaining({
+        key: "commercial.payment_kind",
+        value: "on_delivery",
+      }),
+    ]);
+    expect(claims.filter((item) => item.key === "commercial.payment_deadline_days")).toEqual([
+      expect.objectContaining({
+        key: "commercial.payment_deadline_days",
+        value: 10,
+        quote: expect.stringMatching(/по факту поставки в течение 10 банковских дней/i),
+      }),
+    ]);
+    expect(claims.some((item) => item.key === "commercial.delivery_period_days")).toBe(false);
+  });
+
+  it("does not treat delivery «в течение N дней» as a payment deadline", () => {
+    const claims = cheapExtractCommercialClaims({
+      hash,
+      page: 1,
+      text: "Срок поставки в течение 60 календарных дней с даты подписания договора.",
+    });
+    expect(claims.some((item) => item.key === "commercial.payment_deadline_days")).toBe(false);
+    expect(claims.filter((item) => item.key === "commercial.delivery_period_days")).toEqual([
+      expect.objectContaining({
+        key: "commercial.delivery_period_days",
+        value: 60,
+      }),
+    ]);
+  });
+
+  it("reads «в течение N календарных дней» and «в течении нескольких дней»", () => {
+    expect(
+      cheapExtractCommercialClaims({
+        hash,
+        page: 1,
+        text: "Оплата в течение 15 календарных дней с даты подписания акта.",
+      }).filter((item) => item.key === "commercial.payment_deadline_days"),
+    ).toEqual([
+      expect.objectContaining({
+        key: "commercial.payment_deadline_days",
+        value: 15,
+        quote: expect.stringMatching(/в течение 15 календарных дней/i),
+      }),
+    ]);
+    expect(
+      cheapExtractCommercialNotes({
+        text: "Расчёт по факту поставки в течении нескольких дней.",
+      }),
+    ).toContain("Срок оплаты: в течение нескольких дней.");
+    expect(
+      cheapExtractCommercialNotes({
+        text: "Работы выполнить в течение нескольких дней.",
+      }),
+    ).toContain("Срок: в течение нескольких дней.");
+    expect(
+      cheapExtractCommercialClaims({
+        hash,
+        page: 1,
+        text: "Поставка в течение 7 рабочих дней.",
+      }).filter((item) => item.key === "commercial.delivery_period_days"),
+    ).toEqual([
+      expect.objectContaining({
+        key: "commercial.delivery_period_days",
+        value: 7,
+      }),
+    ]);
+  });
+
   it("reads «без аванса» as a zero advance, not a missing field", () => {
     expect(
       cheapExtractCommercialClaims({

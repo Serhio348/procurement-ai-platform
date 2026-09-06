@@ -88,4 +88,84 @@ describe("applyParticipateDocuments", () => {
     expect(next.termsDetail).toContain("срок поставки: сентябрь 2026г.");
     expect(next.termsDetail ?? "").not.toMatch(/Срок поставки:\s*\d+\s*дн/);
   });
+
+  it("puts payment days next to on-delivery without pasting the contract paragraph", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Насос",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://example.test/request/1",
+      sourceProcurementId: "request/1",
+    });
+    const next = applyParticipateDocuments(card, [
+      SpecialistCaseDocument.parse({
+        name: "dogovor.docx",
+        sourceUrl: "https://example.test/files/dogovor.docx",
+        hash: "a".repeat(64),
+        status: "hashed",
+        extraction: {
+          status: "extracted",
+          kind: "office_text",
+          pageCount: 1,
+          letterCount: 200,
+          confidence: 1,
+          ocrApplied: false,
+          textPreview: "по факту поставки в течение 10 банковских дней",
+          pages: [
+            {
+              page: 1,
+              text: "Расчеты за товар производятся по факту поставки в течение 10 банковских дней на основании ТТН.",
+              ocrApplied: false,
+              confidence: 1,
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(next.termsDetail).toContain("Оплата: по факту поставки.");
+    expect(next.termsDetail).toContain("Срок оплаты: 10 дн.");
+    expect(next.termsDetail ?? "").not.toMatch(/районного бюджета|казначейства|ТТН/i);
+  });
+
+  it("keeps «в течение нескольких дней» as a line, not a made-up number", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Насос",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://example.test/request/2",
+      sourceProcurementId: "request/2",
+    });
+    const next = applyParticipateDocuments(card, [
+      SpecialistCaseDocument.parse({
+        name: "dogovor.docx",
+        sourceUrl: "https://example.test/files/dogovor2.docx",
+        hash: "a".repeat(64),
+        status: "hashed",
+        extraction: {
+          status: "extracted",
+          kind: "office_text",
+          pageCount: 1,
+          letterCount: 80,
+          confidence: 1,
+          ocrApplied: false,
+          textPreview: "по факту поставки в течении нескольких дней",
+          pages: [
+            {
+              page: 1,
+              text: "Оплата по факту поставки в течении нескольких дней.",
+              ocrApplied: false,
+              confidence: 1,
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(next.termsDetail).toContain("Оплата: по факту поставки.");
+    expect(next.termsDetail).toContain("Срок оплаты: в течение нескольких дней.");
+    expect(next.termsDetail ?? "").not.toMatch(/Срок оплаты:\s*\d+\s*дн/);
+  });
 });

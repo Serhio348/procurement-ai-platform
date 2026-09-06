@@ -358,6 +358,75 @@ git checkout -- package-lock.json
 git pull
 ```
 
+### 11.1. Этот раз: вход в консоль (этап 26)
+
+После `git pull` консоль без логина больше не откроется. Сделайте шаги
+по порядку, не пропускайте миграцию и переменные в `.env`.
+
+**1. Код**
+
+```bash
+cd /opt/procurement-ai-platform
+git config --global --add safe.directory /opt/procurement-ai-platform
+git pull
+```
+
+**2. Первый администратор в `.env`**
+
+```bash
+nano /opt/procurement-ai-platform/.env
+```
+
+Добавьте в конец (подставьте свой email, пароль не короче 8 символов и IP сервера):
+
+```env
+AUTH_BOOTSTRAP_EMAIL=вы@ваша-фирма.by
+AUTH_BOOTSTRAP_PASSWORD=придумайте-надежный-пароль
+AUTH_PUBLIC_URL=http://193.47.42.49
+AUTH_COOKIE_SECURE=0
+INTERNAL_API_TOKEN=
+```
+
+`AUTH_COOKIE_SECURE=0` пока сайт на HTTP. SMTP для сброса пароля можно
+не заполнять: вход и регистрация работают без почты.
+
+Сохранить: `Ctrl+O`, Enter, `Ctrl+X`.
+
+**3. Пакеты, миграция пользователей, сборка**
+
+```bash
+cd /opt/procurement-ai-platform
+npm install --include=dev
+set -a
+source .env
+set +a
+npm run db:migrate
+npm run build
+npm run build -w @procurement/web
+```
+
+Ожидание миграции: в выводе нет ошибки, в базе появляются `auth_users`.
+
+**4. Права и перезапуск API**
+
+```bash
+chown -R procurement:procurement /opt/procurement-ai-platform
+systemctl restart procurement-api
+```
+
+**5. Проверка в браузере**
+
+Откройте `http://IP` и нажмите **Ctrl+F5**. Должен быть тёмный экран
+«Платформа закупок» и форма входа, не список закупок.
+
+Войдите email и паролем из `AUTH_BOOTSTRAP_*`. Если таблица пользователей
+уже была непустая, bootstrap admin не создастся — тогда зарегистрируйтесь
+и выдайте себе роль вручную в базе или очистите `auth_users` только на
+пустом стенде.
+
+Другие сотрудники: «Регистрация» → ждут → вы в **Администрирование**
+одобряете и ставите роль.
+
 ---
 
 ## 12. Обычные команды

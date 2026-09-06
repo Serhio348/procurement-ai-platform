@@ -141,6 +141,7 @@ describe("cheapExtractCommercialClaims", () => {
       expect.objectContaining({
         key: "commercial.payment_deadline_days",
         value: 10,
+        unit: "banking_days",
         quote: expect.stringMatching(/по факту поставки в течение 10 банковских дней/i),
       }),
     ]);
@@ -158,6 +159,7 @@ describe("cheapExtractCommercialClaims", () => {
       expect.objectContaining({
         key: "commercial.delivery_period_days",
         value: 60,
+        unit: "calendar_days",
       }),
     ]);
   });
@@ -173,6 +175,7 @@ describe("cheapExtractCommercialClaims", () => {
       expect.objectContaining({
         key: "commercial.payment_deadline_days",
         value: 15,
+        unit: "calendar_days",
         quote: expect.stringMatching(/в течение 15 календарных дней/i),
       }),
     ]);
@@ -196,6 +199,7 @@ describe("cheapExtractCommercialClaims", () => {
       expect.objectContaining({
         key: "commercial.delivery_period_days",
         value: 7,
+        unit: "working_days",
       }),
     ]);
   });

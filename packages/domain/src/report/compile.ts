@@ -2,12 +2,14 @@ import type {
   ChangeEvent,
   ChangeKind,
   CommercialTerms,
+  Fact,
   PaymentKind,
   ProcedureKind,
   ProcedureStatus,
   ScoreSnapshot,
   ScoreVerdict,
 } from "@procurement/contracts";
+import { formatDayCount } from "../commercial/detail.js";
 
 export interface ReportCard {
   title: string;
@@ -21,6 +23,7 @@ export interface ReportCompileInput {
   card: ReportCard;
   profileName?: string;
   terms?: CommercialTerms;
+  facts?: readonly Fact[];
   changes?: readonly ChangeEvent[];
   score?: Pick<ScoreSnapshot, "finalScore" | "verdict" | "explanation" | "confidence">;
 }
@@ -39,7 +42,7 @@ export interface CompiledReport {
 export function compileProcurementReport(input: ReportCompileInput): CompiledReport {
   const missing: string[] = [];
   const card = compileCard(input.card, input.profileName);
-  const commercial = compileCommercial(input.terms, missing);
+  const commercial = compileCommercial(input.terms, input.facts ?? [], missing);
   const changes = compileChanges(input.changes ?? []);
   const score = compileScore(input.score, missing);
   const sections = [card, commercial, changes, score];
@@ -72,6 +75,7 @@ function compileCard(
 
 function compileCommercial(
   terms: CommercialTerms | undefined,
+  facts: readonly Fact[],
   missing: string[],
 ): { heading: string; body: string } {
   if (terms === undefined) {
@@ -94,10 +98,14 @@ function compileCommercial(
     missing.push("Доля аванса не подтверждена.");
   }
   if (terms.paymentDeadlineDays !== undefined) {
-    lines.push(`Срок оплаты: ${String(terms.paymentDeadlineDays.value)} дн.`);
+    lines.push(
+      `Срок оплаты: ${formatDayCount(terms.paymentDeadlineDays.value, unitForFact(facts, "commercial.payment_deadline_days"))}.`,
+    );
   }
   if (terms.deliveryPeriodDays !== undefined) {
-    lines.push(`Срок поставки: ${String(terms.deliveryPeriodDays.value)} дн.`);
+    lines.push(
+      `Срок поставки: ${formatDayCount(terms.deliveryPeriodDays.value, unitForFact(facts, "commercial.delivery_period_days"))}.`,
+    );
   }
   if (terms.warrantyMonths !== undefined) {
     lines.push(`Гарантия: ${String(terms.warrantyMonths.value)} мес.`);
@@ -189,6 +197,10 @@ function kindLabel(kind: ProcedureKind): string {
     case "other":
       return "иная процедура";
   }
+}
+
+function unitForFact(facts: readonly Fact[], key: string): string | undefined {
+  return facts.find((item) => item.key === key)?.unit;
 }
 
 function paymentKindLabel(kind: PaymentKind): string {

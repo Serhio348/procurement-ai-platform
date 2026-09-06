@@ -39,10 +39,10 @@ export function formatCommercialDetailLines(
     lines.push(paymentKindLabel(kind));
   }
   if (paymentDays.length === 1) {
-    lines.push(`Срок оплаты: ${String(paymentDays[0])} дн.`);
+    lines.push(`Срок оплаты: ${formatDayCount(paymentDays[0]!, unitForNumber(claims, "commercial.payment_deadline_days", paymentDays[0]!))}.`);
   }
   if (deliveryDays.length === 1) {
-    lines.push(`Срок поставки: ${String(deliveryDays[0])} дн.`);
+    lines.push(`Срок поставки: ${formatDayCount(deliveryDays[0]!, unitForNumber(claims, "commercial.delivery_period_days", deliveryDays[0]!))}.`);
   }
   if (warranty.length === 1) {
     lines.push(`Гарантия: ${String(warranty[0])} мес.`);
@@ -56,6 +56,17 @@ export function formatCommercialDetailLines(
 
 function formatPercent(value: number): string {
   return String(value).replace(".", ",");
+}
+
+export function formatDayCount(value: number, unit: string | undefined): string {
+  if (unit === "banking_days") return `${String(value)} банковских дн.`;
+  if (unit === "calendar_days") return `${String(value)} календарных дн.`;
+  if (unit === "working_days") return `${String(value)} рабочих дн.`;
+  return `${String(value)} дн.`;
+}
+
+function unitForNumber(claims: readonly CommercialClaim[], key: string, value: number): string | undefined {
+  return claims.find((item) => item.key === key && item.value === value)?.unit;
 }
 
 function uniqueNumbers(claims: readonly CommercialClaim[], key: string): number[] {
@@ -93,10 +104,10 @@ function lineCoversNote(line: string, note: string): boolean {
   if (line.startsWith("Оплата:") && /по факту поставк|условия оплаты/u.test(folded) && !hasDuration) {
     return true;
   }
-  if (line.startsWith("Срок оплаты:") && /срок оплаты|в\s+течени/u.test(folded) && /\d+\s*дн/u.test(line)) {
+  if (line.startsWith("Срок оплаты:") && /срок оплаты|в\s+течени/u.test(folded) && /\d+.*дн/u.test(line)) {
     return true;
   }
-  if (line.startsWith("Срок поставки:") && folded.includes("срок поставки") && /\d+\s*дн/u.test(line)) {
+  if (line.startsWith("Срок поставки:") && folded.includes("срок поставки") && /\d+.*дн/u.test(line)) {
     return true;
   }
   return false;

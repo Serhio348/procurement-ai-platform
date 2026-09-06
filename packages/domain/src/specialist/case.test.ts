@@ -187,14 +187,14 @@ describe("compileSpecialistCase", () => {
     });
 
     expect(card.termsDetail).toContain("Аванс: до 99,5%.");
-    expect(card.termsDetail).toContain("Срок поставки: 60 дн.");
+    expect(card.termsDetail).toContain("Срок поставки: 60 календарных дн.");
     expect(card.termsDetail).toContain("Гарантия: 60 мес.");
     expect(card.termsDetail ?? "").not.toMatch(/Аванс:\s*99,5%\./);
     expect(card.missing).not.toContain("Доля аванса не подтверждена.");
     expect(card.paymentQuote).toContain("предоплата до 99,5 %");
     expect(card.paymentQuote).toContain("стоимости материальных затрат, определяемая");
     expect(card.paymentQuote ?? "").not.toMatch(/_/);
-    expect(card.reportMarkdown).toContain("Срок поставки: 60 дн.");
+    expect(card.reportMarkdown).toContain("Срок поставки: 60 календарных дн.");
     expect(card.actions.find((item) => item.actor === "CommercialTermsAgent")?.detail).toContain(
       "Подтверждённые числа",
     );

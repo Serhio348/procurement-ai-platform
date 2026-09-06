@@ -13,7 +13,7 @@ import {
 } from "@procurement/contracts";
 import { assembleCommercialTerms } from "../commercial/assemble.js";
 import { cheapExtractCommercialClaims } from "../commercial/cheap-extract.js";
-import { paymentKindLabel } from "../commercial/detail.js";
+import { formatDayCount, paymentKindLabel } from "../commercial/detail.js";
 import { keepQuotedClaims, pageKey } from "../commercial/provenance.js";
 import { pageSafeForCommercialFacts } from "../documents/text-quality.js";
 import { compileProcurementReport } from "../report/compile.js";
@@ -89,6 +89,7 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     },
     profileName: run.profileName,
     ...(reportTerms === undefined ? {} : { terms: reportTerms }),
+    facts,
   });
   const actions = pipelineActions({
     hitTitle: run.hit.title,
@@ -100,7 +101,7 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     failedCount,
     extractedDocs,
     ocrCount,
-    termLines: termLines(assembled.terms),
+    termLines: termLines(assembled.terms, facts),
     extracted: facts.length > 0,
   });
 
@@ -117,7 +118,7 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     ...(amountLabel(run.card) === undefined ? {} : { amountLabel: amountLabel(run.card) }),
     documents: run.documents,
     actions,
-    ...(facts.length === 0 ? {} : { termsDetail: termLines(assembled.terms).join("\n") }),
+    ...(facts.length === 0 ? {} : { termsDetail: termLines(assembled.terms, facts).join("\n") }),
     ...(paymentQuote(run.card) === undefined ? {} : { paymentQuote: paymentQuote(run.card) }),
     reportMarkdown: report.markdown,
     missing: report.missing,
@@ -226,7 +227,7 @@ function documentIngestDetail(input: {
 }
 
 function emptyTerms(terms: CommercialTerms): boolean {
-  return termLines(terms).length === 0;
+  return termLines(terms, []).length === 0;
 }
 
 function formatPercent(value: number): string {
@@ -237,7 +238,7 @@ function formatAdvanceLine(value: number): string {
   return value === 0 ? "Аванс: нет." : `Аванс: ${formatPercent(value)}%.`;
 }
 
-function termLines(terms: CommercialTerms): string[] {
+function termLines(terms: CommercialTerms, facts: readonly Fact[]): string[] {
   const lines: string[] = [];
   if (terms.advancePercent !== undefined) {
     lines.push(formatAdvanceLine(terms.advancePercent.value));
@@ -248,15 +249,23 @@ function termLines(terms: CommercialTerms): string[] {
     lines.push(paymentKindLabel(terms.paymentKind.value));
   }
   if (terms.paymentDeadlineDays !== undefined) {
-    lines.push(`Срок оплаты: ${String(terms.paymentDeadlineDays.value)} дн.`);
+    lines.push(
+      `Срок оплаты: ${formatDayCount(terms.paymentDeadlineDays.value, unitForFact(facts, "commercial.payment_deadline_days"))}.`,
+    );
   }
   if (terms.deliveryPeriodDays !== undefined) {
-    lines.push(`Срок поставки: ${String(terms.deliveryPeriodDays.value)} дн.`);
+    lines.push(
+      `Срок поставки: ${formatDayCount(terms.deliveryPeriodDays.value, unitForFact(facts, "commercial.delivery_period_days"))}.`,
+    );
   }
   if (terms.warrantyMonths !== undefined) {
     lines.push(`Гарантия: ${String(terms.warrantyMonths.value)} мес.`);
   }
   return lines;
+}
+
+function unitForFact(facts: readonly Fact[], key: string): string | undefined {
+  return facts.find((item) => item.key === key)?.unit;
 }
 
 function paymentQuote(card: ProcedureCard): string | undefined {

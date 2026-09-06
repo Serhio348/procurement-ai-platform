@@ -40,7 +40,7 @@ export function cheapExtractCommercialClaims(page: {
         CommercialClaim.parse({
           key: pattern.key,
           value,
-          unit: pattern.unit,
+          unit: dayUnitForClaim(pattern.key, pattern.unit, quote),
           confidence: 0.92,
           hash: page.hash,
           page: page.page,
@@ -164,10 +164,10 @@ function extractWithinDuration(page: {
     if (several) {
       const note =
         kind === "payment"
-          ? "Срок оплаты: в течение нескольких дней."
+          ? `Срок оплаты: в течение нескольких${severalDayFlavor(phrase)} дней.`
           : kind === "delivery"
-            ? "Срок поставки: в течение нескольких дней."
-            : "Срок: в течение нескольких дней.";
+            ? `Срок поставки: в течение нескольких${severalDayFlavor(phrase)} дней.`
+            : `Срок: в течение нескольких${severalDayFlavor(phrase)} дней.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
@@ -183,7 +183,7 @@ function extractWithinDuration(page: {
       CommercialClaim.parse({
         key: kind === "delivery" ? "commercial.delivery_period_days" : "commercial.payment_deadline_days",
         value,
-        unit: "days",
+        unit: dayCountUnitFromQuote(phrase),
         confidence: 0.9,
         hash: page.hash,
         page: page.page,
@@ -192,6 +192,29 @@ function extractWithinDuration(page: {
     );
   }
   return { claims, notes };
+}
+
+export function dayCountUnitFromQuote(quote: string): string {
+  const folded = quote.toLocaleLowerCase("ru-BY");
+  if (folded.includes("банковск")) return "banking_days";
+  if (folded.includes("календарн")) return "calendar_days";
+  if (folded.includes("рабоч")) return "working_days";
+  return "days";
+}
+
+function dayUnitForClaim(key: string, fallback: string, quote: string): string {
+  if (key === "commercial.payment_deadline_days" || key === "commercial.delivery_period_days") {
+    return dayCountUnitFromQuote(quote);
+  }
+  return fallback;
+}
+
+function severalDayFlavor(phrase: string): string {
+  const unit = dayCountUnitFromQuote(phrase);
+  if (unit === "banking_days") return " банковских";
+  if (unit === "calendar_days") return " календарных";
+  if (unit === "working_days") return " рабочих";
+  return "";
 }
 
 function classifyWithinDuration(left: string): "payment" | "delivery" | "note" {

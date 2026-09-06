@@ -44,7 +44,7 @@ describe("applyParticipateDocuments", () => {
 
     expect(next.documents).toHaveLength(1);
     expect(next.documents[0]?.status).toBe("hashed");
-    expect(next.termsDetail).toContain("Срок поставки: 60 дн.");
+    expect(next.termsDetail).toContain("Срок поставки: 60 календарных дн.");
     expect(next.actions.at(-1)?.actor).toBe("DocumentAgent");
     expect(next.reportMarkdown).toBeUndefined();
   });
@@ -125,7 +125,7 @@ describe("applyParticipateDocuments", () => {
     ]);
 
     expect(next.termsDetail).toContain("Оплата: по факту поставки.");
-    expect(next.termsDetail).toContain("Срок оплаты: 10 дн.");
+    expect(next.termsDetail).toContain("Срок оплаты: 10 банковских дн.");
     expect(next.termsDetail ?? "").not.toMatch(/районного бюджета|казначейства|ТТН/i);
   });
 

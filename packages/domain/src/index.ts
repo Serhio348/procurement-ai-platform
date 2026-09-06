@@ -1,4 +1,6 @@
 export * from "./activity/gate.js";
+export * from "./auth/access.js";
+
 export * from "./commercial/assemble.js";
 export * from "./commercial/cheap-extract.js";
 export * from "./commercial/detail.js";

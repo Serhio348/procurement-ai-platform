@@ -1,4 +1,6 @@
 export * from "./agent.js";
+export * from "./auth.js";
+
 export * from "./analysis.js";
 export * from "./assessment.js";
 export * from "./capability.js";

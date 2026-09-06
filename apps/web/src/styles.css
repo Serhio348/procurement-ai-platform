@@ -63,7 +63,7 @@ a {
 .nav-brand-text {
   display: flex;
   flex-direction: column;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 650;
   letter-spacing: 0.03em;
   line-height: 1.15;
@@ -87,6 +87,7 @@ a {
   background: transparent;
   color: inherit;
   font: inherit;
+  font-size: 15px;
   text-align: left;
   padding: 8px 10px;
   border-radius: 4px;
@@ -114,7 +115,7 @@ a {
 }
 
 .nav-soon-mark {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .shell > :not(.nav) {

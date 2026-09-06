@@ -28,6 +28,7 @@ User → Intent → Context → Supervisor → Domain / Capability
 
 - [**Инструкция по разработке**](AGENTS.md) — начните отсюда, если продолжаете работу над проектом
 - [Новый Ubuntu-сервер (VirtualBox / заказчик)](docs/ops/ubuntu-server.md)
+- [Живая консоль на VPS (клиенты, пароль, goszakupki.by)](docs/ops/vps-console.md)
 - [Этап 0 — архитектура](docs/architecture/STAGE-0.md)
 - [Этап 1 — структура репозитория и базовые пакеты](docs/architecture/STAGE-1.md)
 - [Этап 2 — инфраструктура и PostgreSQL](docs/architecture/STAGE-2.md)

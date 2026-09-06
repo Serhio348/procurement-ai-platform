@@ -1,0 +1,474 @@
+ъ+_ёцй # Консоль на любом Ubuntu-сервере
+
+Инструкция поднимает **живую консоль специалиста** на чистом сервере:
+клиенты открывают ссылку в браузере, программа с белорусского IP ходит
+на `goszakupki.by`.
+
+Для домашнего VirtualBox без клиентов достаточно
+[`ubuntu-server.md`](ubuntu-server.md) (только Docker и база).
+
+Один сервер — одна фирма. Общего логина на всех заказчиков нет: у каждого
+свой `.env` и своя база.
+
+---
+
+## 0. Что должно быть у сервера
+
+| | Минимум |
+|---|---|
+| ОС | Ubuntu 22.04 или 24.04, 64-bit, **без** ISPmanager / FastPanel |
+| CPU | 2 ядра |
+| RAM | 4 ГБ |
+| Диск | 50 ГБ |
+| Сеть | публичный IPv4 **в Беларуси** (иначе площадка не пустит) |
+| Доступ | SSH, пользователь `root` или свой с `sudo` |
+
+Не ставьте на этот сервер VPN/прокси «для раздачи интернета» — у части
+хостеров это запрещено. Консоль — обычное веб-приложение, это другое.
+
+Имя хоста в панели (`zakupki`) — кличка сервера, не сайт. Клиентам
+потом даёте IP или домен.
+
+---
+
+## 1. Первый вход по SSH
+
+С Windows (PowerShell или cmd), подставьте IP хостера:
+
+```powershell
+ssh root@193.47.42.49
+```
+
+Первый раз спросит `Are you sure you want to continue connecting` —
+напишите `yes` и Enter. Пароль от хостера: буквы не рисуются, так надо.
+
+Дальше все команды — **на сервере**, в этом SSH. Если вы не `root`,
+добавьте `sudo` перед `apt`, `systemctl`, правкой файлов в `/etc`.
+
+Проверка, что вы внутри:
+
+```bash
+hostname
+whoami
+```
+
+Ожидание: имя вроде `zakupki`, пользователь `root`.
+
+---
+
+## 2. Система: Docker, Node.js 22, nginx
+
+Обновить списки пакетов и поставить то, без чего дальше нельзя:
+
+```bash
+apt update
+apt install -y ca-certificates curl git nginx apache2-utils
+```
+
+| Пакет | Зачем |
+|---|---|
+| `ca-certificates` | проверка HTTPS |
+| `curl` | скачать ключи Docker и Node |
+| `git` | клон с GitHub |
+| `nginx` | вход с улицы: порт 80, пароль, раздача консоли |
+| `apache2-utils` | команда `htpasswd` для пароля клиента |
+
+### 2.1. Docker Engine и Compose
+
+Официальный репозиторий Docker (не snap):
+
+```bash
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+Если работаете не под `root`:
+
+```bash
+usermod -aG docker "$USER"
+```
+
+После `usermod` выйдите из SSH и зайдите снова, иначе `docker` будет
+просить `sudo`.
+
+### 2.2. Node.js 22
+
+В проекте нужен Node **22+** и **npm** (не pnpm, не yarn):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs
+```
+
+### 2.3. Проверка
+
+```bash
+docker version
+docker compose version
+node -v
+npm -v
+```
+
+Ожидание: Docker без ошибки, `v22.…`, любой свежий `npm`.
+
+---
+
+## 3. Скачать проект с GitHub
+
+Репозиторий закрытый. Нужен доступ вашего GitHub-аккаунта.
+
+**Токен (один раз на компьютере разработчика):**  
+GitHub → Settings → Developer settings → Personal access tokens →
+classic token с правом `repo`. Пароль от сайта GitHub в `git clone`
+**не** подходит.
+
+На сервере:
+
+```bash
+cd /root
+git clone https://github.com/Serhio348/procurement-ai-platform.git
+cd procurement-ai-platform
+git checkout main
+cp .env.example .env
+```
+
+Логин — аккаунт GitHub. «Password» — токен (символы не видны).
+
+Проверка:
+
+```bash
+pwd
+git log -1 --oneline
+```
+
+Ожидание: путь `.../procurement-ai-platform`, последний коммит `main`.
+
+---
+
+## 4. Файл `.env`
+
+Открыть редактор:
+
+```bash
+nano /root/procurement-ai-platform/.env
+```
+
+`Ctrl+O` — сохранить, Enter, `Ctrl+X` — выход.
+
+`.env` **никогда не коммитить**. Секреты в чат не слать.
+
+Обязательно поменять для живой консоли:
+
+```env
+PROCUREMENT_SOURCE_MODE=live
+GOSZAKUPKI_TLS_INSECURE=1
+LLM_API_KEY=вставьте_свой_ключ_deepseek
+```
+
+| Переменная | Что значит |
+|---|---|
+| `PROCUREMENT_SOURCE_MODE=live` | поиск на goszakupki.by, не фикстуры |
+| `GOSZAKUPKI_TLS_INSECURE=1` | на части Linux цепочка сертификатов площадки не сходится; без этого поиск пишет «площадка недоступна». На публичном сервере это компромисс, не оставляйте `NODE_TLS_REJECT_UNAUTHORIZED=0` |
+| `LLM_API_KEY` | ключ DeepSeek, тот же что локально |
+
+Остальное из примера можно оставить на первом стенде
+(`DATABASE_URL`, MinIO, Redis). На сервере заказчика смените пароли
+Postgres и MinIO в `.env` **до** первого `docker compose up`.
+
+Проверка, что live включён:
+
+```bash
+grep PROCUREMENT_SOURCE_MODE /root/procurement-ai-platform/.env
+```
+
+Ожидание: `live`, не `fixture`.
+
+---
+
+## 5. Пакеты Node, инфраструктура, миграции
+
+В каталоге проекта:
+
+```bash
+cd /root/procurement-ai-platform
+npm install --include=dev
+```
+
+`--include=dev` нужен: без devDependencies не будет `concurrently`,
+сборки и `tsx`.
+
+Сборка пакетов (API импортирует `dist` у Document MCP):
+
+```bash
+npm run build
+npm run build -w @procurement/web
+```
+
+Поднять PostgreSQL, Redis, MinIO. Порты только на `127.0.0.1` — с улицы
+база не торчит:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+docker compose -f infra/docker-compose.yml ps
+```
+
+Ожидание: `postgres`, `redis`, `minio` — `healthy`. `minio-init` —
+`Exited (0)`.
+
+Подгрузить `.env` в текущую оболочку и применить схему:
+
+```bash
+set -a
+source /root/procurement-ai-platform/.env
+set +a
+npm run db:migrate
+npm run db:bootstrap
+```
+
+`db:bootstrap` второй раз профиль не дублирует.
+
+---
+
+## 6. Пароль на вход (один на фирму)
+
+Это не учётки в программе. Браузер спросит логин и пароль **до**
+консоли. Один комплект на всю фирму.
+
+Придумайте логин и пароль клиента. Команда спросит пароль два раза
+(звёздочек не будет):
+
+```bash
+htpasswd -c /etc/nginx/.htpasswd-procurement specialist
+```
+
+`specialist` — логин, который введёт клиент. Файл `-c` создаёт заново:
+повторный `-c` сотрёт старых пользователей. Добавить второго:
+
+```bash
+htpasswd /etc/nginx/.htpasswd-procurement drugoy_login
+```
+
+---
+
+## 7. nginx: с улицы только порт 80
+
+Консоль собирается в статику. Браузер ходит на `/`, запросы `/api`
+проксируются на Fastify `127.0.0.1:3001`. Vite на 5173 клиентам
+**не** открываем.
+
+```bash
+nano /etc/nginx/sites-available/procurement
+```
+
+Вставьте целиком (IP в `server_name` замените на свой; можно оставить
+`_` — тогда подойдёт любой адрес):
+
+```nginx
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    auth_basic "Procurement";
+    auth_basic_user_file /etc/nginx/.htpasswd-procurement;
+
+    client_max_body_size 32m;
+
+    root /root/procurement-ai-platform/apps/web/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "";
+        proxy_read_timeout 180s;
+        proxy_send_timeout 180s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+`Authorization ""` — чтобы пароль nginx не улетал в API.
+
+Включить сайт, выключить дефолтный, проверить конфиг:
+
+```bash
+rm -f /etc/nginx/sites-enabled/default
+ln -sfn /etc/nginx/sites-available/procurement /etc/nginx/sites-enabled/procurement
+nginx -t
+systemctl reload nginx
+```
+
+Ожидание `nginx -t`: `syntax is ok`, `test is successful`.
+
+---
+
+## 8. Автозапуск API после перезагрузки
+
+API слушает только `127.0.0.1:3001`. С улицы его не видно.
+
+```bash
+nano /etc/systemd/system/procurement-api.service
+```
+
+```ini
+[Unit]
+Description=Procurement specialist API
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/procurement-ai-platform
+ExecStart=/usr/bin/npm run start -w @procurement/api
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now procurement-api
+systemctl status procurement-api --no-pager
+```
+
+В статусе — `active (running)`. В логе через минуту:
+
+```bash
+journalctl -u procurement-api -n 40 --no-pager
+```
+
+Ожидание: `Specialist API listening`, `"searchMode":"live"`,
+`"postgres":true`, `"objectStore":"s3"`.
+
+Если порт занят или красный traceback — пришлите этот лог, не угадывайте.
+
+Перезапуск API после правки `.env`:
+
+```bash
+systemctl restart procurement-api
+```
+
+---
+
+## 9. Файрвол: с улицы только SSH и сайт
+
+```bash
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw --force enable
+ufw status
+```
+
+Порты 3001, 5173, 5432, 6379, 9000 наружу не открывать.
+
+---
+
+## 10. Что дать клиенту
+
+1. Ссылка: `http://IP-сервера` (пример: `http://193.47.42.49`).
+2. Логин и пароль из шага 6.
+3. Коротко: открыть ссылку → ввести пароль → профиль → поиск.
+
+Не давать: SSH, пароль `root`, токен GitHub, ключ DeepSeek.
+
+Браузер может ругаться, что нет HTTPS — для первого теста это нормально.
+Сертификат и домен — отдельный шаг (не в этой инструкции).
+
+Проверка с телефона **не** по Wi‑Fi офиса, а с мобильного интернета:
+открыть ту же ссылку. Если пускает и после пароля видна консоль —
+сервер доступен из Беларуси.
+
+---
+
+## 11. Обновить программу с GitHub
+
+На сервере:
+
+```bash
+cd /root/procurement-ai-platform
+git pull
+npm install --include=dev
+npm run build
+npm run build -w @procurement/web
+set -a
+source .env
+set +a
+npm run db:migrate
+systemctl restart procurement-api
+```
+
+Статику nginx подхватит из `apps/web/dist` сразу после `build` web.
+Если страница «старая» — жёсткое обновление в браузере (Ctrl+F5).
+
+Конфликт `package-lock.json` после `npm install` на сервере:
+
+```bash
+git checkout -- package-lock.json
+git pull
+```
+
+---
+
+## 12. Обычные команды
+
+| Задача | Команда |
+|---|---|
+| Лог API | `journalctl -u procurement-api -f` |
+| Перезапуск API | `systemctl restart procurement-api` |
+| Статус контейнеров | `cd /root/procurement-ai-platform && docker compose -f infra/docker-compose.yml ps` |
+| Перезапуск базы | `docker compose -f infra/docker-compose.yml restart` |
+| Проверка nginx | `nginx -t && systemctl reload nginx` |
+| Сменить пароль клиента | `htpasswd /etc/nginx/.htpasswd-procurement specialist` |
+
+---
+
+## 13. Если сломалось
+
+**SSH не пускает.** Сервер ещё создаётся (подождать) или неверный пароль
+хостера.
+
+**`git clone` 403 / Authentication failed.** Нужен токен `repo`, не пароль
+GitHub.
+
+**Поиск: «Площадка goszakupki.by сейчас недоступна».**  
+В `.env` есть `PROCUREMENT_SOURCE_MODE=live` и `GOSZAKUPKI_TLS_INSECURE=1`?
+API перезапущен? С сервера:
+
+```bash
+curl -I --max-time 20 https://goszakupki.by
+```
+
+Если и `curl` не 200 — IP не белорусский или площадка лежит.
+
+**Консоль без стилей / 404.** Не собран web: `npm run build -w @procurement/web`.
+Путь `root` в nginx совпадает с `apps/web/dist`.
+
+**502 Bad Gateway.** API не запущен: `systemctl status procurement-api`.
+
+**После пароля пустая страница.** В логе API нет `listening` — смотреть
+`journalctl`. Часто забыли `npm run build` или Docker не поднялся.
+
+**После перезагрузки сервера нет базы.** Docker должен быть `enabled`
+(ставится с пакетом). Затем `systemctl start procurement-api`.
+
+---
+
+## 14. Чего эта инструкция не делает
+
+- HTTPS и домен `.by`
+- отдельные учётки специалистов внутри программы
+- входящий Telegram-бот
+- документы на «Отслеживать» (качаются только после «Участвовать»)
+- Railway / Cloudflare / домашний 4G как замена белорусскому IP

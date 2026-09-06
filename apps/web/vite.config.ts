@@ -12,6 +12,9 @@ export default defineConfig({
       "@procurement/domain": fromWeb("../../packages/domain/src/index.ts"),
     },
   },
+  build: {
+    target: "es2022",
+  },
   server: {
     port: 5173,
     strictPort: true,

@@ -15,6 +15,13 @@
       "when": 1788205342796,
       "tag": "0001_specialist_console",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788205342797,
+      "tag": "0002_auth",
+      "breakpoints": true
     }
   ]
 }

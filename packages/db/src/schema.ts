@@ -706,3 +706,62 @@ export const specialistCases = pgTable(
   },
   (table) => [uniqueIndex("specialist_cases_source_uq").on(table.sourceProcurementId)],
 );
+
+export const authAccessStatus = pgEnum("auth_access_status", [
+  "pending",
+  "active",
+  "rejected",
+  "revoked",
+]);
+
+export const authSpecialistRole = pgEnum("auth_specialist_role", [
+  "admin",
+  "specialist",
+  "viewer",
+]);
+
+export const authUsers = pgTable(
+  "auth_users",
+  {
+    id: uuid("id").primaryKey(),
+    email: varchar("email", { length: 320 }).notNull(),
+    name: varchar("name", { length: 200 }).notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: authSpecialistRole("role"),
+    accessStatus: authAccessStatus("access_status").notNull().default("pending"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("auth_users_email_uq").on(table.email)],
+);
+
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamptz("expires_at").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("auth_sessions_token_uq").on(table.tokenHash),
+    index("auth_sessions_user_idx").on(table.userId),
+  ],
+);
+
+export const authPasswordResets = pgTable(
+  "auth_password_resets",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamptz("expires_at").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("auth_password_resets_token_uq").on(table.tokenHash)],
+);

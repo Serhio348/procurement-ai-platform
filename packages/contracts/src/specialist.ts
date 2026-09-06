@@ -2,7 +2,7 @@ import { z } from "zod";
 import { IsoDate, IsoDateTime, Sha256 } from "./common.js";
 import { ExtractedPage, ExtractionStatus } from "./documents.js";
 import { ProcurementId } from "./ids.js";
-import { ChangeEvent, ProcedureCard, ProcedureStatus, SearchHit } from "./procurement.js";
+import { ChangeEvent, ChangeKind, ProcedureCard, ProcedureStatus, SearchHit } from "./procurement.js";
 
 export const InboxFixtureProcurement = z.object({
   title: z.string().min(1),
@@ -23,6 +23,12 @@ export const InboxFixture = z.object({
 });
 export type InboxFixture = z.infer<typeof InboxFixture>;
 
+export const SpecialistInboxTopic = z.enum(["new_found", "documents", "card_update"]);
+export type SpecialistInboxTopic = z.infer<typeof SpecialistInboxTopic>;
+
+export const SpecialistInboxAction = z.enum(["open", "refresh", "documents", "dismiss"]);
+export type SpecialistInboxAction = z.infer<typeof SpecialistInboxAction>;
+
 export const SpecialistInboxEntry = z.object({
   id: z.string().uuid(),
   procurementId: ProcurementId,
@@ -35,6 +41,9 @@ export const SpecialistInboxEntry = z.object({
   detail: z.string().min(1),
   detectedOn: IsoDate,
   urgent: z.literal(true),
+  kind: ChangeKind,
+  topic: SpecialistInboxTopic,
+  topicLabel: z.string().min(1),
 });
 export type SpecialistInboxEntry = z.infer<typeof SpecialistInboxEntry>;
 
@@ -42,6 +51,17 @@ export const SpecialistInboxListResponse = z.object({
   items: z.array(SpecialistInboxEntry),
 });
 export type SpecialistInboxListResponse = z.infer<typeof SpecialistInboxListResponse>;
+
+export const SpecialistInboxResolveWrite = z.object({
+  action: SpecialistInboxAction,
+});
+export type SpecialistInboxResolveWrite = z.infer<typeof SpecialistInboxResolveWrite>;
+
+export const SpecialistInboxDocumentLink = z.object({
+  name: z.string().min(1),
+  url: z.string().url(),
+});
+export type SpecialistInboxDocumentLink = z.infer<typeof SpecialistInboxDocumentLink>;
 
 export const SpecialistChangeSlice = z.object({
   summary: z.string().min(1),
@@ -120,6 +140,13 @@ export const SpecialistProcurementCard = z.object({
   triage: SpecialistTriageKind.optional(),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
+
+export const SpecialistInboxResolveResponse = z.object({
+  items: z.array(SpecialistInboxEntry),
+  card: SpecialistProcurementCard.optional(),
+  documents: z.array(SpecialistInboxDocumentLink).default([]),
+});
+export type SpecialistInboxResolveResponse = z.infer<typeof SpecialistInboxResolveResponse>;
 
 export const SpecialistProcurementListResponse = z.object({
   items: z.array(SpecialistProcurementCard),
@@ -223,6 +250,7 @@ export const SpecialistWorkspaceState = z.object({
   profiles: z.array(SpecialistWorkingProfile).min(1),
   activeProfileId: z.string().uuid(),
   decisions: z.array(SpecialistTriageDecision).default([]),
+  dismissedInboxIds: z.array(z.string().uuid()).default([]),
 });
 export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
 

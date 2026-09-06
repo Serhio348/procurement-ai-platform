@@ -1,9 +1,11 @@
-import type { SpecialistInboxEntry } from "@procurement/contracts";
+import type { SpecialistInboxAction, SpecialistInboxEntry } from "@procurement/contracts";
 
 export interface InboxPageProps {
   entries: readonly SpecialistInboxEntry[];
   selectedId?: string;
+  busyId?: string;
   onSelect?: (id: string) => void;
+  onResolve?: (id: string, action: SpecialistInboxAction) => void;
 }
 
 export function InboxPage(props: InboxPageProps) {
@@ -15,7 +17,7 @@ export function InboxPage(props: InboxPageProps) {
       <section className="inbox" aria-labelledby="inbox-heading">
         {props.entries.length > 0 ? (
           <p className="inbox-alarm" role="status">
-            Тревога: есть сообщения по отслеживаемым конкурсам
+            Тревога: есть сообщения, которые нужно разобрать
           </p>
         ) : null}
         <h1 id="inbox-heading">Входящие</h1>
@@ -31,11 +33,19 @@ export function InboxPage(props: InboxPageProps) {
                     type="button"
                     className={isSelected ? "inbox-row is-selected" : "inbox-row"}
                     aria-current={isSelected ? "true" : undefined}
-                    onClick={() => props.onSelect?.(entry.id)}
+                    onClick={() => {
+                      if (entry.topic === "new_found") {
+                        props.onResolve?.(entry.id, "open");
+                        return;
+                      }
+                      props.onSelect?.(entry.id);
+                    }}
                   >
                     <span className="inbox-row-top">
                       <span className="inbox-title">{entry.title}</span>
-                      <span className="urgent-mark">Срочно</span>
+                      <span className="inbox-marks">
+                        <span className={`inbox-topic is-${entry.topic}`}>{entry.topicLabel}</span>
+                      </span>
                     </span>
                     <span className="inbox-summary">{entry.summary}</span>
                     <span className="inbox-date">{entry.detectedOn}</span>
@@ -76,6 +86,56 @@ export function InboxPage(props: InboxPageProps) {
             </dl>
             <h3>Изменение</h3>
             <pre className="change-body">{selected.detail}</pre>
+            <div className="inbox-actions">
+              {selected.topic === "new_found" ? (
+                <button
+                  type="button"
+                  className="profile-fill"
+                  disabled={props.busyId === selected.id}
+                  onClick={() => props.onResolve?.(selected.id, "open")}
+                >
+                  Открыть карточку
+                </button>
+              ) : null}
+              {selected.topic === "documents" ? (
+                <button
+                  type="button"
+                  className="profile-fill"
+                  disabled={props.busyId === selected.id}
+                  onClick={() => props.onResolve?.(selected.id, "documents")}
+                >
+                  Скачать документы
+                </button>
+              ) : null}
+              {selected.topic === "card_update" ? (
+                <button
+                  type="button"
+                  className="profile-fill"
+                  disabled={props.busyId === selected.id}
+                  onClick={() => props.onResolve?.(selected.id, "refresh")}
+                >
+                  Обновить карточку
+                </button>
+              ) : null}
+              {selected.topic !== "new_found" ? (
+                <button
+                  type="button"
+                  className="profile-fill"
+                  disabled={props.busyId === selected.id}
+                  onClick={() => props.onResolve?.(selected.id, "open")}
+                >
+                  Открыть карточку
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="admin-danger"
+                disabled={props.busyId === selected.id}
+                onClick={() => props.onResolve?.(selected.id, "dismiss")}
+              >
+                Удалить
+              </button>
+            </div>
           </>
         )}
       </section>

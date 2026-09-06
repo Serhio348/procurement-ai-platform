@@ -8,11 +8,13 @@ import {
 } from "@procurement/contracts";
 import { compileChangeAlert } from "../notification/message.js";
 import { statusLabel } from "./case.js";
+import { inboxTopic, inboxTopicLabel } from "./inbox-action.js";
 
 export class SpecialistCatalog {
   readonly #byChangeId = new Map<string, InboxFixtureItemValue>();
   readonly #order: InboxFixtureItemValue[] = [];
   readonly #cases = new Map<string, SpecialistProcurementCardValue>();
+  readonly #dismissed = new Set<string>();
 
   static parse(raw: unknown): SpecialistCatalog {
     const fixture = InboxFixture.parse(raw);
@@ -38,8 +40,39 @@ export class SpecialistCatalog {
     this.#cases.set(card.id, SpecialistProcurementCard.parse(card));
   }
 
+  inboxItem(id: string): InboxFixtureItemValue | undefined {
+    if (this.#dismissed.has(id)) return undefined;
+    return this.#byChangeId.get(id);
+  }
+
+  dismiss(id: string): boolean {
+    if (this.#byChangeId.get(id) === undefined) return false;
+    this.#dismissed.add(id);
+    return true;
+  }
+
+  dismissMany(ids: readonly string[]): void {
+    for (const id of ids) {
+      this.dismiss(id);
+    }
+  }
+
+  dismissByProcurementId(procurementId: string): void {
+    for (const item of this.#order) {
+      if (item.change.procurementId === procurementId) {
+        this.#dismissed.add(item.change.id);
+      }
+    }
+  }
+
+  dismissedIds(): string[] {
+    return [...this.#dismissed];
+  }
+
   urgentInbox(): SpecialistInboxEntry[] {
-    return this.#order.filter((item) => item.change.urgent).map(toInboxEntry);
+    return this.#order
+      .filter((item) => item.change.urgent && !this.#dismissed.has(item.change.id))
+      .map(toInboxEntry);
   }
 
   procurements(): SpecialistProcurementCard[] {
@@ -59,6 +92,7 @@ export class SpecialistCatalog {
 
 function toInboxEntry(item: InboxFixtureItemValue): SpecialistInboxEntry {
   const presented = presentChange(item);
+  const topic = inboxTopic(item.change.kind);
   return SpecialistInboxEntry.parse({
     id: item.change.id,
     procurementId: item.change.procurementId,
@@ -71,6 +105,9 @@ function toInboxEntry(item: InboxFixtureItemValue): SpecialistInboxEntry {
     detail: presented.detail,
     detectedOn: item.change.detectedAt.slice(0, 10),
     urgent: true,
+    kind: item.change.kind,
+    topic,
+    topicLabel: inboxTopicLabel(topic),
   });
 }
 

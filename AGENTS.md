@@ -45,6 +45,7 @@
 - [`docs/architecture/STAGE-24.md`](docs/architecture/STAGE-24.md) — документы после «Участвовать»
 - [`docs/architecture/STAGE-25.md`](docs/architecture/STAGE-25.md) — PostgreSQL, MinIO и Redis для консоли
 - [`docs/architecture/STAGE-26.md`](docs/architecture/STAGE-26.md) — вход, регистрация и одобрение доступа
+- [`docs/architecture/STAGE-27.md`](docs/architecture/STAGE-27.md) — разбор входящих, а не склад сообщений
 
 ---
 
@@ -192,6 +193,7 @@ docs/architecture/ Документы этапов
 - Этап 24 — документы найденной процедуры после «Участвовать»
 - Этап 25 — консоль: хеши в PostgreSQL, файлы в MinIO, discovery в Redis
 - Этап 26 — вход, открытая регистрация, admin выдаёт роль
+- Этап 27 — входящие разбираются действием и исчезают
 
 Не начато: документы на «Отслеживать» (только хеши),
 PostgreSQL outbox для inbox, входящий Telegram-бот.

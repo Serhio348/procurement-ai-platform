@@ -1,16 +1,37 @@
 import { useState } from "react";
-import type { SpecialistInboxEntry } from "@procurement/contracts";
+import type { SpecialistInboxAction, SpecialistInboxEntry } from "@procurement/contracts";
 import { Shell } from "../shell/Shell.js";
 import { InboxPage } from "./InboxPage.js";
 
-export function InboxApp({ entries }: { entries: readonly SpecialistInboxEntry[] }) {
+export function InboxApp({
+  entries,
+  onResolve,
+}: {
+  entries: readonly SpecialistInboxEntry[];
+  onResolve?: (
+    id: string,
+    action: SpecialistInboxAction,
+  ) => Promise<void>;
+}) {
   const [selectedId, setSelectedId] = useState<string | undefined>(entries[0]?.id);
+  const [busyId, setBusyId] = useState<string | undefined>();
+  const selected = entries.find((entry) => entry.id === selectedId) ?? entries[0];
+
   return (
     <Shell>
       <InboxPage
         entries={entries}
-        {...(selectedId === undefined ? {} : { selectedId })}
+        {...(selected === undefined ? {} : { selectedId: selected.id })}
+        {...(busyId === undefined ? {} : { busyId })}
         onSelect={setSelectedId}
+        {...(onResolve === undefined
+          ? {}
+          : {
+              onResolve: (id, action) => {
+                setBusyId(id);
+                void onResolve(id, action).finally(() => setBusyId(undefined));
+              },
+            })}
       />
     </Shell>
   );

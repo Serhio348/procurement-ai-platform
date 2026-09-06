@@ -21,6 +21,7 @@ export * from "./search/cheap-classify.js";
 export * from "./search/search-cards.js";
 export * from "./specialist/case.js";
 export * from "./specialist/catalog.js";
+export * from "./specialist/inbox-action.js";
 export * from "./specialist/ingest-progress.js";
 export * from "./specialist/looking-for.js";
 export * from "./specialist/participate.js";

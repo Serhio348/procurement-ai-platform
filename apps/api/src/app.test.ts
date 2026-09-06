@@ -69,6 +69,50 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("refreshes a card from a status message and then drops that inbox row", async () => {
+    const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
+    const before = await app.inject({ method: "GET", url: "/api/inbox" });
+    const statusId = JSON.parse(before.body).items.find(
+      (item: { topic: string }) => item.topic === "card_update",
+    )?.id as string;
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${statusId}/resolve`,
+      payload: { action: "refresh" },
+    });
+    const after = await app.inject({ method: "GET", url: "/api/inbox" });
+    const card = JSON.parse(resolved.body).card as { status: string; title: string };
+
+    expect(resolved.statusCode).toBe(200);
+    expect(card.title).toBe("Поставка КТПБ");
+    expect(card.status).toBe("cancelled");
+    expect(JSON.parse(after.body).items.map((item: { title: string }) => item.title)).toEqual([
+      "НКУ и щитовое оборудование",
+    ]);
+
+    await app.close();
+  });
+
+  it("deletes an inbox row without removing the procurement case", async () => {
+    const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
+    const listed = await app.inject({ method: "GET", url: "/api/inbox" });
+    const id = JSON.parse(listed.body).items[0]?.id as string;
+    const removed = await app.inject({ method: "DELETE", url: `/api/inbox/${id}` });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const cases = await app.inject({ method: "GET", url: "/api/procurements" });
+
+    expect(removed.statusCode).toBe(200);
+    expect(JSON.parse(inbox.body).items).toHaveLength(1);
+    expect(
+      (JSON.parse(cases.body).items as Array<{ title: string }>).some(
+        (item) => item.title === "Поставка КТПБ",
+      ),
+    ).toBe(true);
+
+    await app.close();
+  });
+
   it("lists procurement cases including a non-urgent latest change", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
 
@@ -507,6 +551,7 @@ describe("specialist API", () => {
     const first = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     const items = JSON.parse(first.body).items as Array<{ id: string; title: string }>;
     const substation = items.find((item) => item.title === "Комплектная трансформаторная подстанция");
+    const inboxAfterFind = await app.inject({ method: "GET", url: "/api/inbox" });
     const decided = await app.inject({
       method: "POST",
       url: `/api/procurements/${substation?.id ?? ""}/decision`,
@@ -528,6 +573,17 @@ describe("specialist API", () => {
     expect(JSON.parse(second.body).ran).toBe(true);
     expect(JSON.parse(second.body).addedCount).toBe(0);
     expect(JSON.parse(second.body).skippedDecidedCount).toBeGreaterThanOrEqual(1);
+    const foundRows = JSON.parse(inboxAfterFind.body).items as Array<{
+      topic: string;
+      procurementId: string;
+    }>;
+    expect(foundRows.some((item) => item.topic === "new_found")).toBe(true);
+    const inboxAfterDecide = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(inboxAfterDecide.body).items as Array<{ procurementId: string }>).some(
+        (item) => item.procurementId === substation?.id,
+      ),
+    ).toBe(false);
 
     await app.close();
   });

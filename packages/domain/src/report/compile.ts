@@ -222,6 +222,8 @@ function paymentKindLabel(kind: PaymentKind): string {
 
 function changeKindLabel(kind: ChangeKind): string {
   switch (kind) {
+    case "procedure_found":
+      return "Новая закупка";
     case "status_changed":
       return "Статус";
     case "price_changed":

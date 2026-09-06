@@ -4,6 +4,8 @@ import {
   SpecialistDiscoveryResponse,
   SpecialistIngestProgress,
   SpecialistInboxListResponse,
+  SpecialistInboxResolveResponse,
+  SpecialistInboxResolveWrite,
   SpecialistProcurementCard,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
@@ -18,6 +20,10 @@ import {
   type SpecialistWorkspaceState,
 } from "@procurement/contracts";
 import {
+  applyInboxChangeToCard,
+  inboxDocumentLinks,
+  inboxItemFromFoundCard,
+  inboxTopic,
   partitionHitsByDecision,
   profileDisplayName,
   selectRelevantSearchCards,
@@ -74,6 +80,7 @@ export interface BuildApiOptions {
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
   const catalog = options.catalog ?? new SpecialistCatalog();
   const workspace = options.workspace ?? new SpecialistWorkspace();
+  catalog.dismissMany(workspace.dismissedInboxIds());
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
@@ -188,6 +195,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       for (const card of selected.cards) {
         if (known.has(card.sourceProcurementId)) continue;
         catalog.upsertCase(withTriage(card, workspace));
+        catalog.record(inboxItemFromFoundCard(card, clock()));
         known.add(card.sourceProcurementId);
         addedCount += 1;
       }
@@ -347,6 +355,69 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
   });
 
+  app.delete("/api/inbox/:id", async (request, reply) => {
+    const params = request.params as { id: string };
+    if (!catalog.dismiss(params.id)) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    await persist();
+    return SpecialistInboxListResponse.parse({ items: catalog.urgentInbox() });
+  });
+
+  app.post("/api/inbox/:id/resolve", async (request, reply) => {
+    const params = request.params as { id: string };
+    const parsed = SpecialistInboxResolveWrite.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const item = catalog.inboxItem(params.id);
+    if (item === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const topic = inboxTopic(item.change.kind);
+    const action = parsed.data.action;
+    if (action === "refresh" && topic !== "card_update") {
+      return reply.code(400).send({ error: "invalid_action" });
+    }
+    if (action === "documents" && topic !== "documents") {
+      return reply.code(400).send({ error: "invalid_action" });
+    }
+
+    let card = catalog.procurement(item.change.procurementId);
+    if (action === "refresh" && card !== undefined) {
+      card = withTriage(applyInboxChangeToCard(card, item.change), workspace);
+      catalog.upsertCase(card);
+    }
+    if (action === "documents" && card !== undefined && documentIngest !== undefined) {
+      ingestProgress.begin(card.id);
+      try {
+        card = withTriage(await documentIngest.ingest(card), workspace);
+        ingestProgress.done(card.id);
+        catalog.upsertCase(card);
+      } catch (error) {
+        ingestProgress.fail(card.id);
+        logger.error("Specialist inbox document ingest failed", error, {
+          sourceProcurementId: card.sourceProcurementId,
+        });
+      }
+    }
+
+    catalog.dismiss(params.id);
+    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    await persist();
+    logger.info("Specialist inbox resolved", {
+      changeId: params.id,
+      action,
+      topic,
+    });
+    return SpecialistInboxResolveResponse.parse({
+      items: catalog.urgentInbox(),
+      documents: action === "documents" ? inboxDocumentLinks(card) : [],
+      ...(card === undefined ? {} : { card }),
+    });
+  });
+
   app.get("/api/procurements", async () =>
     SpecialistProcurementListResponse.parse({ items: listed() }),
   );
@@ -392,6 +463,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
     }
     catalog.upsertCase(next);
+    catalog.dismissByProcurementId(next.id);
+    workspace.setDismissedInboxIds(catalog.dismissedIds());
     await persist();
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,

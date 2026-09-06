@@ -132,6 +132,8 @@ function policyFor(
 
 function watchForKind(kind: ChangeKind): DomainMonitoringRule["watch"] | undefined {
   switch (kind) {
+    case "procedure_found":
+      return undefined;
     case "status_changed":
       return "status";
     case "price_changed":

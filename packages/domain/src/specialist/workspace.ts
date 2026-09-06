@@ -37,6 +37,7 @@ export class SpecialistWorkspace {
   #profiles: SpecialistWorkingProfileValue[];
   #activeProfileId: string;
   readonly #decisions: SpecialistTriageDecision[] = [];
+  #dismissedInboxIds: string[] = [];
 
   constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
     const parsed = SpecialistWorkingProfile.parse(stripStockElectricalSeed(profile));
@@ -60,6 +61,7 @@ export class SpecialistWorkspace {
     for (const decision of state.decisions) {
       workspace.#decisions.push(SpecialistTriageDecision.parse(decision));
     }
+    workspace.#dismissedInboxIds = [...state.dismissedInboxIds];
     return workspace;
   }
 
@@ -68,7 +70,16 @@ export class SpecialistWorkspace {
       profiles: this.#profiles,
       activeProfileId: this.#activeProfileId,
       decisions: this.#decisions,
+      dismissedInboxIds: this.#dismissedInboxIds,
     });
+  }
+
+  dismissedInboxIds(): readonly string[] {
+    return this.#dismissedInboxIds;
+  }
+
+  setDismissedInboxIds(ids: readonly string[]): void {
+    this.#dismissedInboxIds = [...new Set(ids)];
   }
 
   profiles(): readonly SpecialistWorkingProfileValue[] {
@@ -211,14 +222,16 @@ export class SpecialistWorkspace {
 function migrateWorkspaceState(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null) {
     const created = emptySpecialistWorkingProfile();
-    return { profiles: [created], activeProfileId: created.id, decisions: [] };
+    return { profiles: [created], activeProfileId: created.id, decisions: [], dismissedInboxIds: [] };
   }
   const record = raw as {
     profiles?: unknown;
     profile?: unknown;
     activeProfileId?: unknown;
     decisions?: unknown;
+    dismissedInboxIds?: unknown;
   };
+  const dismissedInboxIds = Array.isArray(record.dismissedInboxIds) ? record.dismissedInboxIds : [];
   if (Array.isArray(record.profiles) && record.profiles.length > 0) {
     const profiles = record.profiles.map((item) =>
       SpecialistWorkingProfile.parse(stripStockElectricalSeed(item)),
@@ -229,6 +242,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       profiles,
       activeProfileId: active?.id,
       decisions: record.decisions ?? [],
+      dismissedInboxIds,
     };
   }
   if (record.profile !== undefined) {
@@ -237,10 +251,16 @@ function migrateWorkspaceState(raw: unknown): unknown {
       profiles: [profile],
       activeProfileId: profile.id,
       decisions: record.decisions ?? [],
+      dismissedInboxIds,
     };
   }
   const created = emptySpecialistWorkingProfile();
-  return { profiles: [created], activeProfileId: created.id, decisions: record.decisions ?? [] };
+  return {
+    profiles: [created],
+    activeProfileId: created.id,
+    decisions: record.decisions ?? [],
+    dismissedInboxIds,
+  };
 }
 
 function stripStockElectricalSeed(raw: unknown): unknown {

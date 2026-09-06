@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
+  SpecialistInboxAction,
   SpecialistInboxEntry,
+  SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
   SpecialistProcurementCard,
   SpecialistProfileListResponse,
@@ -34,6 +36,10 @@ export interface SpecialistAppProps {
   ) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
+  resolveInbox?: (
+    id: string,
+    action: SpecialistInboxAction,
+  ) => Promise<SpecialistInboxResolveResponse>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -51,6 +57,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const saveProfile = props.saveProfile;
   const setProfileWatch = props.setProfileWatch;
   const refreshInbox = props.refreshInbox;
+  const resolveInbox = props.resolveInbox;
 
   useEffect(() => {
     if (refreshInbox === undefined) return undefined;
@@ -77,8 +84,20 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       : async (id: string, kind: SpecialistTriageKind) => {
           const items = await decideCase(id, kind);
           setProcurements(items);
+          if (refreshInbox !== undefined) {
+            setInbox(await refreshInbox());
+          }
           return items;
         };
+
+  function rememberCard(card: SpecialistProcurementCard): void {
+    setProcurements((current) => {
+      if (current.some((item) => item.id === card.id)) {
+        return current.map((item) => (item.id === card.id ? card : item));
+      }
+      return [...current, card];
+    });
+  }
 
   function remember(next: SpecialistWorkingProfile, activate = false): SpecialistWorkingProfile {
     setProfiles((current) => {
@@ -95,7 +114,29 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     <InboxAlertProvider count={inbox.length}>
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<InboxApp entries={inbox} />} />
+        <Route
+          path="/"
+          element={
+            <InboxRoute
+              entries={inbox}
+              {...(resolveInbox === undefined
+                ? {}
+                : {
+                    resolve: async (id, action) => {
+                      const result = await resolveInbox(id, action);
+                      setInbox(result.items);
+                      if (result.card !== undefined) rememberCard(result.card);
+                      if (action === "documents") {
+                        for (const document of result.documents) {
+                          window.open(document.url, "_blank", "noopener,noreferrer");
+                        }
+                      }
+                      return result;
+                    },
+                  })}
+            />
+          }
+        />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
         <Route path="/forgot-password" element={<Navigate to="/" replace />} />
@@ -196,6 +237,34 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       </Routes>
     </BrowserRouter>
     </InboxAlertProvider>
+  );
+}
+
+function InboxRoute({
+  entries,
+  resolve,
+}: {
+  entries: readonly SpecialistInboxEntry[];
+  resolve?: (
+    id: string,
+    action: SpecialistInboxAction,
+  ) => Promise<SpecialistInboxResolveResponse>;
+}): ReactElement {
+  const navigate = useNavigate();
+  return (
+    <InboxApp
+      entries={entries}
+      {...(resolve === undefined
+        ? {}
+        : {
+            onResolve: async (id, action) => {
+              const result = await resolve(id, action);
+              if (result.card !== undefined && action !== "dismiss") {
+                void navigate(`/procurements/${result.card.id}`);
+              }
+            },
+          })}
+    />
   );
 }
 

@@ -10,6 +10,7 @@ import {
   fetchIngestProgress,
   fetchProcurements,
   fetchProfiles,
+  resolveInbox,
   saveProfile,
   searchProcurements,
   setProfileWatch,
@@ -126,6 +127,7 @@ function LiveConsole() {
       decide={decideProcurement}
       ingestProgress={fetchIngestProgress}
       refreshInbox={fetchInbox}
+      resolveInbox={resolveInbox}
     />
   );
 }

@@ -1,11 +1,14 @@
 import {
   SpecialistInboxListResponse,
+  SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistSearchResponse,
   SpecialistWorkingProfile,
+  type SpecialistInboxAction,
   type SpecialistInboxEntry,
+  type SpecialistInboxResolveResponse as SpecialistInboxResolveResponseValue,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistProfileWrite,
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
@@ -20,6 +23,36 @@ export async function fetchInbox(fetcher: typeof fetch = fetch): Promise<readonl
   const response = await fetcher("/api/inbox", withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось загрузить входящие");
+  }
+  return SpecialistInboxListResponse.parse(await response.json()).items;
+}
+
+export async function resolveInbox(
+  id: string,
+  action: SpecialistInboxAction,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistInboxResolveResponseValue> {
+  const response = await fetcher(
+    `/api/inbox/${id}/resolve`,
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    }),
+  );
+  if (!response.ok) {
+    throw new Error("Не удалось обработать сообщение");
+  }
+  return SpecialistInboxResolveResponse.parse(await response.json());
+}
+
+export async function deleteInbox(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<readonly SpecialistInboxEntry[]> {
+  const response = await fetcher(`/api/inbox/${id}`, withCredentials({ method: "DELETE" }));
+  if (!response.ok) {
+    throw new Error("Не удалось удалить сообщение");
   }
   return SpecialistInboxListResponse.parse(await response.json()).items;
 }

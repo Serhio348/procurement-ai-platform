@@ -23,6 +23,9 @@ describe("fetchInbox", () => {
         detail: "Номер: auction/001.",
         detectedOn: "2026-09-03",
         urgent: true as const,
+        kind: "status_changed" as const,
+        topic: "card_update" as const,
+        topicLabel: "Карточка",
       },
     ];
     const inbox = await fetchInbox(

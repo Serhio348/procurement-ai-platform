@@ -279,6 +279,7 @@ export const Clarification = SourceClarification.extend({
 export type Clarification = z.infer<typeof Clarification>;
 
 export const ChangeKind = z.enum([
+  "procedure_found",
   "status_changed",
   "price_changed",
   "deadline_changed",

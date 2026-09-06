@@ -159,6 +159,7 @@ integration("PostgreSQL migrations and invariants", () => {
       ],
       activeProfileId: "00000000-0000-4000-8000-000000000902",
       decisions: [],
+      dismissedInboxIds: [],
     });
     await store.saveCases([card]);
 

@@ -89,4 +89,16 @@ describe("SpecialistCatalog", () => {
     expect(catalog.record(event).duplicate).toBe(true);
     expect(catalog.urgentInbox()).toHaveLength(1);
   });
+
+  it("drops a dismissed urgent row from the inbox and keeps the procurement case", () => {
+    const catalog = SpecialistCatalog.parse(fixture);
+    const status = catalog.urgentInbox()[0];
+    if (status === undefined) throw new Error("fixture missing");
+
+    expect(status.topic).toBe("card_update");
+    expect(catalog.urgentInbox()[1]?.topic).toBe("documents");
+    expect(catalog.dismiss(status.id)).toBe(true);
+    expect(catalog.urgentInbox().map((entry) => entry.title)).toEqual(["НКУ и щитовое оборудование"]);
+    expect(catalog.procurement(status.procurementId)?.title).toBe("Поставка КТПБ");
+  });
 });

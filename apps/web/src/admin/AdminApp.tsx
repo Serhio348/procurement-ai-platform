@@ -45,7 +45,7 @@ export function AdminApp() {
 
   return (
     <Shell>
-      <main className="workspace admin-workspace">
+      <main className="admin-workspace">
         <section className="profile-section">
           <h1>Администрирование</h1>
           <p className="profile-lead">Заявки на доступ и роли сотрудников.</p>

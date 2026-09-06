@@ -176,8 +176,8 @@ LLM_API_KEY=вставьте_свой_ключ_deepseek
 | `GOSZAKUPKI_TLS_INSECURE=1` | на части Linux цепочка сертификатов площадки не сходится; без этого поиск пишет «площадка недоступна». На публичном сервере это компромисс, не оставляйте `NODE_TLS_REJECT_UNAUTHORIZED=0` |
 | `LLM_API_KEY` | ключ DeepSeek, тот же что локально |
 | `AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD` | первый администратор, если таблица пользователей пуста |
-| `AUTH_PUBLIC_URL` | адрес консоли в ссылке сброса пароля, например `http://193.47.42.49` |
-| `AUTH_COOKIE_SECURE=0` | пока консоль на HTTP. После TLS поставьте `1` |
+| `AUTH_PUBLIC_URL` | адрес консоли в ссылке сброса пароля. После TLS — `https://домен` |
+| `AUTH_COOKIE_SECURE` | `0` на HTTP, `1` после шага 14 |
 | `INTERNAL_API_TOKEN` | служебный заголовок для `POST /api/inbox/events` |
 
 Остальное из примера можно оставить на первом стенде
@@ -244,10 +244,8 @@ npm run db:bootstrap
 ## 6. nginx: с улицы только порт 80
 
 Консоль теперь с логином внутри программы. Nginx по-прежнему только
-отдаёт статику и проксирует `/api`. Cookie сессии `SameSite=Lax`,
-`Secure` выключен на HTTP (`AUTH_COOKIE_SECURE=0`). Когда появится
-HTTPS — поставьте `1` и перезапустите API.
-Пока его нет, кто знает IP — откроет консоль. Для теста так и задумано.
+отдаёт статику и проксирует `/api`. Cookie сессии `SameSite=Lax`.
+На HTTP `AUTH_COOKIE_SECURE=0`. После TLS — шаг 14: `1` и перезапуск API.
 
 Консоль — статика из `apps/web/dist`. Запросы `/api` идут на Fastify
 `127.0.0.1:3001`. Vite на 5173 клиентам не открываем.
@@ -264,6 +262,9 @@ systemctl reload nginx
 ```
 
 Ожидание `nginx -t`: `syntax is ok`, `test is successful`.
+
+После выпуска сертификата этот `cp` больше не делайте: certbot правит
+файл в `/etc/nginx`, а не копию в репозитории.
 
 ---
 
@@ -308,23 +309,22 @@ systemctl restart procurement-api
 ```bash
 ufw allow OpenSSH
 ufw allow 80/tcp
+ufw allow 443/tcp
 ufw --force enable
 ufw status
 ```
 
 Порты 3001, 5173, 5432, 6379, 9000 наружу не открывать.
+80 нужен Let's Encrypt даже после перехода на HTTPS.
 
 ---
 
 ## 10. Что дать клиенту
 
-1. Ссылка: `http://IP-сервера` (пример: `http://193.47.42.49`).
+1. Ссылка: после шага 14 — `https://ваш-домен`. До TLS — `http://IP`.
 2. Коротко: открыть ссылку → профиль → поиск.
 
 Не давать: SSH, пароль `root`, токен GitHub, ключ DeepSeek.
-
-Браузер может ругаться, что нет HTTPS — для первого теста это нормально.
-Сертификат и домен — отдельный шаг (не в этой инструкции).
 
 Проверка с телефона **не** по Wi‑Fi офиса, а с мобильного интернета:
 открыть ту же ссылку. Если видна консоль — сервер доступен из Беларуси.
@@ -438,6 +438,7 @@ systemctl restart procurement-api
 | Статус контейнеров | `cd /opt/procurement-ai-platform && docker compose -f infra/docker-compose.yml ps` |
 | Перезапуск базы | `docker compose -f infra/docker-compose.yml restart` |
 | Проверка nginx | `nginx -t && systemctl reload nginx` |
+| Обновить сертификат | `certbot renew --dry-run` |
 
 ---
 
@@ -472,9 +473,71 @@ curl -I --max-time 20 https://goszakupki.by
 
 ---
 
-## 14. Чего эта инструкция не делает
+## 14. HTTPS (Let's Encrypt)
 
-- HTTPS и домен `.by` (логин уже есть; Secure-cookie после TLS)
+Доверенный замок в браузере **не выдают на голый IP**. Нужен домен
+(например `zakupki.ваша-фирма.by`), A-запись на `193.47.42.49`.
+Самоподписанный сертификат клиенты будут обходить — это не безопаснее.
+
+Подставьте свой домен и почту. DNS должен уже отвечать этим IP
+(`ping ваш-домен` с ноутбука).
+
+**1. Имя сайта в nginx**
+
+```bash
+nano /etc/nginx/sites-available/procurement
+```
+
+Строку `server_name _;` замените на:
+
+```nginx
+server_name zakupki.ваша-фирма.by;
+```
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+**2. Порт 443 и сертификат**
+
+```bash
+ufw allow 443/tcp
+apt update
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d zakupki.ваша-фирма.by --redirect --agree-tos -m вы@ваша-фирма.by
+```
+
+Certbot сам слушает порт 80, пишет 443 и редирект HTTP → HTTPS.
+Продление — таймер `certbot.timer`, руками ничего не крутить.
+
+**3. Cookie только по HTTPS**
+
+```bash
+nano /opt/procurement-ai-platform/.env
+```
+
+```env
+AUTH_PUBLIC_URL=https://zakupki.ваша-фирма.by
+AUTH_COOKIE_SECURE=1
+```
+
+```bash
+systemctl restart procurement-api
+```
+
+**4. Проверка**
+
+Откройте `https://zakupki.ваша-фирма.by`, **Ctrl+F5**. Замок без
+предупреждения. `http://…` должен перекинуть на https.
+Войдите — сессия держится после обновления страницы.
+
+Не копируйте `infra/nginx/procurement.conf` поверх живого сайта:
+сотрёте TLS.
+
+---
+
+## 15. Чего эта инструкция не делает
+
 - входящий Telegram-бот
 - документы на «Отслеживать» (качаются только после «Участвовать»)
 - Railway / Cloudflare / домашний 4G как замена белорусскому IP

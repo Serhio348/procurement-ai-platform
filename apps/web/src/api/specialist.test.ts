@@ -116,7 +116,7 @@ describe("saveProfile", () => {
         excludeKeywords: [],
       },
       async (input) => {
-        url = typeof input === "string" ? input : input.url;
+        url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
         return new Response(
           JSON.stringify(
             SpecialistWorkingProfile.parse({

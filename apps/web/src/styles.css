@@ -890,6 +890,14 @@ h3 {
   padding: 24px;
 }
 
+.admin-workspace .profile-section,
+.admin-list,
+.admin-row,
+.admin-actions {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .admin-list {
   display: grid;
   gap: 10px;
@@ -899,31 +907,20 @@ h3 {
 }
 
 .admin-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
   gap: 12px;
-  min-width: 0;
   padding: 12px;
   background: #f4f6f8;
   border: 1px solid #d5dae2;
   border-radius: 4px;
-}
-
-.admin-row > :first-child {
-  min-width: 0;
-  flex: 1 1 200px;
+  overflow: hidden;
 }
 
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
-  justify-content: flex-end;
+  align-items: flex-end;
   gap: 8px;
-  min-width: 0;
-  flex: 1 1 240px;
 }
 
 .admin-actions label {
@@ -940,6 +937,21 @@ h3 {
 .admin-actions select {
   font: inherit;
   padding: 6px 8px;
+}
+
+.admin-danger {
+  font: inherit;
+  padding: 6px 10px;
+  color: #6b4a4a;
+  background: #fff;
+  border: 1px solid #d5dae2;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.admin-danger:hover {
+  background: #f8eeee;
+  border-color: #c4a8a8;
 }
 
 @keyframes auth-card-in {

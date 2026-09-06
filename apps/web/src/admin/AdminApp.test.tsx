@@ -54,6 +54,7 @@ describe("AdminApp", () => {
     );
 
     expect(await screen.findByText("Иван")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Отклонить" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Одобрить" }));
     expect(approvals).toEqual([{ role: "specialist" }]);
   });

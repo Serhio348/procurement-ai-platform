@@ -147,7 +147,7 @@ function AdminUserRow({
           </button>
         ) : null}
         {onReject !== undefined ? (
-          <button type="button" className="profile-list-remove" onClick={() => void onReject()}>
+          <button type="button" className="admin-danger" onClick={() => void onReject()}>
             Отклонить
           </button>
         ) : null}
@@ -157,7 +157,7 @@ function AdminUserRow({
           </button>
         ) : null}
         {onRevoke !== undefined ? (
-          <button type="button" className="profile-list-remove" onClick={() => void onRevoke()}>
+          <button type="button" className="admin-danger" onClick={() => void onRevoke()}>
             Отозвать
           </button>
         ) : null}

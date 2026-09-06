@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type {
   SpecialistProfileWrite,
   SpecialistWorkingProfile,
@@ -8,9 +8,11 @@ import {
   addPlatformKeyword,
   mergePlatformKeywords,
   platformKeywordEdits,
+  profileDisplayName,
   removePlatformKeyword,
 } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
+import { profileCreatedToast } from "./ProfileList.js";
 
 export function ProfileApp({
   profile: initial,
@@ -33,6 +35,8 @@ export function ProfileApp({
   const [addWord, setAddWord] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
+  const navigate = useNavigate();
+  const untitled = initial.name.trim().length === 0;
   const platformQueries = mergePlatformKeywords(description, extras, removed);
   const activateRef = useRef(activate);
   activateRef.current = activate;
@@ -67,7 +71,12 @@ export function ProfileApp({
         excludeKeywords: [],
       });
       setProfile(next);
-      setNotice("Профиль сохранён. Поиск и слежение сами не запустились.");
+      const title = profileDisplayName(next);
+      await navigate("/profiles", {
+        state: {
+          toast: untitled ? profileCreatedToast(title) : `Профиль «${title}» сохранён.`,
+        },
+      });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Не удалось сохранить профиль.");
     } finally {

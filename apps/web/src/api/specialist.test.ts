@@ -1,6 +1,12 @@
 import { SpecialistInboxListResponse, SpecialistSearchResponse, SpecialistWorkingProfile } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { fetchInbox, fetchProfile, searchFailureMessage, searchProcurements } from "./specialist.js";
+import {
+  fetchInbox,
+  fetchProfile,
+  saveProfile,
+  searchFailureMessage,
+  searchProcurements,
+} from "./specialist.js";
 
 describe("fetchInbox", () => {
   it("parses the specialist inbox payload from the API", async () => {
@@ -92,5 +98,37 @@ describe("searchProcurements", () => {
       }),
     );
     expect(message).toContain("goszakupki.by");
+  });
+});
+
+describe("saveProfile", () => {
+  it("writes the opened profile by id, not only the active one", async () => {
+    const id = "00000000-0000-4000-8000-000000000901";
+    let url: string | undefined;
+    const saved = await saveProfile(
+      id,
+      {
+        name: "Щиты",
+        purpose: "",
+        description: "",
+        instructions: "",
+        keywords: [],
+        excludeKeywords: [],
+      },
+      async (input) => {
+        url = typeof input === "string" ? input : input.url;
+        return new Response(
+          JSON.stringify(
+            SpecialistWorkingProfile.parse({
+              id,
+              name: "Щиты",
+            }),
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    expect(url).toBe(`/api/profiles/${id}`);
+    expect(saved.name).toBe("Щиты");
   });
 });

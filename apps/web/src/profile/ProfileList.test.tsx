@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { ProfileList } from "./ProfileList.js";
+import { ProfileList, profileCreatedToast } from "./ProfileList.js";
 
 afterEach(() => {
   cleanup();
@@ -35,6 +35,28 @@ describe("ProfileList", () => {
     expect(screen.queryByText(/водоподготов/i)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Новый профиль" }));
     expect(create).toHaveBeenCalled();
+  });
+
+  it("shows a created-profile toast from navigation state", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/profiles", state: { toast: profileCreatedToast("Водоподготовка") } },
+        ]}
+      >
+        <ProfileList
+          profiles={[
+            SpecialistWorkingProfile.parse({
+              id: "00000000-0000-4000-8000-000000000902",
+              name: "Водоподготовка",
+            }),
+          ]}
+          create={async () => undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("Профиль «Водоподготовка» создан.");
   });
 
   it("deletes a direction with the row cross and keeps the last profile", async () => {

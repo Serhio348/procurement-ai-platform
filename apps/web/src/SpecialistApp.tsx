@@ -24,7 +24,7 @@ export interface SpecialistAppProps {
   createProfile?: () => Promise<SpecialistWorkingProfile>;
   deleteProfile?: (id: string) => Promise<SpecialistProfileListResponse>;
   activateProfile?: (id: string) => Promise<SpecialistWorkingProfile>;
-  saveProfile?: (next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
+  saveProfile?: (id: string, next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
   setProfileWatch?: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
   decide?: (
     id: string,
@@ -109,15 +109,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(activateProfile === undefined
                 ? {}
                 : { activate: async (id: string) => remember(await activateProfile(id), true) })}
-              save={async (next) => {
+              save={async (id, next) => {
                 if (saveProfile === undefined) {
-                  const current = profiles[0];
+                  const current = profiles.find((item) => item.id === id) ?? profiles[0];
                   if (current === undefined) {
                     throw new Error("no_profile");
                   }
                   return remember({ ...current, ...next });
                 }
-                return remember(await saveProfile(next));
+                return remember(await saveProfile(id, next));
               }}
               setWatch={async (watchNewProcurements) => {
                 if (setProfileWatch === undefined) {
@@ -207,7 +207,7 @@ function ProfileEditorRoute({
 }: {
   profiles: readonly SpecialistWorkingProfile[];
   activate?: (id: string) => Promise<SpecialistWorkingProfile>;
-  save: (next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
+  save: (id: string, next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
   setWatch: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
 }): ReactElement {
   const { id } = useParams();
@@ -219,7 +219,7 @@ function ProfileEditorRoute({
     <ProfileApp
       profile={profile}
       {...(activate === undefined ? {} : { activate })}
-      save={save}
+      save={(next) => save(profile.id, next)}
       setWatch={setWatch}
     />
   );

@@ -2,15 +2,19 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ProfileApp } from "./ProfileApp.js";
+import { ProfileList } from "./ProfileList.js";
 
 afterEach(() => {
   cleanup();
 });
 
+const profileId = "00000000-0000-4000-8000-000000000901";
+
 function profile(extra: Record<string, unknown> = {}) {
   return SpecialistWorkingProfile.parse({
+    id: profileId,
     name: "Электротехническое оборудование",
     purpose: "Находить КТПБ.",
     description: "Промышленные подстанции.",
@@ -20,6 +24,29 @@ function profile(extra: Record<string, unknown> = {}) {
     watchNewProcurements: false,
     ...extra,
   });
+}
+
+function renderProfile(
+  current: ReturnType<typeof profile>,
+  save: () => Promise<ReturnType<typeof profile>>,
+  setWatch: (watch: boolean) => Promise<ReturnType<typeof profile>> = vi.fn(
+    async () => current,
+  ),
+) {
+  return render(
+    <MemoryRouter initialEntries={[`/profiles/${current.id}`]}>
+      <Routes>
+        <Route
+          path="/profiles"
+          element={<ProfileList profiles={[current]} create={async () => undefined} />}
+        />
+        <Route
+          path="/profiles/:id"
+          element={<ProfileApp profile={current} save={save} setWatch={setWatch} />}
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
 }
 
 describe("ProfileApp", () => {
@@ -56,15 +83,7 @@ describe("ProfileApp", () => {
       profile({ name: "Щиты", keywords: ["кабель", "ВРУ"], watchNewProcurements }),
     );
 
-    render(
-      <MemoryRouter>
-        <ProfileApp
-          profile={profile({ description: "", keywords: [] })}
-          save={save}
-          setWatch={setWatch}
-        />
-      </MemoryRouter>,
-    );
+    renderProfile(profile({ description: "", keywords: [] }), save, setWatch);
 
     await user.clear(screen.getByLabelText("Название"));
     await user.type(screen.getByLabelText("Название"), "Щиты");
@@ -97,26 +116,30 @@ describe("ProfileApp", () => {
     });
     expect(screen.queryByLabelText("Зачем ищем")).toBeNull();
     expect(setWatch).not.toHaveBeenCalled();
-    expect(screen.getByText(/Поиск и слежение сами не запустились/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Профили" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Профиль «Щиты» сохранён.");
+  });
 
-    await user.click(screen.getByRole("button", { name: "Следить за новыми закупками" }));
-    expect(setWatch).toHaveBeenCalledWith(true);
-    expect(screen.getByRole("button", { name: "Слежение за новыми закупками включено" })).toBeTruthy();
+  it("after creating a named profile shows a toast and returns to the list", async () => {
+    const user = userEvent.setup();
+    const current = profile({ name: "", description: "", instructions: "", keywords: [] });
+    const save = vi.fn(async () => profile({ name: "Водоподготовка", keywords: [] }));
+
+    renderProfile(current, save);
+
+    await user.type(screen.getByLabelText("Название"), "Водоподготовка");
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(save).toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "Профили" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Профиль «Водоподготовка» создан.");
   });
 
   it("can drop a looking-for word without rewriting the text", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => profile({ keywords: ["КТПБ"] }));
 
-    render(
-      <MemoryRouter>
-        <ProfileApp
-          profile={profile({ description: "КТПБ, НКУ", keywords: ["КТПБ", "НКУ"] })}
-          save={save}
-          setWatch={vi.fn(async () => profile())}
-        />
-      </MemoryRouter>,
-    );
+    renderProfile(profile({ description: "КТПБ, НКУ", keywords: ["КТПБ", "НКУ"] }), save);
 
     await user.click(screen.getByRole("button", { name: "Убрать НКУ" }));
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));

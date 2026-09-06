@@ -1,7 +1,18 @@
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import type { SpecialistWorkingProfile } from "@procurement/contracts";
 import { profileDisplayName } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
+
+export function profileCreatedToast(name: string): string {
+  return `Профиль «${name}» создан.`;
+}
+
+export function profileListToast(state: unknown): string | undefined {
+  if (state === null || typeof state !== "object" || !("toast" in state)) return undefined;
+  const value = (state as { toast: unknown }).toast;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
 
 export function ProfileList({
   profiles,
@@ -12,10 +23,33 @@ export function ProfileList({
   create: () => Promise<void>;
   remove?: (id: string) => Promise<void>;
 }) {
+  const location = useLocation();
+  const incoming = profileListToast(location.state);
+  const [toast, setToast] = useState(incoming);
   const canRemove = profiles.length > 1;
+
+  useEffect(() => {
+    setToast(incoming);
+  }, [incoming]);
+
+  useEffect(() => {
+    if (toast === undefined) return;
+    const timer = window.setTimeout(() => {
+      setToast(undefined);
+    }, 8000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [toast]);
+
   return (
     <Shell>
       <main className="profile-page">
+        {toast === undefined ? null : (
+          <p className="toast" role="status">
+            {toast}
+          </p>
+        )}
         <h1>Профили</h1>
         <p className="profile-lead">
           Каждое направление — свой профиль и своё слежение. На вкладке

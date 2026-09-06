@@ -104,10 +104,11 @@ export async function activateProfile(
 }
 
 export async function saveProfile(
+  id: string,
   input: SpecialistProfileWrite,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
-  const response = await fetcher("/api/profile", {
+  const response = await fetcher(`/api/profiles/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

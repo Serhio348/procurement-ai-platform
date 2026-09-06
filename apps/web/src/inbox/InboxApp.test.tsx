@@ -4,6 +4,7 @@ import { SpecialistCatalog } from "@procurement/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import fixture from "../../../../tests/fixtures/specialist/inbox.json";
+import { InboxAlertProvider } from "./InboxAlert.js";
 import { InboxApp } from "./InboxApp.js";
 
 afterEach(() => {
@@ -15,10 +16,14 @@ describe("InboxApp", () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
-        <InboxApp entries={SpecialistCatalog.parse(fixture).urgentInbox()} />
+        <InboxAlertProvider count={2}>
+          <InboxApp entries={SpecialistCatalog.parse(fixture).urgentInbox()} />
+        </InboxAlertProvider>
       </MemoryRouter>,
     );
 
+    expect(screen.getByText("Тревога: есть сообщения по отслеживаемым конкурсам")).toBeTruthy();
+    expect(screen.getByText("тревога")).toBeTruthy();
     expect(screen.getAllByText("Срочно")).toHaveLength(2);
     expect(screen.queryByText("Бытовой щиток")).toBeNull();
     expect(screen.getByRole("link", { name: "https://goszakupki.by/auction/view/001" })).toBeTruthy();
@@ -43,6 +48,7 @@ describe("InboxApp", () => {
       </MemoryRouter>,
     );
 
+    expect(screen.queryByText("Тревога: есть сообщения по отслеживаемым конкурсам")).toBeNull();
     expect(screen.getAllByText("Новых изменений нет").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Профили" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Задачи/ })).toHaveProperty("disabled", true);

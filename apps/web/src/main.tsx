@@ -125,6 +125,7 @@ function LiveConsole() {
       setProfileWatch={setProfileWatch}
       decide={decideProcurement}
       ingestProgress={fetchIngestProgress}
+      refreshInbox={fetchInbox}
     />
   );
 }

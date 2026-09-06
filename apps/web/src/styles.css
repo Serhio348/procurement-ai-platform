@@ -120,8 +120,17 @@ a {
   cursor: not-allowed;
 }
 
-.nav-soon-mark {
+.nav-soon-mark,
+.nav-alarm-mark {
   font-size: 12px;
+}
+
+.nav-alarm-mark {
+  color: #fff;
+  background: #a33b3b;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 650;
 }
 
 .nav-badge {
@@ -197,6 +206,16 @@ a {
 .inbox {
   border-right: 1px solid #d5dae2;
   background: #fff;
+}
+
+.inbox-alarm {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: #5a2a2a;
+  background: #f8eeee;
+  border: 1px solid #c4a8a8;
+  border-radius: 4px;
+  font-weight: 650;
 }
 
 .detail {

@@ -13,6 +13,11 @@ export function InboxPage(props: InboxPageProps) {
   return (
     <main className="workspace">
       <section className="inbox" aria-labelledby="inbox-heading">
+        {props.entries.length > 0 ? (
+          <p className="inbox-alarm" role="status">
+            Тревога: есть сообщения по отслеживаемым конкурсам
+          </p>
+        ) : null}
         <h1 id="inbox-heading">Входящие</h1>
         {props.entries.length === 0 ? (
           <p className="empty">Новых изменений нет</p>

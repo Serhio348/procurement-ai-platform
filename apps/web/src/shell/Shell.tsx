@@ -2,11 +2,13 @@ import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuthSession } from "../auth/AuthSession.js";
 import { roleLabel } from "../auth/labels.js";
+import { useInboxAlertCount } from "../inbox/InboxAlert.js";
 import { BrandMark } from "./BrandMark.js";
 
 export function Shell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuthSession();
   const pending = user?.pendingUserCount ?? 0;
+  const inboxAlert = useInboxAlertCount();
 
   return (
     <div className="shell">
@@ -23,6 +25,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav aria-label="Разделы">
           <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}>
             Входящие
+            {inboxAlert > 0 ? <span className="nav-alarm-mark">тревога</span> : null}
           </NavLink>
           <NavLink
             to="/procurements"

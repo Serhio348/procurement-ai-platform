@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
   SpecialistInboxEntry,
@@ -11,6 +11,7 @@ import type {
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
 import { AdminApp } from "./admin/AdminApp.js";
+import { InboxAlertProvider } from "./inbox/InboxAlert.js";
 import { InboxApp } from "./inbox/InboxApp.js";
 import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
@@ -32,9 +33,11 @@ export interface SpecialistAppProps {
     kind: SpecialistTriageKind,
   ) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
+  refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
+  const [inbox, setInbox] = useState(props.inbox);
   const [procurements, setProcurements] = useState(props.procurements);
   const [profiles, setProfiles] = useState(props.profiles);
   const [activeProfileId, setActiveProfileId] = useState(
@@ -47,6 +50,17 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const deleteProfile = props.deleteProfile;
   const saveProfile = props.saveProfile;
   const setProfileWatch = props.setProfileWatch;
+  const refreshInbox = props.refreshInbox;
+
+  useEffect(() => {
+    if (refreshInbox === undefined) return undefined;
+    const timer = setInterval(() => {
+      void refreshInbox()
+        .then(setInbox)
+        .catch(() => undefined);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [refreshInbox]);
 
   const search =
     searchProfile === undefined
@@ -78,9 +92,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   }
 
   return (
+    <InboxAlertProvider count={inbox.length}>
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<InboxApp entries={props.inbox} />} />
+        <Route path="/" element={<InboxApp entries={inbox} />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
         <Route path="/forgot-password" element={<Navigate to="/" replace />} />
@@ -180,6 +195,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         />
       </Routes>
     </BrowserRouter>
+    </InboxAlertProvider>
   );
 }
 

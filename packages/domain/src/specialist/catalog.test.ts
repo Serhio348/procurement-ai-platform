@@ -101,4 +101,26 @@ describe("SpecialistCatalog", () => {
     expect(catalog.urgentInbox().map((entry) => entry.title)).toEqual(["НКУ и щитовое оборудование"]);
     expect(catalog.procurement(status.procurementId)?.title).toBe("Поставка КТПБ");
   });
+
+  it("keeps both profiles on a case found twice", () => {
+    const catalog = new SpecialistCatalog();
+    const first = {
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Комплектная трансформаторная подстанция",
+      status: "unknown" as const,
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/001",
+      sourceProcurementId: "auction-001",
+      profileIds: ["00000000-0000-4000-8000-000000000901"],
+    };
+    catalog.upsertCase(first);
+    catalog.upsertCase({
+      ...first,
+      profileIds: ["00000000-0000-4000-8000-000000000902"],
+    });
+    expect(catalog.procurement(first.id)?.profileIds).toEqual([
+      "00000000-0000-4000-8000-000000000901",
+      "00000000-0000-4000-8000-000000000902",
+    ]);
+  });
 });

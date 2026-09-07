@@ -11,6 +11,7 @@ import type {
 } from "@procurement/contracts";
 import {
   ingestFileWeight,
+  procurementsForProfile,
   profileDisplayName,
   specialistDocumentWasRead,
 } from "@procurement/domain";
@@ -185,7 +186,7 @@ export function ProcurementsApp({
 }) {
   const params = useParams();
   const navigate = useNavigate();
-  const [items, setItems] = useState(catalog);
+  const [catalogItems, setCatalogItems] = useState(catalog);
   const [chosenProfileId, setChosenProfileId] = useState(activeProfileId ?? profiles[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
@@ -195,8 +196,10 @@ export function ProcurementsApp({
   const catalogRef = useRef(catalog);
   if (catalogRef.current !== catalog) {
     catalogRef.current = catalog;
-    setItems(catalog);
+    setCatalogItems(catalog);
   }
+  const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
+  const items = procurementsForProfile(catalogItems, chosenProfile);
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
   const ingestForSelected =
     selected !== undefined &&
@@ -218,7 +221,7 @@ export function ProcurementsApp({
         await selectProfile(chosenProfileId);
       }
       const result = await search();
-      setItems(result.items);
+      setCatalogItems(result.items);
       setNotice(
         `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}.`,
       );
@@ -253,10 +256,10 @@ export function ProcurementsApp({
     if (kind === "participate") pullProgress();
     try {
       const next = await decide(selected.id, kind);
-      setItems(next);
+      setCatalogItems(next);
       if (kind === "reject") {
         setNotice("Закупка скрыта и больше не будет предлагаться.");
-        const remaining = next[0];
+        const remaining = procurementsForProfile(next, chosenProfile)[0];
         await navigate(remaining === undefined ? "/procurements" : `/procurements/${remaining.id}`);
       } else if (kind === "participate") {
         const current = next.find((item) => item.id === selected.id);
@@ -295,7 +298,17 @@ export function ProcurementsApp({
                     value={chosenProfileId}
                     disabled={busy}
                     onChange={(event) => {
-                      setChosenProfileId(event.target.value);
+                      const id = event.target.value;
+                      setChosenProfileId(id);
+                      const profile = profiles.find((item) => item.id === id);
+                      const next = procurementsForProfile(catalogItems, profile);
+                      const keep = next.find((item) => item.id === selected?.id) ?? next[0];
+                      void (async () => {
+                        if (selectProfile !== undefined) await selectProfile(id);
+                        await navigate(
+                          keep === undefined ? "/procurements" : `/procurements/${keep.id}`,
+                        );
+                      })();
                     }}
                   >
                     {profiles.map((profile) => (

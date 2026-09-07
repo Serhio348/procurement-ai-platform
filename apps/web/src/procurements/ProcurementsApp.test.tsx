@@ -356,6 +356,61 @@ describe("ProcurementsApp", () => {
     expect(search).toHaveBeenCalled();
   });
 
+  it("shows only procurements that belong to the chosen profile", async () => {
+    const user = userEvent.setup();
+    const substations = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "Подстанции",
+      keywords: ["подстанция"],
+    });
+    const water = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Водоподготовка",
+      keywords: ["вода"],
+    });
+    const station = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Комплектная трансформаторная подстанция",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/001",
+      sourceProcurementId: "auction-001",
+      profileIds: [substations.id],
+    });
+    const filter = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Системы очистки воды",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/002",
+      sourceProcurementId: "auction-002",
+      profileIds: [water.id],
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements/:id?"
+            element={
+              <ProcurementsApp
+                items={[station, filter]}
+                profiles={[substations, water]}
+                activeProfileId={substations.id}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Системы очистки воды/ })).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Профиль"), water.id);
+    expect(screen.getByRole("button", { name: /Системы очистки воды/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();
+  });
+
   it("records a specialist choice and hides a rejected case from the list", async () => {
     const user = userEvent.setup();
     const found = SpecialistProcurementCard.parse({

@@ -9,6 +9,7 @@ import {
 import { compileChangeAlert } from "../notification/message.js";
 import { statusLabel } from "./case.js";
 import { inboxTopic, inboxTopicLabel } from "./inbox-action.js";
+import { mergeProfileIds } from "./profile-cases.js";
 
 export class SpecialistCatalog {
   readonly #byChangeId = new Map<string, InboxFixtureItemValue>();
@@ -37,7 +38,15 @@ export class SpecialistCatalog {
   }
 
   upsertCase(card: SpecialistProcurementCardValue): void {
-    this.#cases.set(card.id, SpecialistProcurementCard.parse(card));
+    const previous = this.#cases.get(card.id);
+    const parsed = SpecialistProcurementCard.parse(card);
+    this.#cases.set(
+      card.id,
+      SpecialistProcurementCard.parse({
+        ...parsed,
+        profileIds: mergeProfileIds(previous?.profileIds, parsed.profileIds),
+      }),
+    );
   }
 
   inboxItem(id: string): InboxFixtureItemValue | undefined {

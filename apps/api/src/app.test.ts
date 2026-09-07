@@ -500,6 +500,31 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("ties a found case to the profile that searched for it", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "Подстанции",
+        keywords: electricalEquipmentSeedV1.keywords,
+      },
+    });
+    const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      id: string;
+    };
+    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const items = JSON.parse(searched.body).items as Array<{
+      title: string;
+      profileIds: string[];
+    }>;
+    const station = items.find((item) => item.title.includes("подстанция"));
+
+    expect(searched.statusCode).toBe(200);
+    expect(station?.profileIds).toEqual([profile.id]);
+    await app.close();
+  });
+
   it("keeps edited platform keywords and fills them from looking-for when empty", async () => {
     const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
 

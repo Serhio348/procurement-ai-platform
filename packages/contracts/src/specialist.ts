@@ -138,6 +138,8 @@ export const SpecialistProcurementCard = z.object({
   extractPreview: z.string().optional(),
   /** Latest specialist choice; absent means the case is still waiting. */
   triage: SpecialistTriageKind.optional(),
+  /** Profiles that found this case. Empty: not yet tied to a direction. */
+  profileIds: z.array(z.string().uuid()).default([]),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
 

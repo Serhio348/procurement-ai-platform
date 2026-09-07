@@ -21,6 +21,7 @@ import {
 } from "@procurement/contracts";
 import {
   applyInboxChangeToCard,
+  attachProfileToCard,
   inboxDocumentLinks,
   inboxItemFromFoundCard,
   inboxTopic,
@@ -141,7 +142,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         skippedRejected += 1;
         continue;
       }
-      catalog.upsertCase(withTriage(card, workspace));
+      catalog.upsertCase(withTriage(attachProfileToCard(card, profile.id), workspace));
     }
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
@@ -207,8 +208,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         limit,
       );
       for (const card of selected.cards) {
-        if (known.has(card.sourceProcurementId)) continue;
-        catalog.upsertCase(withTriage(card, workspace));
+        const existing = catalog
+          .procurements()
+          .find((item) => item.sourceProcurementId === card.sourceProcurementId);
+        if (existing !== undefined) {
+          catalog.upsertCase(withTriage(attachProfileToCard(existing, profile.id), workspace));
+          continue;
+        }
+        catalog.upsertCase(withTriage(attachProfileToCard(card, profile.id), workspace));
         catalog.record(inboxItemFromFoundCard(card, clock()));
         known.add(card.sourceProcurementId);
         addedCount += 1;

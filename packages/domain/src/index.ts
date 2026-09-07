@@ -25,5 +25,6 @@ export * from "./specialist/inbox-action.js";
 export * from "./specialist/ingest-progress.js";
 export * from "./specialist/looking-for.js";
 export * from "./specialist/participate.js";
+export * from "./specialist/profile-cases.js";
 export * from "./specialist/triage.js";
 export * from "./specialist/workspace.js";

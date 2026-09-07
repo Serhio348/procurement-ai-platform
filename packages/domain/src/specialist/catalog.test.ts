@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SpecialistProcurementCard } from "@procurement/contracts";
 import { SpecialistCatalog } from "./catalog.js";
 
 const fixture = {
@@ -104,20 +105,22 @@ describe("SpecialistCatalog", () => {
 
   it("keeps both profiles on a case found twice", () => {
     const catalog = new SpecialistCatalog();
-    const first = {
+    const first = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000401",
       title: "Комплектная трансформаторная подстанция",
-      status: "unknown" as const,
+      status: "unknown",
       statusLabel: "Прием предложений",
       url: "https://example.test/auction/001",
       sourceProcurementId: "auction-001",
       profileIds: ["00000000-0000-4000-8000-000000000901"],
-    };
-    catalog.upsertCase(first);
-    catalog.upsertCase({
-      ...first,
-      profileIds: ["00000000-0000-4000-8000-000000000902"],
     });
+    catalog.upsertCase(first);
+    catalog.upsertCase(
+      SpecialistProcurementCard.parse({
+        ...first,
+        profileIds: ["00000000-0000-4000-8000-000000000902"],
+      }),
+    );
     expect(catalog.procurement(first.id)?.profileIds).toEqual([
       "00000000-0000-4000-8000-000000000901",
       "00000000-0000-4000-8000-000000000902",

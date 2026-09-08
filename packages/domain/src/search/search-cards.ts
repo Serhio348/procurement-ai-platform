@@ -9,6 +9,7 @@ import {
 } from "@procurement/contracts";
 import { statusLabel, uuidFromHex } from "../specialist/case.js";
 import { cheapClassifyHit, type CheapClassifyProfile } from "./cheap-classify.js";
+import { termMatches } from "./term-match.js";
 
 export interface ProfileSearchSelection {
   cards: SpecialistProcurementCardValue[];
@@ -60,12 +61,10 @@ export function hitMatchesProfileKeywords(
   keywords: readonly string[],
 ): boolean {
   if (keywords.length === 0) return false;
-  const haystack = normalise(
-    [hit.title, hit.buyerName, hit.sourceStatus]
-      .filter((part): part is string => part !== undefined)
-      .join(" "),
-  );
-  return keywords.some((keyword) => haystack.includes(normalise(keyword)));
+  const haystack = [hit.title, hit.buyerName, hit.sourceStatus]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
+  return keywords.some((keyword) => termMatches(haystack, keyword));
 }
 
 export function searchHitsFromFixtureDump(raw: unknown): SearchHitValue[] {
@@ -140,6 +139,3 @@ function amountLabel(hit: SearchHitValue): string | undefined {
   return undefined;
 }
 
-function normalise(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("ru-BY").replace(/\s+/g, " ").trim();
-}

@@ -2,6 +2,7 @@
  * Title-level classification before any LLM call. Exact keyword hits can be
  * kept; exclude keywords always win. Ambiguous titles are left for the model.
  */
+import { termMatches } from "./term-match.js";
 
 export interface CheapClassifyProfile {
   keywords: readonly string[];
@@ -26,20 +27,16 @@ export function cheapClassifyHit(
   text: CheapClassifyText,
   profile: CheapClassifyProfile,
 ): CheapClassifyResult {
-  const haystack = normalise(
-    [text.title, text.buyerName, text.sourceStatus].filter((part) => part !== undefined).join(" "),
-  );
-  const excludedBy = profile.excludeKeywords.filter((term) => haystack.includes(normalise(term)));
+  const haystack = [text.title, text.buyerName, text.sourceStatus]
+    .filter((part) => part !== undefined)
+    .join(" ");
+  const excludedBy = profile.excludeKeywords.filter((term) => termMatches(haystack, term));
   if (excludedBy.length > 0) {
     return { verdict: "irrelevant", matchedTerms: [], excludedBy };
   }
-  const matchedTerms = profile.keywords.filter((term) => haystack.includes(normalise(term)));
+  const matchedTerms = profile.keywords.filter((term) => termMatches(haystack, term));
   if (matchedTerms.length > 0) {
     return { verdict: "relevant", matchedTerms, excludedBy: [] };
   }
   return { verdict: "ambiguous", matchedTerms: [], excludedBy: [] };
-}
-
-function normalise(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("ru-BY").replace(/\s+/g, " ").trim();
 }

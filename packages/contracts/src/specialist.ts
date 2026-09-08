@@ -156,7 +156,7 @@ export const SpecialistProcurementListResponse = z.object({
 export type SpecialistProcurementListResponse = z.infer<typeof SpecialistProcurementListResponse>;
 
 export const SpecialistSearchRequest = z.object({
-  limit: z.number().int().positive().max(50).default(20),
+  limit: z.number().int().positive().max(200).default(100),
 });
 export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
 

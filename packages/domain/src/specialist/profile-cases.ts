@@ -3,6 +3,7 @@ import {
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
 } from "@procurement/contracts";
+import { termMatches } from "../search/term-match.js";
 
 export function attachProfileToCard(
   card: SpecialistProcurementCardValue,
@@ -48,12 +49,8 @@ function titleMatchesKeywords(
   keywords: readonly string[],
 ): boolean {
   if (keywords.length === 0) return false;
-  const haystack = normalise(
-    [card.title, card.buyerName].filter((part): part is string => part !== undefined).join(" "),
-  );
-  return keywords.some((keyword) => haystack.includes(normalise(keyword)));
-}
-
-function normalise(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("ru-BY").replace(/\s+/g, " ").trim();
+  const haystack = [card.title, card.buyerName]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
+  return keywords.some((keyword) => termMatches(haystack, keyword));
 }

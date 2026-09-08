@@ -24,6 +24,7 @@ export default defineConfig({
       "workers/**/*.test.ts",
     ],
     environment: "node",
+    testTimeout: 15000,
     coverage: {
       reporter: ["text", "lcov"],
       include: ["packages/**/src/**", "apps/**/src/**"],

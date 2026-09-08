@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type {
+  ProcedureStatus,
   SpecialistProfileWrite,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
@@ -34,6 +35,7 @@ export function ProfileApp({
   const [removed, setRemoved] = useState(initialEdits.removed);
   const [addWord, setAddWord] = useState("");
   const [excluded, setExcluded] = useState(initial.excludeKeywords.join("\n"));
+  const [statuses, setStatuses] = useState<readonly ProcedureStatus[]>(initial.statuses);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
   const navigate = useNavigate();
@@ -70,6 +72,7 @@ export function ProfileApp({
         instructions: instructions.trim(),
         keywords: platformQueries,
         excludeKeywords: splitExcludeLines(excluded),
+        statuses: [...statuses],
       });
       setProfile(next);
       const title = profileDisplayName(next);
@@ -202,6 +205,29 @@ export function ProfileApp({
                 setExcluded(event.target.value);
               }}
             />
+            <fieldset className="profile-statuses">
+              <legend>Статусы закупок</legend>
+              <p className="profile-hint">
+                Отбираются только отмеченные статусы. Ничего не отмечено —
+                показываем все.
+              </p>
+              {STATUS_OPTIONS.map((option) => (
+                <label key={option.value} className="profile-status-option">
+                  <input
+                    type="checkbox"
+                    checked={statuses.includes(option.value)}
+                    onChange={(event) => {
+                      setStatuses(
+                        event.target.checked
+                          ? [...statuses, option.value]
+                          : statuses.filter((item) => item !== option.value),
+                      );
+                    }}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
             <label htmlFor="profile-instructions">Указания</label>
             <p className="profile-hint">
               Пометки, какие закупки вам нужны, а какие пропускать.
@@ -248,6 +274,17 @@ export function ProfileApp({
     </Shell>
   );
 }
+
+const STATUS_OPTIONS: ReadonlyArray<{ value: ProcedureStatus; label: string }> = [
+  { value: "announced", label: "Объявлена" },
+  { value: "accepting_bids", label: "Приём предложений" },
+  { value: "bidding_closed", label: "Приём завершён, идёт подписание" },
+  { value: "auction_in_progress", label: "Торги идут" },
+  { value: "under_review", label: "На рассмотрении" },
+  { value: "completed", label: "Завершена" },
+  { value: "cancelled", label: "Отменена" },
+  { value: "unknown", label: "Прочие" },
+];
 
 function splitExcludeLines(text: string): string[] {
   const seen = new Set<string>();

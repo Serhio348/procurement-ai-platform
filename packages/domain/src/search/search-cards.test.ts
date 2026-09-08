@@ -102,6 +102,33 @@ describe("selectRelevantSearchCards", () => {
     expect(selected.discardedCount).toBe(1);
   });
 
+  it("drops hits whose status the profile does not watch", () => {
+    const hits = [
+      hit("auction-001", "Комплектная трансформаторная подстанция", {
+        status: "accepting_bids",
+        sourceStatus: "Подать предложение",
+      }),
+      hit("auction-002", "Комплектная трансформаторная подстанция", {
+        status: "completed",
+        sourceStatus: "Завершен",
+      }),
+      hit("auction-003", "Комплектная трансформаторная подстанция"),
+    ];
+
+    const activeOnly = selectRelevantSearchCards(
+      hits,
+      { ...profile, statuses: ["accepting_bids"] },
+      20,
+    );
+    expect(activeOnly.cards.map((card) => card.sourceProcurementId)).toEqual([
+      "auction-001",
+      "auction-003",
+    ]);
+
+    const everything = selectRelevantSearchCards(hits, { ...profile, statuses: [] }, 20);
+    expect(everything.cards).toHaveLength(3);
+  });
+
   it("caps the listed keyword matches at the requested limit", () => {
     const hits = [
       hit("a", "подстанция 1"),

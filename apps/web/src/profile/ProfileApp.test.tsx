@@ -113,6 +113,7 @@ describe("ProfileApp", () => {
       instructions: "Бытовые щитки не брать.",
       keywords: ["кабель", "ВРУ"],
       excludeKeywords: [],
+      statuses: ["accepting_bids"],
     });
     expect(screen.queryByLabelText("Зачем ищем")).toBeNull();
     expect(setWatch).not.toHaveBeenCalled();
@@ -170,6 +171,22 @@ describe("ProfileApp", () => {
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({
         excludeKeywords: ["реставрация", "ремонт зданий"],
+      }),
+    );
+  });
+
+  it("lets the specialist watch finished procedures too", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => profile());
+
+    renderProfile(profile({ statuses: ["accepting_bids"] }), save);
+
+    await user.click(screen.getByLabelText("Завершена"));
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statuses: ["accepting_bids", "completed"],
       }),
     );
   });

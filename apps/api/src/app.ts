@@ -137,6 +137,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       {
         keywords: profile.keywords,
         excludeKeywords: profile.excludeKeywords,
+        statuses: profile.statuses,
       },
       limit,
     );
@@ -208,6 +209,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         {
           keywords: profile.keywords,
           excludeKeywords: profile.excludeKeywords,
+          statuses: profile.statuses,
         },
         limit,
       );

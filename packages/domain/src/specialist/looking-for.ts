@@ -53,13 +53,9 @@ export function searchPhrasesFromLookingFor(text: string): string[] {
       .map((word) => word.replace(/^[.,:;—\-()]+|[.,:;—\-()]+$/gu, ""))
       .filter((word) => word.length > 0 && !isStopword(word));
     if (content.length === 0) continue;
-    if (content.length <= 4) {
-      phrases.push(content.join(" "));
-      continue;
-    }
-    for (const word of content) {
-      if (word.length >= 3) phrases.push(word);
-    }
+    // Keep the whole segment as one phrase: splitting long lines into single
+    // words loses context and floods the platform query with noise.
+    phrases.push(content.join(" "));
   }
   return dedupe(phrases).slice(0, MAX_PHRASES);
 }

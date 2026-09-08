@@ -6,6 +6,7 @@ import {
   type ProcedureCard as ProcedureCardValue,
   type SearchHit as SearchHitValue,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type ProcedureStatus as ProcedureStatusValue,
 } from "@procurement/contracts";
 import { statusLabel, uuidFromHex } from "../specialist/case.js";
 import { cheapClassifyHit, type CheapClassifyProfile } from "./cheap-classify.js";
@@ -16,13 +17,19 @@ export interface ProfileSearchSelection {
   discardedCount: number;
 }
 
+/** Profile filters applied to listing hits before classification. */
+export interface SearchSelectionProfile extends CheapClassifyProfile {
+  /** Watched procedure statuses; empty or absent means no status filter. */
+  statuses?: readonly ProcedureStatusValue[];
+}
+
 /**
  * Turns listing hits into specialist cases. Only exact profile-keyword matches
  * become cards; ambiguous titles wait for the model and are not shown yet.
  */
 export function selectRelevantSearchCards(
   hits: readonly SearchHitValue[],
-  profile: CheapClassifyProfile,
+  profile: SearchSelectionProfile,
   limit: number,
 ): ProfileSearchSelection {
   const uniqueHits: SearchHitValue[] = [];
@@ -35,6 +42,7 @@ export function selectRelevantSearchCards(
   }
   const listed = uniqueHits
     .filter((hit) => hitMatchesProfileKeywords(hit, profile.keywords))
+    .filter((hit) => hitMatchesProfileStatuses(hit, profile.statuses))
     .slice(0, limit);
   const cards: SpecialistProcurementCardValue[] = [];
   let discardedCount = uniqueHits.length - listed.length;
@@ -67,6 +75,19 @@ export function hitMatchesProfileKeywords(
   return keywords.some((keyword) => termMatches(haystack, keyword));
 }
 
+/**
+ * A hit without a parsed status is kept: missing data is not a finished
+ * procedure. A hit whose status is normalized but not watched is dropped.
+ */
+export function hitMatchesProfileStatuses(
+  hit: SearchHitValue,
+  statuses: readonly ProcedureStatusValue[] | undefined,
+): boolean {
+  if (statuses === undefined || statuses.length === 0) return true;
+  if (hit.status === undefined) return true;
+  return statuses.includes(hit.status);
+}
+
 export function searchHitsFromFixtureDump(raw: unknown): SearchHitValue[] {
   if (typeof raw !== "object" || raw === null || !("records" in raw)) {
     throw new Error("fixture dump missing records");
@@ -93,6 +114,7 @@ export function searchHitFromProcedureCard(card: ProcedureCardValue): SearchHitV
     title: card.title,
     pageFamily: card.pageFamily,
     ...(card.sourceStatus === undefined ? {} : { sourceStatus: card.sourceStatus }),
+    ...(card.status === "unknown" ? {} : { status: card.status }),
     ...(buyerName === undefined ? {} : { buyerName }),
     ...(card.startingPrice === undefined ? {} : { startingPrice: card.startingPrice }),
     ...(card.amount === undefined ? {} : { amount: card.amount }),

@@ -73,7 +73,9 @@ export function parseGoszakupkiSearchPage(
           url: targetUrl.href,
           title,
           pageFamily: pageFamilyFromSegment(family),
-          ...(sourceStatus.length === 0 ? {} : { sourceStatus }),
+          ...(sourceStatus.length === 0
+            ? {}
+            : { sourceStatus, status: procedureStatus(sourceStatus) }),
           ...(buyerName.length === 0 ? {} : { buyerName }),
           ...(amount?.amount === null || amount?.currency === undefined
             ? {}
@@ -483,12 +485,18 @@ function procedureStatus(sourceStatus: string | undefined): ProcedureStatus {
   const normalized = normalise(sourceStatus);
   if (
     normalized.includes("подача предложений") ||
-    normalized.includes("подача документов")
+    normalized.includes("подача документов") ||
+    normalized.includes("подать предложени") ||
+    normalized.includes("подать документ")
   ) {
     return "accepting_bids";
   }
   if (normalized.includes("отмен")) return "cancelled";
   if (normalized.includes("заверш") || normalized.includes("заключен")) return "completed";
+  if (normalized.includes("подписан")) return "bidding_closed";
+  if (normalized.includes("проведени") || normalized.includes("аукцион")) {
+    return "auction_in_progress";
+  }
   if (normalized.includes("рассмотр")) return "under_review";
   return "unknown";
 }

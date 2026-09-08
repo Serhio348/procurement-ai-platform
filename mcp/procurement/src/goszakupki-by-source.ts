@@ -223,13 +223,16 @@ function matchesSearchRow(
       .filter((value): value is string => value !== undefined)
       .join(" "),
   );
+  // Exclusions are deliberately not applied here: this row check is a coarse
+  // bandwidth filter, and dropping by raw substring would over-remove rows the
+  // domain layer would keep. Keywords/exclusions are decided in the domain.
   if (
     query.keywords.length > 0 &&
     !query.keywords.some((keyword) => haystack.includes(normalise(keyword)))
   ) {
     return false;
   }
-  return !query.excludeKeywords.some((keyword) => haystack.includes(normalise(keyword)));
+  return true;
 }
 
 function sourceSequence(id: string): number {

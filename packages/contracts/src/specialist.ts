@@ -189,6 +189,8 @@ export const SpecialistWorkingProfile = z.object({
   instructions: z.string().max(8000).default(""),
   keywords: z.array(z.string().min(1)).max(50).default([]),
   excludeKeywords: z.array(z.string().min(1)).max(50).default([]),
+  /** Procedure statuses this profile collects. Empty array means no status filter. */
+  statuses: z.array(ProcedureStatus).default(["accepting_bids"]),
   watchNewProcurements: z.boolean().default(false),
 });
 export type SpecialistWorkingProfile = z.infer<typeof SpecialistWorkingProfile>;

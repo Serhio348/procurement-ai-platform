@@ -60,4 +60,10 @@ describe("searchPhrasesFromLookingFor", () => {
       "щитового оборудования",
     ]);
   });
+
+  it("keeps a long phrase whole instead of shredding it into single words", () => {
+    expect(
+      searchPhrasesFromLookingFor("поставка комплектных трансформаторных подстанций с шинами"),
+    ).toEqual(["поставка комплектных трансформаторных подстанций шинами"]);
+  });
 });

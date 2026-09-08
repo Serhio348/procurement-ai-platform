@@ -181,6 +181,8 @@ export const SearchHit = z.object({
   url: z.string().url(),
   title: z.string().min(1),
   pageFamily: PageFamily.optional(),
+  /** Normalized status when the listing row exposed one. */
+  status: ProcedureStatus.optional(),
   sourceStatus: z.string().optional(),
   buyerName: z.string().optional(),
   startingPrice: Money.optional(),

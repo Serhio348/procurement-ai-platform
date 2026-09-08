@@ -27,7 +27,13 @@ export interface ProcurementSearchHitsOptions {
  */
 export function createProcurementSearchHits(
   options: ProcurementSearchHitsOptions,
-): { search: (limit: number, keywords: readonly string[]) => Promise<readonly SearchHit[]> } {
+): {
+  search: (
+    limit: number,
+    keywords: readonly string[],
+    excludeKeywords?: readonly string[],
+  ) => Promise<readonly SearchHit[]>;
+} {
   const sourceId = SourceId.parse(options.sourceId);
   const client = new ProcurementMcpClient({
     caller: options.caller,
@@ -39,7 +45,11 @@ export function createProcurementSearchHits(
   });
 
   return {
-    async search(limit: number, keywords: readonly string[]): Promise<readonly SearchHit[]> {
+    async search(
+      limit: number,
+      keywords: readonly string[],
+      excludeKeywords?: readonly string[],
+    ): Promise<readonly SearchHit[]> {
       if (keywords.length === 0) {
         throw new McpToolCallError(
           "invalid_request",
@@ -51,7 +61,8 @@ export function createProcurementSearchHits(
         ProcurementSearchRequest.parse({
           sourceId,
           keywords: [...keywords],
-          excludeKeywords: [],
+          excludeKeywords: [...(excludeKeywords ?? [])],
+          searchText: keywords.join(" "),
           limit,
           offset: 0,
         }),

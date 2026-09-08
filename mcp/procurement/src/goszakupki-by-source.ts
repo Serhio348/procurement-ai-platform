@@ -45,7 +45,12 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   }
 
   async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
-    const terms = query.keywords.length === 0 ? [undefined] : query.keywords;
+    const terms =
+      query.searchText !== undefined
+        ? [query.searchText]
+        : query.keywords.length === 0
+          ? [undefined]
+          : query.keywords;
     const rows = new Map<
       string,
       ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]

@@ -57,7 +57,11 @@ import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 
 export interface SpecialistSearchHitsPort {
-  search: (limit: number, keywords: readonly string[]) => Promise<readonly SearchHit[]>;
+  search: (
+    limit: number,
+    keywords: readonly string[],
+    excludeKeywords?: readonly string[],
+  ) => Promise<readonly SearchHit[]>;
 }
 
 export interface SpecialistApi extends FastifyInstance {
@@ -127,12 +131,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   async function runManualSearch(limit: number): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace.profile();
-    const hits = await searchHits.search(limit, profile.keywords);
+    const hits = await searchHits.search(limit, profile.keywords, profile.excludeKeywords);
     const selected = selectRelevantSearchCards(
       hits,
       {
         keywords: profile.keywords,
-        excludeKeywords: [],
+        excludeKeywords: profile.excludeKeywords,
       },
       limit,
     );
@@ -187,7 +191,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     for (const profile of ready) {
       let hits: readonly SearchHit[];
       try {
-        hits = await searchHits.search(limit, profile.keywords);
+        hits = await searchHits.search(limit, profile.keywords, profile.excludeKeywords);
       } catch (error) {
         logger.error("Specialist discovery search failed", error);
         await recordJournal(journal, {
@@ -203,7 +207,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         partitioned.undecided,
         {
           keywords: profile.keywords,
-          excludeKeywords: [],
+          excludeKeywords: profile.excludeKeywords,
         },
         limit,
       );
@@ -594,6 +598,7 @@ function mapSearchError(reply: FastifyReply, error: unknown) {
 async function loadDefaultSearchHits(
   _limit: number,
   _keywords: readonly string[],
+  _excludeKeywords?: readonly string[],
 ): Promise<readonly SearchHit[]> {
   return loadFixtureSearchHits();
 }

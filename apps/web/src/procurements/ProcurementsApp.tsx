@@ -179,7 +179,7 @@ export function ProcurementsApp({
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
   activeProfileId?: string;
-  search?: () => Promise<SpecialistSearchResponse>;
+  search?: (offset?: number) => Promise<SpecialistSearchResponse>;
   selectProfile?: (id: string) => Promise<void>;
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
@@ -191,6 +191,8 @@ export function ProcurementsApp({
   const [busy, setBusy] = useState(false);
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const ingestGeneration = useRef(0);
   const catalogRef = useRef(catalog);
@@ -213,17 +215,19 @@ export function ProcurementsApp({
       selected.paymentQuote !== undefined ||
       (selected.triage === "participate" && selected.documents.length > 0));
 
-  async function runSearch(): Promise<void> {
+  async function runSearch(offset = 0): Promise<void> {
     if (search === undefined || busy) return;
     setBusy(true);
     try {
       if (selectProfile !== undefined && chosenProfileId.length > 0) {
         await selectProfile(chosenProfileId);
       }
-      const result = await search();
+      const result = await search(offset);
       setCatalogItems(result.items);
+      setHasMore(result.hasMore);
+      setNextOffset(offset + 100);
       setNotice(
-        `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}.`,
+        `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}, сомнительных во входящих ${String(result.ambiguousCount)}.`,
       );
     } catch (error) {
       setNotice(
@@ -329,6 +333,18 @@ export function ProcurementsApp({
               >
                 {busy && busyKind === undefined ? "Ищем…" : "Искать по профилю"}
               </button>
+              {hasMore && search !== undefined ? (
+                <button
+                  type="button"
+                  className="search-profile"
+                  disabled={busy}
+                  onClick={() => {
+                    void runSearch(nextOffset);
+                  }}
+                >
+                  Загрузить ещё
+                </button>
+              ) : null}
             </div>
           </div>
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}

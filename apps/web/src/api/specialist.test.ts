@@ -79,7 +79,7 @@ describe("searchProcurements", () => {
     });
     let method: string | undefined;
     let body: string | null | undefined;
-    const result = await searchProcurements(async (input, init) => {
+    const result = await searchProcurements(0, async (input, init) => {
       method = typeof input === "string" ? init?.method : undefined;
       body = typeof init?.body === "string" ? init.body : null;
       return new Response(JSON.stringify(payload), {
@@ -88,7 +88,7 @@ describe("searchProcurements", () => {
       });
     });
     expect(method).toBe("POST");
-    expect(body).toBe("{}");
+    expect(body).toBe('{"limit":100,"offset":0}');
     expect(result.relevantCount).toBe(1);
     expect(result.items[0]?.title).toBe("Комплектная трансформаторная подстанция");
   });

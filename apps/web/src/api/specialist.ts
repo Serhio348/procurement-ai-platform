@@ -68,6 +68,7 @@ export async function fetchProcurements(
 }
 
 export async function searchProcurements(
+  offset = 0,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistSearchResponseValue> {
   const response = await fetcher(
@@ -75,7 +76,7 @@ export async function searchProcurements(
     withCredentials({
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ limit: 100, offset }),
     }),
   );
   if (!response.ok) {

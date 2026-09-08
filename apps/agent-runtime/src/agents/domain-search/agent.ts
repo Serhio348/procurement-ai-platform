@@ -35,7 +35,7 @@ const ModelClassification = DomainSearchCandidate.pick({
   matchedTerms: true,
 });
 
-const defaultModelLimit = 20;
+const defaultModelLimit = 50;
 
 export interface DomainSearchAgentOptions {
   caller: McpToolCaller;

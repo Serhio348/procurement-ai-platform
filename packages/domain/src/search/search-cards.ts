@@ -14,8 +14,13 @@ import { termMatches } from "./term-match.js";
 
 export interface ProfileSearchSelection {
   cards: SpecialistProcurementCardValue[];
+  /** Borderline hits kept for human review instead of being dropped. */
+  ambiguousCards: SpecialistProcurementCardValue[];
   discardedCount: number;
 }
+
+/** How many borderline hits one search run may push to the inbox. */
+export const MAX_AMBIGUOUS_PER_SEARCH = 50;
 
 /** Profile filters applied to listing hits before classification. */
 export interface SearchSelectionProfile extends CheapClassifyProfile {
@@ -24,8 +29,9 @@ export interface SearchSelectionProfile extends CheapClassifyProfile {
 }
 
 /**
- * Turns listing hits into specialist cases. Only exact profile-keyword matches
- * become cards; ambiguous titles wait for the model and are not shown yet.
+ * Turns listing hits into specialist cases. Exact profile-keyword matches
+ * become cards; hits that survived the source but match no keyword become
+ * ambiguous cards for human review, capped at MAX_AMBIGUOUS_PER_SEARCH.
  */
 export function selectRelevantSearchCards(
   hits: readonly SearchHitValue[],
@@ -45,7 +51,6 @@ export function selectRelevantSearchCards(
     .filter((hit) => hitMatchesProfileStatuses(hit, profile.statuses))
     .slice(0, limit);
   const cards: SpecialistProcurementCardValue[] = [];
-  let discardedCount = uniqueHits.length - listed.length;
   for (const hit of listed) {
     const classified = cheapClassifyHit(
       {
@@ -56,12 +61,28 @@ export function selectRelevantSearchCards(
       profile,
     );
     if (classified.verdict !== "relevant") {
-      discardedCount += 1;
       continue;
     }
     cards.push(cardFromRelevantHit(hit, classified.matchedTerms));
   }
-  return { cards, discardedCount };
+  const ambiguousCards: SpecialistProcurementCardValue[] = [];
+  for (const hit of uniqueHits) {
+    if (ambiguousCards.length >= MAX_AMBIGUOUS_PER_SEARCH) break;
+    if (hitMatchesProfileKeywords(hit, profile.keywords)) continue;
+    if (!hitMatchesProfileStatuses(hit, profile.statuses)) continue;
+    const classified = cheapClassifyHit(
+      {
+        title: hit.title,
+        ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
+        ...(hit.sourceStatus === undefined ? {} : { sourceStatus: hit.sourceStatus }),
+      },
+      profile,
+    );
+    if (classified.verdict === "irrelevant") continue;
+    ambiguousCards.push(cardFromAmbiguousHit(hit));
+  }
+  const discardedCount = hits.length - cards.length - ambiguousCards.length;
+  return { cards, ambiguousCards, discardedCount };
 }
 
 export function hitMatchesProfileKeywords(
@@ -145,6 +166,32 @@ export function cardFromRelevantHit(
         actor: "DomainSearchAgent",
         status: "done",
         detail: `procurement.search: найдена «${hit.title}». Релевантна по словам: ${terms}. Документы ещё не брали.`,
+      },
+    ],
+  });
+}
+
+/** A borderline hit: the source returned it, but no profile term matched. */
+export function cardFromAmbiguousHit(
+  hit: SearchHitValue,
+): SpecialistProcurementCardValue {
+  const label = amountLabel(hit);
+  return SpecialistProcurementCard.parse({
+    id: ProcurementId.parse(uuidFromHex(`${hit.sourceId}:${hit.sourceProcurementId}`)),
+    title: hit.title,
+    status: "unknown",
+    statusLabel: hit.sourceStatus ?? statusLabel("unknown"),
+    url: hit.url,
+    sourceProcurementId: hit.sourceProcurementId,
+    live: hit.sourceId === "goszakupki_by",
+    ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
+    ...(label === undefined ? {} : { amountLabel: label }),
+    actions: [
+      {
+        step: 1,
+        actor: "DomainSearchAgent",
+        status: "done",
+        detail: `procurement.search: найдена «${hit.title}». Точных совпадений по словам нет — проверьте по смыслу. Документы ещё не брали.`,
       },
     ],
   });

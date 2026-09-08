@@ -156,7 +156,8 @@ export const SpecialistProcurementListResponse = z.object({
 export type SpecialistProcurementListResponse = z.infer<typeof SpecialistProcurementListResponse>;
 
 export const SpecialistSearchRequest = z.object({
-  limit: z.number().int().positive().max(200).default(100),
+  limit: z.number().int().positive().max(500).default(100),
+  offset: z.number().int().nonnegative().default(0),
 });
 export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
 
@@ -164,6 +165,10 @@ export const SpecialistSearchResponse = z.object({
   profileName: z.string().min(1).default("Без названия"),
   relevantCount: z.number().int().nonnegative(),
   discardedCount: z.number().int().nonnegative(),
+  /** Hits sent to the inbox for a human check instead of being dropped. */
+  ambiguousCount: z.number().int().nonnegative().default(0),
+  /** True when the source returned a full page — more results may follow. */
+  hasMore: z.boolean().default(false),
   items: z.array(SpecialistProcurementCard),
 });
 export type SpecialistSearchResponse = z.infer<typeof SpecialistSearchResponse>;

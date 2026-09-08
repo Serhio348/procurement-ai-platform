@@ -29,7 +29,7 @@ describe("InboxApp", () => {
     );
 
     expect(screen.getByText("Тревога: есть сообщения, которые нужно разобрать")).toBeTruthy();
-    expect(screen.getByText("тревога")).toBeTruthy();
+    expect(document.querySelector(".nav-badge")?.textContent).toBe("2");
     expect(screen.getByText("Карточка")).toBeTruthy();
     expect(screen.getByText("Документы")).toBeTruthy();
     expect(screen.queryByText("Бытовой щиток")).toBeNull();

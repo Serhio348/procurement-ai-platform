@@ -169,7 +169,7 @@ export const SearchQuery = z.object({
   publishedFrom: IsoDateTime.optional(),
   publishedTo: IsoDateTime.optional(),
   kinds: z.array(ProcedureKind).default([]),
-  limit: z.number().int().positive().max(200).default(50),
+  limit: z.number().int().positive().max(500).default(50),
   offset: z.number().int().nonnegative().default(0),
 });
 export type SearchQuery = z.infer<typeof SearchQuery>;

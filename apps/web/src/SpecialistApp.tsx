@@ -24,7 +24,7 @@ export interface SpecialistAppProps {
   procurements: readonly SpecialistProcurementCard[];
   profiles: readonly SpecialistWorkingProfile[];
   activeProfileId?: string;
-  search?: () => Promise<SpecialistSearchResponse>;
+  search?: (offset?: number) => Promise<SpecialistSearchResponse>;
   createProfile?: () => Promise<SpecialistWorkingProfile>;
   deleteProfile?: (id: string) => Promise<SpecialistProfileListResponse>;
   activateProfile?: (id: string) => Promise<SpecialistWorkingProfile>;
@@ -72,9 +72,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const search =
     searchProfile === undefined
       ? undefined
-      : async () => {
-          const result = await searchProfile();
+      : async (offset?: number) => {
+          const result = await searchProfile(offset);
           setProcurements(result.items);
+          if (refreshInbox !== undefined) {
+            setInbox(await refreshInbox());
+          }
           return result;
         };
 

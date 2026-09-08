@@ -266,21 +266,27 @@ describe("specialist API", () => {
       profileName: string;
       relevantCount: number;
       discardedCount: number;
+      ambiguousCount: number;
       items: Array<{ title: string; sourceProcurementId: string }>;
     };
 
     expect(response.statusCode).toBe(200);
     expect(body.profileName).toBe("Электротехническое оборудование");
     expect(body.relevantCount).toBe(1);
-    expect(body.discardedCount).toBe(3);
+    // Only the status-less "Кабель силовой" survives: finished or announced
+    // hits are dropped by the default status filter before human review.
+    expect(body.ambiguousCount).toBe(1);
+    expect(body.discardedCount).toBe(2);
     expect(body.items.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
       true,
     );
-    expect(body.items.some((item) => item.title === "Кабель силовой")).toBe(false);
-    expect(body.items.some((item) => item.title === "Трансформаторы силовые")).toBe(false);
-    expect(body.items.some((item) => item.title === "Ремонт трансформаторной подстанции")).toBe(
-      false,
+    // Non-matching hits are not dropped silently: they wait in the inbox as
+    // ambiguous cases for a human look.
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
+      (item) => item.title,
     );
+    expect(inboxTitles).toContain("Кабель силовой");
 
     const listed = await app.inject({ method: "GET", url: "/api/procurements" });
     const titles = (JSON.parse(listed.body).items as Array<{ title: string }>).map(
@@ -336,8 +342,9 @@ describe("specialist API", () => {
     expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
     expect(JSON.parse(saved.body).keywords).toEqual(["кабель"]);
     expect(searched.statusCode).toBe(200);
+    // A keyword-miss is kept as an ambiguous inbox case, not silently dropped.
     expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
-      false,
+      true,
     );
     expect(cable).toBeDefined();
     expect(rejected.statusCode).toBe(200);

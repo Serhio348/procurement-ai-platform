@@ -61,6 +61,7 @@ export interface SpecialistSearchHitsPort {
     limit: number,
     keywords: readonly string[],
     excludeKeywords?: readonly string[],
+    offset?: number,
   ) => Promise<readonly SearchHit[]>;
 }
 
@@ -129,9 +130,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     journal,
   });
 
-  async function runManualSearch(limit: number): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
+  async function runManualSearch(
+    limit: number,
+    offset: number,
+  ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace.profile();
-    const hits = await searchHits.search(limit, profile.keywords, profile.excludeKeywords);
+    const hits = await searchHits.search(
+      limit,
+      profile.keywords,
+      profile.excludeKeywords,
+      offset,
+    );
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -149,16 +158,35 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       catalog.upsertCase(withTriage(attachProfileToCard(card, profile.id), workspace));
     }
+    let ambiguousCount = 0;
+    for (const card of selected.ambiguousCards) {
+      if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
+      const existing = catalog
+        .procurements()
+        .find((item) => item.sourceProcurementId === card.sourceProcurementId);
+      const owned = withTriage(
+        attachProfileToCard(existing ?? card, profile.id),
+        workspace,
+      );
+      catalog.upsertCase(owned);
+      ambiguousCount += 1;
+      if (existing === undefined) {
+        catalog.record(inboxItemFromFoundCard(owned, clock()));
+      }
+    }
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
       relevantCount: selected.cards.length - skippedRejected,
       discardedCount: selected.discardedCount + skippedRejected,
+      ambiguousCount,
     });
     await persist();
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
       relevantCount: selected.cards.length - skippedRejected,
       discardedCount: selected.discardedCount + skippedRejected,
+      ambiguousCount,
+      hasMore: hits.length >= limit,
       items: listed(),
     });
   }
@@ -225,6 +253,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         catalog.record(inboxItemFromFoundCard(card, clock()));
         known.add(card.sourceProcurementId);
         addedCount += 1;
+      }
+      for (const card of selected.ambiguousCards) {
+        if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
+        const existing = catalog
+          .procurements()
+          .find((item) => item.sourceProcurementId === card.sourceProcurementId);
+        const owned = withTriage(
+          attachProfileToCard(existing ?? card, profile.id),
+          workspace,
+        );
+        catalog.upsertCase(owned);
+        if (existing === undefined) {
+          catalog.record(inboxItemFromFoundCard(owned, clock()));
+        }
       }
       logger.info("Specialist discovery recorded", {
         profileName: profileDisplayName(profile),
@@ -474,7 +516,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "no_keywords" });
     }
     try {
-      return await runManualSearch(parsed.data.limit);
+      return await runManualSearch(parsed.data.limit, parsed.data.offset);
     } catch (error) {
       logger.error("Specialist profile search failed", error);
       await noteSearchFailure(journal, error);
@@ -601,6 +643,7 @@ async function loadDefaultSearchHits(
   _limit: number,
   _keywords: readonly string[],
   _excludeKeywords?: readonly string[],
+  _offset?: number,
 ): Promise<readonly SearchHit[]> {
   return loadFixtureSearchHits();
 }

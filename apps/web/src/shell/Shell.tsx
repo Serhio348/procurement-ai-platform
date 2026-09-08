@@ -27,7 +27,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav aria-label="Разделы">
           <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}>
             Входящие
-            {inboxAlert > 0 ? <span className="nav-alarm-mark">тревога</span> : null}
+            {inboxAlert > 0 ? <span className="nav-badge">{inboxAlert}</span> : null}
           </NavLink>
           <NavLink
             to="/procurements"

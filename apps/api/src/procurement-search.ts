@@ -32,6 +32,7 @@ export function createProcurementSearchHits(
     limit: number,
     keywords: readonly string[],
     excludeKeywords?: readonly string[],
+    offset?: number,
   ) => Promise<readonly SearchHit[]>;
 } {
   const sourceId = SourceId.parse(options.sourceId);
@@ -49,6 +50,7 @@ export function createProcurementSearchHits(
       limit: number,
       keywords: readonly string[],
       excludeKeywords?: readonly string[],
+      offset = 0,
     ): Promise<readonly SearchHit[]> {
       if (keywords.length === 0) {
         throw new McpToolCallError(
@@ -63,7 +65,7 @@ export function createProcurementSearchHits(
           keywords: [...keywords],
           excludeKeywords: [...(excludeKeywords ?? [])],
           limit,
-          offset: 0,
+          offset,
         }),
         RequestId.parse(randomUUID()),
       );

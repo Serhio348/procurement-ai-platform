@@ -54,7 +54,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
       ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]
     >();
     const pagesPerTerm = Math.min(
-      10,
+      30,
       Math.max(1, Math.ceil((query.offset + query.limit) / 20) + 1),
     );
 

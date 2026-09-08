@@ -34,7 +34,8 @@ describe("selectRelevantSearchCards", () => {
     const selected = selectRelevantSearchCards(hits, profile, 20);
 
     expect(selected.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-001"]);
-    expect(selected.discardedCount).toBe(3);
+    expect(selected.ambiguousCards).toHaveLength(3);
+    expect(selected.discardedCount).toBe(0);
     expect(selected.cards[0]?.title).toBe("Комплектная трансформаторная подстанция");
     expect(selected.cards[0]?.status).toBe("unknown");
     expect(selected.cards[0]?.statusLabel).toBe("Прием предложений");
@@ -129,6 +130,32 @@ describe("selectRelevantSearchCards", () => {
     expect(everything.cards).toHaveLength(3);
   });
 
+  it("keeps unmatched but unexcluded hits as ambiguous cards for review", () => {
+    const hits = [
+      hit("auction-001", "Комплектная трансформаторная подстанция"),
+      hit("auction-002", "Отправка почтовой корреспонденции", {
+        buyerName: "Национальный банк",
+      }),
+      hit("auction-003", "Бытовой ремонт квартиры"),
+    ];
+
+    const selected = selectRelevantSearchCards(
+      hits,
+      { keywords: ["КТПБ", "подстанция"], excludeKeywords: ["бытов"] },
+      20,
+    );
+
+    expect(selected.cards.map((card) => card.sourceProcurementId)).toEqual([
+      "auction-001",
+    ]);
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual([
+      "auction-002",
+    ]);
+    expect(selected.ambiguousCards[0]?.actions[0]?.detail).toContain(
+      "проверьте по смыслу",
+    );
+  });
+
   it("caps the listed keyword matches at the requested limit", () => {
     const hits = [
       hit("a", "подстанция 1"),
@@ -138,6 +165,8 @@ describe("selectRelevantSearchCards", () => {
     const selected = selectRelevantSearchCards(hits, profile, 1);
     expect(selected.cards).toHaveLength(1);
     expect(selected.cards[0]?.sourceProcurementId).toBe("a");
-    expect(selected.discardedCount).toBe(2);
+    // "b" matches but is over the limit, "c" matches nothing and waits for review.
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["c"]);
+    expect(selected.discardedCount).toBe(1);
   });
 });

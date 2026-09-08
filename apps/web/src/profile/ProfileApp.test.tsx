@@ -152,4 +152,25 @@ describe("ProfileApp", () => {
     );
     expect(screen.queryByRole("button", { name: "Убрать НКУ" })).toBeNull();
   });
+
+  it("sends typed exclusions to the profile instead of dropping them", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () =>
+      profile({ excludeKeywords: ["реставрация", "ремонт зданий"] }),
+    );
+
+    renderProfile(profile({ excludeKeywords: [] }), save);
+
+    await user.type(
+      screen.getByLabelText("Исключать"),
+      "реставрация, ремонт зданий\nреставрация",
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excludeKeywords: ["реставрация", "ремонт зданий"],
+      }),
+    );
+  });
 });

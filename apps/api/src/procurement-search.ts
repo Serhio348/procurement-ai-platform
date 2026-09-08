@@ -62,7 +62,6 @@ export function createProcurementSearchHits(
           sourceId,
           keywords: [...keywords],
           excludeKeywords: [...(excludeKeywords ?? [])],
-          searchText: keywords.join(" "),
           limit,
           offset: 0,
         }),

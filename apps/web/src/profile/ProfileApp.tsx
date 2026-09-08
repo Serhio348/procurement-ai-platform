@@ -33,6 +33,7 @@ export function ProfileApp({
   const [extras, setExtras] = useState(initialEdits.extras);
   const [removed, setRemoved] = useState(initialEdits.removed);
   const [addWord, setAddWord] = useState("");
+  const [excluded, setExcluded] = useState(initial.excludeKeywords.join("\n"));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
   const navigate = useNavigate();
@@ -68,7 +69,7 @@ export function ProfileApp({
         description: descriptionText,
         instructions: instructions.trim(),
         keywords: platformQueries,
-        excludeKeywords: [],
+        excludeKeywords: splitExcludeLines(excluded),
       });
       setProfile(next);
       const title = profileDisplayName(next);
@@ -188,6 +189,19 @@ export function ProfileApp({
                 Добавить
               </button>
             </div>
+            <label htmlFor="profile-exclude">Исключать</label>
+            <p className="profile-hint">
+              Запятая или новая строка — отдельное слово. Закупка с таким словом в
+              названии, заказчике или статусе в выдачу не попадёт.
+            </p>
+            <textarea
+              id="profile-exclude"
+              rows={3}
+              value={excluded}
+              onChange={(event) => {
+                setExcluded(event.target.value);
+              }}
+            />
             <label htmlFor="profile-instructions">Указания</label>
             <p className="profile-hint">
               Пометки, какие закупки вам нужны, а какие пропускать.
@@ -233,4 +247,17 @@ export function ProfileApp({
       </main>
     </Shell>
   );
+}
+
+function splitExcludeLines(text: string): string[] {
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const raw of text.split(/[\n,;]/u)) {
+    const item = raw.trim();
+    const key = item.toLowerCase();
+    if (item.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    items.push(item);
+  }
+  return items;
 }

@@ -166,12 +166,6 @@ export const SearchQuery = z.object({
   sourceId: SourceId,
   keywords: z.array(z.string().min(1)).default([]),
   excludeKeywords: z.array(z.string().min(1)).default([]),
-  /**
-   * The exact phrase sent to the platform's text filter. When present the
-   * adapter queries once by phrase and still filters hits by individual
-   * keywords in `keywords`.
-   */
-  searchText: z.string().min(1).optional(),
   publishedFrom: IsoDateTime.optional(),
   publishedTo: IsoDateTime.optional(),
   kinds: z.array(ProcedureKind).default([]),

@@ -64,6 +64,7 @@ export function ProfileApp({
   const [filters, setFilters] = useState(initial.filters);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
+  const [tab, setTab] = useState<"profile" | "search">("profile");
   const navigate = useNavigate();
   const untitled = initial.name.trim().length === 0;
   const activateRef = useRef(activate);
@@ -183,291 +184,320 @@ export function ProfileApp({
             />
           </section>
 
-          <section className="profile-section" aria-labelledby="profile-words">
-            <h2 id="profile-words">Ключевые слова и фразы для поиска</h2>
-            <p className="profile-hint">Каждое слово или фраза — отдельный запрос на goszakupki.by.</p>
-            <div className="profile-add-row">
-              <input
-                aria-label="Добавить слово"
-                value={addWord}
-                onChange={(event) => {
-                  setAddWord(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  event.preventDefault();
-                  addQueries();
-                }}
-                placeholder="Впишите слово и нажмите Enter; можно несколько через запятую"
-              />
-              <button type="button" className="profile-fill" onClick={addQueries}>
-                Добавить
-              </button>
-            </div>
-            {keywords.length === 0 ? (
-              <p className="profile-empty-queries">Пока пусто — добавьте слова для поиска.</p>
-            ) : (
-              <ul className="profile-chips">
-                {keywords.map((phrase) => (
-                  <li key={phrase.toLowerCase()}>
-                    <span className="profile-chip">
-                      {phrase}
-                      <button
-                        type="button"
-                        className="profile-chip-remove"
-                        aria-label={`Убрать ${phrase}`}
-                        onClick={() => {
-                          removeKeyword(phrase);
-                        }}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="profile-section">
-            <h2>Исключать</h2>
-            <p className="profile-hint">
-              Запятая или новая строка — отдельное слово. Закупка с таким словом в названии,
-              заказчике или статусе в выдачу не попадёт.
-            </p>
-            <label htmlFor="profile-exclude">Исключать</label>
-            <textarea
-              id="profile-exclude"
-              rows={2}
-              value={excluded}
-              onChange={(event) => {
-                setExcluded(event.target.value);
+          <div className="profile-tabs" role="tablist" aria-label="Разделы профиля">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "profile"}
+              className={tab === "profile" ? "profile-tab profile-tab-active" : "profile-tab"}
+              onClick={() => {
+                setTab("profile");
               }}
-            />
-          </section>
+            >
+              Профиль
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "search"}
+              className={tab === "search" ? "profile-tab profile-tab-active" : "profile-tab"}
+              onClick={() => {
+                setTab("search");
+              }}
+            >
+              Расширенный поиск
+            </button>
+          </div>
 
-          <section className="profile-section" aria-labelledby="profile-statuses">
-            <h2 id="profile-statuses">Статусы закупок</h2>
-            <p className="profile-hint">Отбираются только отмеченные статусы. Ничего не отмечено — показываем все.</p>
-            <fieldset className="profile-statuses">
-              <legend className="sr-only">Статусы</legend>
-              {STATUS_OPTIONS.map((option) => (
-                <label key={option.value} className="profile-status-option">
+          {tab === "profile" ? (
+            <div className="profile-tab-body">
+              <section className="profile-section" aria-labelledby="profile-words">
+                <h2 id="profile-words">Ключевые слова и фразы для поиска</h2>
+                <p className="profile-hint">Каждое слово или фраза — отдельный запрос на goszakupki.by.</p>
+                <div className="profile-add-row">
                   <input
-                    type="checkbox"
-                    checked={statuses.includes(option.value)}
+                    aria-label="Добавить слово"
+                    value={addWord}
                     onChange={(event) => {
-                      setStatuses(
-                        event.target.checked
-                          ? [...statuses, option.value]
-                          : statuses.filter((item) => item !== option.value),
-                      );
+                      setAddWord(event.target.value);
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      addQueries();
+                    }}
+                    placeholder="Впишите слово и нажмите Enter; можно несколько через запятую"
                   />
-                  {option.label}
-                </label>
-              ))}
-            </fieldset>
-          </section>
-
-          <section className="profile-section profile-filters-section" aria-labelledby="profile-filters">
-            <h2 id="profile-filters">Уточнить поиск на площадке</h2>
-            <p className="profile-hint">Эти поля отправляются прямо на goszakupki.by — чем точнее, тем меньше лишних страниц.</p>
-            <div className="profile-filters-form">
-              <div className="profile-filter-group">
-                <label htmlFor="profile-unp">УНП заказчика</label>
-                <input
-                  id="profile-unp"
-                  value={filters.buyerUnp}
-                  onChange={(event) => setFilter("buyerUnp", event.target.value)}
-                />
-              </div>
-
-              <div className="profile-filter-group">
-                <label htmlFor="profile-customer">Заказчик / организатор</label>
-                <input
-                  id="profile-customer"
-                  value={filters.buyerText}
-                  onChange={(event) => setFilter("buyerText", event.target.value)}
-                />
-              </div>
-
-              <div className="profile-filter-group">
-                <label htmlFor="profile-number">Номер закупки</label>
-                <input
-                  id="profile-number"
-                  value={filters.procurementNumber}
-                  onChange={(event) => setFilter("procurementNumber", event.target.value)}
-                />
-              </div>
-
-              <div className="profile-filter-group profile-filter-range">
-                <span className="profile-filter-label">Цена (BYN)</span>
-                <div className="profile-filter-range-row">
-                  <div>
-                    <label htmlFor="profile-price-from" className="profile-sublabel">с</label>
-                    <input
-                      id="profile-price-from"
-                      type="number"
-                      value={filters.priceFrom ?? ""}
-                      onChange={(event) => setPrice("priceFrom", event.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="profile-price-to" className="profile-sublabel">по</label>
-                    <input
-                      id="profile-price-to"
-                      type="number"
-                      value={filters.priceTo ?? ""}
-                      onChange={(event) => setPrice("priceTo", event.target.value)}
-                    />
-                  </div>
+                  <button type="button" className="profile-fill" onClick={addQueries}>
+                    Добавить
+                  </button>
                 </div>
-              </div>
+                {keywords.length === 0 ? (
+                  <p className="profile-empty-queries">Пока пусто — добавьте слова для поиска.</p>
+                ) : (
+                  <ul className="profile-chips">
+                    {keywords.map((phrase) => (
+                      <li key={phrase.toLowerCase()}>
+                        <span className="profile-chip">
+                          {phrase}
+                          <button
+                            type="button"
+                            className="profile-chip-remove"
+                            aria-label={`Убрать ${phrase}`}
+                            onClick={() => {
+                              removeKeyword(phrase);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
 
-              <div className="profile-filter-group profile-filter-range">
-                <span className="profile-filter-label">Дата размещения приглашения</span>
-                <div className="profile-filter-range-row">
-                  <div>
-                    <label htmlFor="profile-published-from" className="profile-sublabel">с</label>
-                    <input
-                      id="profile-published-from"
-                      type="date"
-                      value={filters.publishedFrom ?? ""}
-                      onChange={(event) => setDate("publishedFrom", event.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="profile-published-to" className="profile-sublabel">по</label>
-                    <input
-                      id="profile-published-to"
-                      type="date"
-                      value={filters.publishedTo ?? ""}
-                      onChange={(event) => setDate("publishedTo", event.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="profile-filter-group profile-filter-range">
-                <span className="profile-filter-label">Дата окончания приёма</span>
-                <div className="profile-filter-range-row">
-                  <div>
-                    <label htmlFor="profile-request-from" className="profile-sublabel">с</label>
-                    <input
-                      id="profile-request-from"
-                      type="date"
-                      value={filters.requestEndFrom ?? ""}
-                      onChange={(event) => setDate("requestEndFrom", event.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="profile-request-to" className="profile-sublabel">по</label>
-                    <input
-                      id="profile-request-to"
-                      type="date"
-                      value={filters.requestEndTo ?? ""}
-                      onChange={(event) => setDate("requestEndTo", event.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="profile-filter-group profile-filter-range">
-                <span className="profile-filter-label">Дата торгов</span>
-                <div className="profile-filter-range-row">
-                  <div>
-                    <label htmlFor="profile-auction-from" className="profile-sublabel">с</label>
-                    <input
-                      id="profile-auction-from"
-                      type="date"
-                      value={filters.auctionFrom ?? ""}
-                      onChange={(event) => setDate("auctionFrom", event.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="profile-auction-to" className="profile-sublabel">по</label>
-                    <input
-                      id="profile-auction-to"
-                      type="date"
-                      value={filters.auctionTo ?? ""}
-                      onChange={(event) => setDate("auctionTo", event.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="profile-filter-group">
-                <label htmlFor="profile-types">Вид процедуры</label>
-                <select
-                  id="profile-types"
-                  multiple
-                  size={3}
-                  value={filters.typeIds ?? []}
-                  onChange={(event) =>
-                    setFilter(
-                      "typeIds",
-                      [...event.target.selectedOptions].map((option) => option.value),
-                    )
-                  }
-                >
-                  {TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
+              <section className="profile-section" aria-labelledby="profile-statuses">
+                <h2 id="profile-statuses">Статусы закупок</h2>
+                <p className="profile-hint">Отбираются только отмеченные статусы. Ничего не отмечено — показываем все.</p>
+                <fieldset className="profile-statuses">
+                  <legend className="sr-only">Статусы</legend>
+                  {STATUS_OPTIONS.map((option) => (
+                    <label key={option.value} className="profile-status-option">
+                      <input
+                        type="checkbox"
+                        checked={statuses.includes(option.value)}
+                        onChange={(event) => {
+                          setStatuses(
+                            event.target.checked
+                              ? [...statuses, option.value]
+                              : statuses.filter((item) => item !== option.value),
+                          );
+                        }}
+                      />
                       {option.label}
-                    </option>
+                    </label>
                   ))}
-                </select>
-              </div>
+                </fieldset>
+              </section>
 
-              <div className="profile-filter-group">
-                <label htmlFor="profile-regions">Область заказчика</label>
-                <select
-                  id="profile-regions"
-                  multiple
-                  size={3}
-                  value={filters.regionIds ?? []}
-                  onChange={(event) =>
-                    setFilter(
-                      "regionIds",
-                      [...event.target.selectedOptions].map((option) => option.value),
-                    )
-                  }
-                >
-                  {REGION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <section className="profile-section">
+                <h2>Исключать</h2>
+                <p className="profile-hint">
+                  Запятая или новая строка — отдельное слово. Закупка с таким словом в названии,
+                  заказчике или статусе в выдачу не попадёт.
+                </p>
+                <label htmlFor="profile-exclude">Исключать</label>
+                <textarea
+                  id="profile-exclude"
+                  rows={2}
+                  value={excluded}
+                  onChange={(event) => {
+                    setExcluded(event.target.value);
+                  }}
+                />
+              </section>
+
+              <section className="profile-section" aria-labelledby="profile-watch">
+                <h2 id="profile-watch">Новые закупки</h2>
+                <p className="profile-hint">
+                  Если кнопка не нажата, площадка сама не проверяется. Найденное появится во вкладке
+                  «Закупки», не во входящих.
+                </p>
+                <div className="profile-actions">
+                  <button
+                    type="button"
+                    className={profile.watchNewProcurements ? "search-profile is-watching" : "search-profile"}
+                    disabled={busy}
+                    onClick={() => {
+                      void toggleWatch();
+                    }}
+                  >
+                    {profile.watchNewProcurements ? "Слежение включено" : "Следить за новыми закупками"}
+                  </button>
+                </div>
+              </section>
             </div>
-          </section>
+          ) : (
+            <section className="profile-section profile-filters-section" aria-labelledby="profile-filters">
+              <h2 id="profile-filters">Уточнить поиск на площадке</h2>
+              <p className="profile-hint">Эти поля отправляются прямо на goszakupki.by — чем точнее, тем меньше лишних страниц.</p>
+              <div className="profile-filters-form">
+                <div className="profile-filter-group">
+                  <label htmlFor="profile-unp">УНП заказчика</label>
+                  <input
+                    id="profile-unp"
+                    value={filters.buyerUnp}
+                    onChange={(event) => setFilter("buyerUnp", event.target.value)}
+                  />
+                </div>
+
+                <div className="profile-filter-group">
+                  <label htmlFor="profile-customer">Заказчик / организатор</label>
+                  <input
+                    id="profile-customer"
+                    value={filters.buyerText}
+                    onChange={(event) => setFilter("buyerText", event.target.value)}
+                  />
+                </div>
+
+                <div className="profile-filter-group">
+                  <label htmlFor="profile-number">Номер закупки</label>
+                  <input
+                    id="profile-number"
+                    value={filters.procurementNumber}
+                    onChange={(event) => setFilter("procurementNumber", event.target.value)}
+                  />
+                </div>
+
+                <div className="profile-filter-group profile-filter-range">
+                  <span className="profile-filter-label">Цена (BYN)</span>
+                  <div className="profile-filter-range-row">
+                    <div>
+                      <label htmlFor="profile-price-from" className="profile-sublabel">с</label>
+                      <input
+                        id="profile-price-from"
+                        type="number"
+                        value={filters.priceFrom ?? ""}
+                        onChange={(event) => setPrice("priceFrom", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="profile-price-to" className="profile-sublabel">по</label>
+                      <input
+                        id="profile-price-to"
+                        type="number"
+                        value={filters.priceTo ?? ""}
+                        onChange={(event) => setPrice("priceTo", event.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="profile-filter-group profile-filter-range">
+                  <span className="profile-filter-label">Дата размещения приглашения</span>
+                  <div className="profile-filter-range-row">
+                    <div>
+                      <label htmlFor="profile-published-from" className="profile-sublabel">с</label>
+                      <input
+                        id="profile-published-from"
+                        type="date"
+                        value={filters.publishedFrom ?? ""}
+                        onChange={(event) => setDate("publishedFrom", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="profile-published-to" className="profile-sublabel">по</label>
+                      <input
+                        id="profile-published-to"
+                        type="date"
+                        value={filters.publishedTo ?? ""}
+                        onChange={(event) => setDate("publishedTo", event.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="profile-filter-group profile-filter-range">
+                  <span className="profile-filter-label">Дата окончания приёма</span>
+                  <div className="profile-filter-range-row">
+                    <div>
+                      <label htmlFor="profile-request-from" className="profile-sublabel">с</label>
+                      <input
+                        id="profile-request-from"
+                        type="date"
+                        value={filters.requestEndFrom ?? ""}
+                        onChange={(event) => setDate("requestEndFrom", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="profile-request-to" className="profile-sublabel">по</label>
+                      <input
+                        id="profile-request-to"
+                        type="date"
+                        value={filters.requestEndTo ?? ""}
+                        onChange={(event) => setDate("requestEndTo", event.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="profile-filter-group profile-filter-range">
+                  <span className="profile-filter-label">Дата торгов</span>
+                  <div className="profile-filter-range-row">
+                    <div>
+                      <label htmlFor="profile-auction-from" className="profile-sublabel">с</label>
+                      <input
+                        id="profile-auction-from"
+                        type="date"
+                        value={filters.auctionFrom ?? ""}
+                        onChange={(event) => setDate("auctionFrom", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="profile-auction-to" className="profile-sublabel">по</label>
+                      <input
+                        id="profile-auction-to"
+                        type="date"
+                        value={filters.auctionTo ?? ""}
+                        onChange={(event) => setDate("auctionTo", event.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="profile-filter-group">
+                  <label htmlFor="profile-types">Вид процедуры</label>
+                  <select
+                    id="profile-types"
+                    multiple
+                    size={3}
+                    value={filters.typeIds ?? []}
+                    onChange={(event) =>
+                      setFilter(
+                        "typeIds",
+                        [...event.target.selectedOptions].map((option) => option.value),
+                      )
+                    }
+                  >
+                    {TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="profile-filter-group">
+                  <label htmlFor="profile-regions">Область заказчика</label>
+                  <select
+                    id="profile-regions"
+                    multiple
+                    size={3}
+                    value={filters.regionIds ?? []}
+                    onChange={(event) =>
+                      setFilter(
+                        "regionIds",
+                        [...event.target.selectedOptions].map((option) => option.value),
+                      )
+                    }
+                  >
+                    {REGION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </section>
+          )}
 
           <div className="profile-actions">
             <button type="submit" className="search-profile" disabled={busy}>
               {busy ? "Сохраняем…" : "Сохранить профиль"}
             </button>
           </div>
-
-          <section className="profile-section profile-watch-section" aria-labelledby="profile-watch">
-            <h2 id="profile-watch">Новые закупки</h2>
-            <p className="profile-hint">
-              Если кнопка не нажата, площадка сама не проверяется. Найденное появится во вкладке
-              «Закупки», не во входящих.
-            </p>
-            <div className="profile-actions">
-              <button
-                type="button"
-                className={profile.watchNewProcurements ? "search-profile is-watching" : "search-profile"}
-                disabled={busy}
-                onClick={() => {
-                  void toggleWatch();
-                }}
-              >
-                {profile.watchNewProcurements ? "Слежение включено" : "Следить за новыми закупками"}
-              </button>
-            </div>
-          </section>
         </form>
       </main>
     </Shell>

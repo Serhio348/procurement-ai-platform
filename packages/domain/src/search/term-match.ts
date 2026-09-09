@@ -22,7 +22,17 @@ export function termMatches(text: string, term: string): boolean {
     const token = raw.toLocaleLowerCase("ru-BY");
     if (token === needle) return true;
     if (needle.length >= 4 && token.startsWith(needle)) return true;
-    if (token.includes(needle) && isCodeLikeToken(raw)) return true;
+    if (token.includes(needle) && isCodeLikeToken(raw)) {
+      let index = token.indexOf(needle);
+      while (index !== -1) {
+        const before = index > 0 ? raw[index - 1] : undefined;
+        const after = index + needle.length < raw.length ? raw[index + needle.length] : undefined;
+        const beforeLower = before !== undefined && /^\p{Ll}$/u.test(before);
+        const afterLower = after !== undefined && /^\p{Ll}$/u.test(after);
+        if (!(beforeLower && afterLower)) return true;
+        index = token.indexOf(needle, index + 1);
+      }
+    }
   }
   return false;
 }

@@ -7,6 +7,9 @@ describe("termMatches", () => {
       false,
     );
     expect(termMatches("услуги круглосуточной охраны", "КРУ")).toBe(false);
+    expect(
+      termMatches("СО2-инкубатор (термостат электронный)", "НКУ"),
+    ).toBe(false);
   });
 
   it("accepts a whole word and its inflected forms", () => {

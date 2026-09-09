@@ -17,6 +17,8 @@ import { recordJournal } from "./admin/journal.js";
 import { openSpecialistPersistence } from "./persist.js";
 import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
+import { createSearchClassifierFromEnv } from "./search-classifier.js";
+import { createProcurementSearchReview } from "./search-review.js";
 
 async function main(): Promise<void> {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -49,6 +51,18 @@ async function main(): Promise<void> {
           sourceId: SourceId.parse("goszakupki_by"),
           logger,
         });
+  const classifier = createSearchClassifierFromEnv(process.env);
+  const searchReview =
+    mcp === undefined
+      ? undefined
+      : createProcurementSearchReview({
+          caller: mcp.caller,
+          ...(classifier === undefined ? {} : { classifier }),
+          logger,
+        });
+  if (mcp !== undefined) {
+    logger.info("Search review configured", { model: classifier !== undefined });
+  }
   const bootstrapEmail = process.env["AUTH_BOOTSTRAP_EMAIL"]?.trim() ?? "";
   const bootstrapPassword = process.env["AUTH_BOOTSTRAP_PASSWORD"] ?? "";
   if (bootstrapEmail.length > 0 && bootstrapPassword.length >= 8) {
@@ -79,6 +93,7 @@ async function main(): Promise<void> {
       ? {}
       : { internalApiToken: process.env["INTERNAL_API_TOKEN"] }),
     ...(searchHits === undefined ? {} : { searchHits }),
+    ...(searchReview === undefined ? {} : { searchReview }),
     ...(mcp === undefined
       ? {}
       : {

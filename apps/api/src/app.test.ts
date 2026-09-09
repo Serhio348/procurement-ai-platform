@@ -7,7 +7,7 @@ import {
   SpecialistProcurementCard,
   electricalEquipmentSeedV1,
 } from "@procurement/contracts";
-import { SpecialistCatalog } from "@procurement/domain";
+import { SpecialistCatalog, type ReviewOutcome } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
@@ -299,6 +299,163 @@ describe("specialist API", () => {
     expect(titles(inboxAfterPrune.body)).toEqual([]);
     expect(removeCases).toHaveBeenCalledTimes(1);
     expect(removeCases.mock.calls[0]?.[0]).toHaveLength(3);
+
+    await app.close();
+  });
+
+  it("lets the review port promote a checked hit, drop an unrelated one and ask about the rest", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/lot-1",
+        url: "https://goszakupki.by/auction/view/lot-1",
+        title: "Поставка электрооборудования для подстанции №3",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/incubator-1",
+        url: "https://goszakupki.by/auction/view/incubator-1",
+        title: "СО2-инкубатор (термостат электронный)",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/unclear-1",
+        url: "https://goszakupki.by/auction/view/unclear-1",
+        title: "Электромонтажные работы",
+      }),
+    ];
+    const verdicts: Record<string, ReviewOutcome> = {
+      "auction/lot-1": {
+        verdict: "relevant",
+        decidedBy: "card",
+        reason: "В лотах есть НКУ-0,4.",
+        matchedTerms: ["НКУ"],
+        confidence: 1,
+      },
+      "auction/incubator-1": {
+        verdict: "irrelevant",
+        decidedBy: "model",
+        reason: "Лабораторный инкубатор, не электрооборудование.",
+        matchedTerms: [],
+        confidence: 0.95,
+      },
+      "auction/unclear-1": {
+        verdict: "needs_human",
+        decidedBy: "model",
+        reason: "Модель склоняется к «подходит», но не уверена.",
+        matchedTerms: [],
+        confidence: 0.5,
+      },
+    };
+    const review = vi.fn(async (reviewed: readonly SearchHit[]) =>
+      reviewed.map((item) => verdicts[item.sourceProcurementId] as ReviewOutcome),
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      searchReview: { review },
+      clock: () => "2026-09-01T10:00:00.000Z",
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ", keywords: ["НКУ"] },
+    });
+
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const body = JSON.parse(searched.body) as {
+      relevantCount: number;
+      ambiguousCount: number;
+      discardedCount: number;
+      items: Array<{ title: string; foundAs?: string; actions: Array<{ detail: string }> }>;
+    };
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
+      (item) => item.title,
+    );
+
+    // The keyword never appeared in a title, so all three went to review.
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(review.mock.calls[0]?.[0]).toHaveLength(3);
+    // Only the checked one is a confident case; the incubator is gone for good.
+    expect(body.items.map((item) => item.title)).toEqual([
+      "Поставка электрооборудования для подстанции №3",
+    ]);
+    expect(body.items[0]?.foundAs).toBe("match");
+    expect(body.items[0]?.actions.at(-1)?.detail).toContain("НКУ-0,4");
+    expect(body.relevantCount).toBe(1);
+    expect(body.discardedCount).toBe(1);
+    expect(body.ambiguousCount).toBe(1);
+    // The unresolved one waits for a specialist, the discarded one does not.
+    expect(inboxTitles).toEqual(["Электромонтажные работы"]);
+
+    await app.close();
+  });
+
+  it("reviews background discovery hits too, and counts only the accepted ones as added", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/night-1",
+        url: "https://goszakupki.by/auction/view/night-1",
+        title: "Поставка электрооборудования",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/night-2",
+        url: "https://goszakupki.by/auction/view/night-2",
+        title: "СО2-инкубатор",
+      }),
+    ];
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      searchReview: {
+        review: async (reviewed) =>
+          reviewed.map((item) =>
+            item.sourceProcurementId === "auction/night-1"
+              ? {
+                  verdict: "relevant" as const,
+                  decidedBy: "card" as const,
+                  reason: "В лотах есть НКУ-0,4.",
+                  matchedTerms: ["НКУ"],
+                  confidence: 1,
+                }
+              : {
+                  verdict: "irrelevant" as const,
+                  decidedBy: "model" as const,
+                  reason: "Лабораторный инкубатор.",
+                  matchedTerms: [],
+                  confidence: 0.95,
+                },
+          ),
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ", keywords: ["НКУ"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const body = JSON.parse(ran.body) as {
+      ran: boolean;
+      addedCount: number;
+      items: Array<{ title: string }>;
+    };
+
+    expect(body.ran).toBe(true);
+    expect(body.addedCount).toBe(1);
+    expect(body.items.map((item) => item.title)).toEqual(["Поставка электрооборудования"]);
 
     await app.close();
   });

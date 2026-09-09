@@ -17,6 +17,8 @@ export interface ProfileSearchSelection {
   cards: SpecialistProcurementCardValue[];
   /** Borderline hits kept for human review instead of being dropped. */
   ambiguousCards: SpecialistProcurementCardValue[];
+  /** The listing rows behind ambiguousCards, same order, for a second look. */
+  ambiguousHits: SearchHitValue[];
   discardedCount: number;
 }
 
@@ -44,6 +46,7 @@ export function selectRelevantSearchCards(
   const seen = new Set<string>();
   const cards: SpecialistProcurementCardValue[] = [];
   const ambiguousCards: SpecialistProcurementCardValue[] = [];
+  const ambiguousHits: SearchHitValue[] = [];
   for (const hit of hits) {
     const key = `${hit.sourceId}:${hit.sourceProcurementId}`;
     if (seen.has(key)) continue;
@@ -68,9 +71,10 @@ export function selectRelevantSearchCards(
         ? cardFromWeakHit(hit, classified.matchedTerms)
         : cardFromAmbiguousHit(hit),
     );
+    ambiguousHits.push(hit);
   }
   const discardedCount = hits.length - cards.length - ambiguousCards.length;
-  return { cards, ambiguousCards, discardedCount };
+  return { cards, ambiguousCards, ambiguousHits, discardedCount };
 }
 
 export function hitMatchesProfileKeywords(

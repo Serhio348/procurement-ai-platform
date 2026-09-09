@@ -32,6 +32,7 @@ import {
   shouldRunDiscovery,
   SpecialistCatalog,
   SpecialistWorkspace,
+  type ReviewOutcome,
 } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { silentLogger, type Logger } from "@procurement/observability";
@@ -56,6 +57,7 @@ import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
+import type { SpecialistReviewPort } from "./search-review.js";
 
 export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -73,6 +75,8 @@ export interface BuildApiOptions {
   logger?: Logger;
   blobDirectory?: string;
   searchHits?: SpecialistSearchHitsPort;
+  /** Second look at weak / keyword-less hits. Absent: they all wait in the inbox. */
+  searchReview?: SpecialistReviewPort;
   documentIngest?: SpecialistDocumentIngestPort;
   liveProcurementsOnly?: boolean;
   persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
@@ -98,6 +102,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
+  const searchReview = options.searchReview;
   const documentIngest = options.documentIngest;
   const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
@@ -210,6 +215,77 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return { card: owned, isNew: existing === undefined };
   }
 
+  /**
+   * Weak and keyword-less hits get a second look when a review port is
+   * configured: the card first, then the model. A confident "relevant" joins
+   * the list as a match; a confident "irrelevant" is discarded; everything
+   * else waits in the inbox with the reason attached to the card.
+   */
+  async function reviewAmbiguous(
+    selected: ReturnType<typeof selectRelevantSearchCards>,
+    profile: ReturnType<typeof workspace.profile>,
+    now: string,
+    options: { inboxForMatches: boolean },
+  ): Promise<{ matched: SpecialistProcurementCardValue[]; discarded: number; ambiguousCount: number }> {
+    const rejected = workspace.rejectedSourceIds();
+    const pending = selected.ambiguousCards
+      .map((card, index) => ({ card, hit: selected.ambiguousHits[index] }))
+      .filter(
+        (item): item is { card: SpecialistProcurementCardValue; hit: SearchHit } =>
+          item.hit !== undefined && !rejected.has(item.card.sourceProcurementId),
+      );
+    const outcomes =
+      searchReview === undefined || pending.length === 0
+        ? undefined
+        : await searchReview.review(
+            pending.map((item) => item.hit),
+            {
+              name: profileDisplayName(profile),
+              ...(profile.purpose === undefined ? {} : { purpose: profile.purpose }),
+              ...(profile.description === undefined ? {} : { description: profile.description }),
+              keywords: profile.keywords,
+              excludeKeywords: profile.excludeKeywords,
+            },
+          );
+    const matched: SpecialistProcurementCardValue[] = [];
+    let discarded = 0;
+    let ambiguousCount = 0;
+    pending.forEach(({ card }, index) => {
+      const outcome = outcomes?.[index];
+      if (outcome?.verdict === "irrelevant") {
+        discarded += 1;
+        return;
+      }
+      const reviewedCard: SpecialistProcurementCardValue =
+        outcome === undefined
+          ? card
+          : {
+              ...card,
+              ...(outcome.verdict === "relevant" ? { foundAs: "match" as const } : {}),
+              actions: [
+                ...card.actions,
+                {
+                  step: card.actions.length + 1,
+                  actor: "DomainSearchAgent",
+                  status: "done",
+                  detail: `${reviewActor(outcome.decidedBy)}: ${outcome.reason}`,
+                },
+              ],
+            };
+      const remembered = rememberFound(reviewedCard, profile.id, now);
+      if (outcome?.verdict === "relevant") {
+        matched.push(remembered.card);
+        if (options.inboxForMatches && remembered.isNew) {
+          catalog.record(inboxItemFromFoundCard(remembered.card, now));
+        }
+        return;
+      }
+      ambiguousCount += 1;
+      if (remembered.isNew) catalog.record(inboxItemFromFoundCard(remembered.card, now));
+    });
+    return { matched, discarded, ambiguousCount };
+  }
+
   async function runManualSearch(
     limit: number,
     offset: number,
@@ -235,30 +311,23 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       resultItems.push(rememberFound(card, profile.id, now).card);
     }
-    // Weak and keyword-less hits wait in the inbox for a human look; they are
-    // not listed among the confident matches returned to the console.
-    let ambiguousCount = 0;
-    for (const card of selected.ambiguousCards) {
-      if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
-      const remembered = rememberFound(card, profile.id, now);
-      ambiguousCount += 1;
-      if (remembered.isNew) {
-        catalog.record(inboxItemFromFoundCard(remembered.card, now));
-      }
-    }
+    const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: false });
+    resultItems.push(...reviewed.matched);
+    const relevantCount = resultItems.length;
+    const discardedCount = selected.discardedCount + skippedRejected + reviewed.discarded;
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
-      relevantCount: selected.cards.length - skippedRejected,
-      discardedCount: selected.discardedCount + skippedRejected,
-      ambiguousCount,
+      relevantCount,
+      discardedCount,
+      ambiguousCount: reviewed.ambiguousCount,
     });
     await pruneStaleCases();
     await persist();
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
-      relevantCount: selected.cards.length - skippedRejected,
-      discardedCount: selected.discardedCount + skippedRejected,
-      ambiguousCount,
+      relevantCount,
+      discardedCount,
+      ambiguousCount: reviewed.ambiguousCount,
       hasMore: hits.length >= limit,
       items: resultItems,
     });
@@ -322,12 +391,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         known.add(card.sourceProcurementId);
         addedCount += 1;
       }
-      for (const card of selected.ambiguousCards) {
-        if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
-        const remembered = rememberFound(card, profile.id, now);
-        if (remembered.isNew) {
-          catalog.record(inboxItemFromFoundCard(remembered.card, now));
-        }
+      const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: true });
+      for (const card of reviewed.matched) {
+        if (known.has(card.sourceProcurementId)) continue;
+        known.add(card.sourceProcurementId);
+        addedCount += 1;
       }
       logger.info("Specialist discovery recorded", {
         profileName: profileDisplayName(profile),
@@ -676,6 +744,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   const api = Object.assign(app, { runDiscovery }) as SpecialistApi;
   return api;
+}
+
+function reviewActor(decidedBy: ReviewOutcome["decidedBy"]): string {
+  switch (decidedBy) {
+    case "card":
+      return "procurement.get";
+    case "model":
+      return "Модель";
+    case "quota":
+      return "Проверка";
+    case "none":
+      return "Проверка";
+  }
 }
 
 function withTriage(

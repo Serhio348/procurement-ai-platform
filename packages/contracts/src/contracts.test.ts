@@ -531,7 +531,6 @@ describe("specialist working profile", () => {
     expect(parsed.name).toBe("");
     expect(parsed.description).toBe("");
     expect(parsed.keywords).toEqual([]);
-    expect(parsed.instructions).toBe("");
     expect(parsed.watchNewProcurements).toBe(false);
   });
 });

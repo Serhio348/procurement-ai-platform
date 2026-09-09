@@ -722,9 +722,9 @@ h3 {
 
 .profile-section {
   display: grid;
-  gap: 12px;
-  margin: 0 0 20px;
-  padding: 14px 16px 16px;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px 14px 14px;
   background: #fff;
   border: 1px solid #d5dae2;
   border-radius: 4px;
@@ -1046,6 +1046,54 @@ h3 {
   border: 1px solid #d5dae2;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.profile-filters-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.profile-filters-grid label {
+  font-size: 13px;
+}
+
+.profile-filters-grid input[type="number"],
+.profile-filters-grid input[type="date"] {
+  width: 100%;
+}
+
+.profile-filters-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.profile-filters-lists h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .profile-filters-lists,
+  .profile-filters-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-danger:hover {

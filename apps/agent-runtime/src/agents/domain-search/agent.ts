@@ -5,6 +5,7 @@ import {
   DomainSearchInput,
   DomainSearchOutput,
   SearchClassifierInput,
+  SearchQuery,
   type AgentDefinition,
   type AgentRunInput as AgentRunInputValue,
   type AgentRunOutput as AgentRunOutputValue,
@@ -87,16 +88,16 @@ export class DomainSearchAgent {
     }
 
     const payload = DomainSearchInput.parse(input.input);
-    const query = {
+    const query = SearchQuery.parse({
       sourceId: payload.sourceId,
       keywords: [...profile.keywords],
-      excludeKeywords: [] as string[],
+      excludeKeywords: [],
       kinds: payload.kinds,
       limit: payload.limit,
       offset: payload.offset,
       ...(payload.publishedFrom === undefined ? {} : { publishedFrom: payload.publishedFrom }),
       ...(payload.publishedTo === undefined ? {} : { publishedTo: payload.publishedTo }),
-    };
+    });
 
     const client = new ProcurementMcpClient({
       caller: this.#caller,

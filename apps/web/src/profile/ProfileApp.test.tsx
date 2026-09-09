@@ -16,9 +16,6 @@ function profile(extra: Record<string, unknown> = {}) {
   return SpecialistWorkingProfile.parse({
     id: profileId,
     name: "Электротехническое оборудование",
-    purpose: "Находить КТПБ.",
-    description: "Промышленные подстанции.",
-    instructions: "Бытовые щитки не брать.",
     keywords: ["КТПБ"],
     excludeKeywords: [],
     watchNewProcurements: false,
@@ -54,7 +51,7 @@ describe("ProfileApp", () => {
     render(
       <MemoryRouter>
         <ProfileApp
-          profile={profile({ name: "", description: "", instructions: "", keywords: [] })}
+          profile={profile({ name: "", keywords: [] })}
           save={vi.fn(async () => profile())}
           setWatch={vi.fn(async () => profile())}
         />
@@ -62,68 +59,53 @@ describe("ProfileApp", () => {
     );
 
     expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("Что ищем") as HTMLTextAreaElement).value).toBe("");
-    expect((screen.getByLabelText("Указания") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("Добавить слово") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByLabelText("Указания")).toBeNull();
     expect(screen.queryByRole("button", { name: /Убрать / })).toBeNull();
     expect(screen.queryByText(/КТПБ/)).toBeNull();
     expect(screen.queryByText(/водоподготов/i)).toBeNull();
   });
 
-  it("shows looking-for words as chips, keeps extras, and does not turn watch on", async () => {
+  it("adds and removes keywords as chips and does not turn watch on", async () => {
     const user = userEvent.setup();
-    const save = vi.fn(async () =>
-      profile({
-        name: "Щиты",
-        purpose: "кабель",
-        description: "кабель",
-        keywords: ["кабель", "ВРУ"],
-      }),
-    );
+    const save = vi.fn(async () => profile({ name: "Щиты", keywords: ["КТПБ", "ВРУ"] }));
     const setWatch = vi.fn(async (watchNewProcurements: boolean) =>
-      profile({ name: "Щиты", keywords: ["кабель", "ВРУ"], watchNewProcurements }),
+      profile({ name: "Щиты", keywords: ["КТПБ", "ВРУ"], watchNewProcurements }),
     );
 
-    renderProfile(profile({ description: "", keywords: [] }), save, setWatch);
+    renderProfile(profile({ name: "", keywords: [] }), save, setWatch);
 
-    await user.clear(screen.getByLabelText("Название"));
     await user.type(screen.getByLabelText("Название"), "Щиты");
-    await user.type(screen.getByLabelText("Что ищем"), "нужны КТПБ, НКУ и подстанция");
+    await user.type(screen.getByLabelText("Добавить слово"), "КТПБ, НКУ, подстанция");
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
     expect(screen.getByRole("button", { name: "Убрать КТПБ" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Убрать НКУ" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Убрать подстанция" })).toBeTruthy();
-    expect(screen.queryByLabelText("Строки поиска")).toBeNull();
-    expect(screen.queryByLabelText("Не предлагать, если в заголовке есть")).toBeNull();
 
+    await user.clear(screen.getByLabelText("Добавить слово"));
     await user.type(screen.getByLabelText("Добавить слово"), "ВРУ");
     await user.click(screen.getByRole("button", { name: "Добавить" }));
     expect(screen.getByRole("button", { name: "Убрать ВРУ" })).toBeTruthy();
 
-    await user.clear(screen.getByLabelText("Что ищем"));
-    await user.type(screen.getByLabelText("Что ищем"), "кабель");
-    expect(screen.getByRole("button", { name: "Убрать кабель" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Убрать ВРУ" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Убрать КТПБ" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Убрать НКУ" }));
+    expect(screen.queryByRole("button", { name: "Убрать НКУ" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
 
-    expect(save).toHaveBeenCalledWith({
-      name: "Щиты",
-      purpose: "кабель",
-      description: "кабель",
-      instructions: "Бытовые щитки не брать.",
-      keywords: ["кабель", "ВРУ"],
-      excludeKeywords: [],
-      statuses: ["accepting_bids"],
-    });
-    expect(screen.queryByLabelText("Зачем ищем")).toBeNull();
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Щиты",
+        keywords: ["КТПБ", "подстанция", "ВРУ"],
+      }),
+    );
     expect(setWatch).not.toHaveBeenCalled();
     expect(await screen.findByRole("heading", { name: "Профили" })).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Профиль «Щиты» сохранён.");
+    expect(screen.getByRole("status").textContent).toContain("Профиль «Щиты» создан.");
   });
 
   it("after creating a named profile shows a toast and returns to the list", async () => {
     const user = userEvent.setup();
-    const current = profile({ name: "", description: "", instructions: "", keywords: [] });
+    const current = profile({ name: "", keywords: [] });
     const save = vi.fn(async () => profile({ name: "Водоподготовка", keywords: [] }));
 
     renderProfile(current, save);
@@ -136,18 +118,17 @@ describe("ProfileApp", () => {
     expect(screen.getByRole("status").textContent).toContain("Профиль «Водоподготовка» создан.");
   });
 
-  it("can drop a looking-for word without rewriting the text", async () => {
+  it("can drop a keyword chip without rewriting the list", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => profile({ keywords: ["КТПБ"] }));
 
-    renderProfile(profile({ description: "КТПБ, НКУ", keywords: ["КТПБ", "НКУ"] }), save);
+    renderProfile(profile({ keywords: ["КТПБ", "НКУ"] }), save);
 
     await user.click(screen.getByRole("button", { name: "Убрать НКУ" }));
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
 
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({
-        description: "КТПБ, НКУ",
         keywords: ["КТПБ"],
       }),
     );
@@ -164,7 +145,7 @@ describe("ProfileApp", () => {
 
     await user.type(
       screen.getByLabelText("Исключать"),
-      "реставрация, ремонт зданий\nреставрация",
+      "реставрация, ремонт зданий{enter}реставрация",
     );
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
 

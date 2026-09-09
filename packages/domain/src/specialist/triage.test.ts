@@ -22,7 +22,6 @@ describe("specialist triage", () => {
     expect(workspace.profile().name).toBe("");
     expect(workspace.profile().description).toBe("");
     expect(workspace.profile().keywords).toEqual([]);
-    expect(workspace.profile().instructions).toBe("");
     const second = workspace.addProfile();
     expect(workspace.profiles()).toHaveLength(2);
     expect(workspace.profile().id).toBe(second.id);
@@ -44,7 +43,6 @@ describe("specialist triage", () => {
     expect(workspace.profile().name).toBe("");
     expect(workspace.profile().description).toBe("");
     expect(workspace.profile().keywords).toEqual([]);
-    expect(workspace.profile().instructions).toBe("");
   });
 
   it("does not start discovery until the specialist turns watch on", () => {
@@ -61,8 +59,10 @@ describe("specialist triage", () => {
       name: "Щиты",
       purpose: "ignored purpose",
       description: "НКУ, щиты",
-      instructions: "Бытовые щитки не брать.",
       keywords: ["НКУ", "щиты", "ВРУ"],
+      excludeKeywords: [],
+      statuses: ["accepting_bids"],
+      filters: {},
     });
     expect(workspace.profile().watchNewProcurements).toBe(false);
     expect(workspace.profile().excludeKeywords).toEqual([]);

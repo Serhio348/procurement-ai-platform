@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ProcurementSearchRequest,
   RequestId,
+  type SearchQuery,
   SourceId,
   type SearchHit,
   type SourceId as SourceIdValue,
@@ -28,12 +29,7 @@ export interface ProcurementSearchHitsOptions {
 export function createProcurementSearchHits(
   options: ProcurementSearchHitsOptions,
 ): {
-  search: (
-    limit: number,
-    keywords: readonly string[],
-    excludeKeywords?: readonly string[],
-    offset?: number,
-  ) => Promise<readonly SearchHit[]>;
+  search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
 } {
   const sourceId = SourceId.parse(options.sourceId);
   const client = new ProcurementMcpClient({
@@ -46,13 +42,8 @@ export function createProcurementSearchHits(
   });
 
   return {
-    async search(
-      limit: number,
-      keywords: readonly string[],
-      excludeKeywords?: readonly string[],
-      offset = 0,
-    ): Promise<readonly SearchHit[]> {
-      if (keywords.length === 0) {
+    async search(query: Omit<SearchQuery, "sourceId">): Promise<readonly SearchHit[]> {
+      if (query.keywords.length === 0) {
         throw new McpToolCallError(
           "invalid_request",
           "procurement.search",
@@ -62,10 +53,7 @@ export function createProcurementSearchHits(
       const response = await client.search(
         ProcurementSearchRequest.parse({
           sourceId,
-          keywords: [...keywords],
-          excludeKeywords: [...(excludeKeywords ?? [])],
-          limit,
-          offset,
+          ...query,
         }),
         RequestId.parse(randomUUID()),
       );

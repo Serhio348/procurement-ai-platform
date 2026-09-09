@@ -22,7 +22,19 @@ describe("createProcurementSearchHits", () => {
       sourceId: SourceId.parse("goszakupki_by"),
     });
 
-    const hits = await port.search(20, electricalEquipmentSeedV1.keywords);
+    const hits = await port.search({
+      limit: 20,
+      keywords: electricalEquipmentSeedV1.keywords,
+      excludeKeywords: [],
+      buyerUnp: "",
+      buyerText: "",
+      procurementNumber: "",
+      regionIds: [],
+      typeIds: [],
+      statusIds: [],
+      kinds: [],
+      offset: 0,
+    });
 
     expect(hits).toHaveLength(1);
     expect(hits[0]?.sourceProcurementId).toBe("auction/3629820");
@@ -33,6 +45,7 @@ describe("createProcurementSearchHits", () => {
       keywords: [...electricalEquipmentSeedV1.keywords],
       excludeKeywords: [],
       limit: 20,
+      offset: 0,
     });
     expect(callTool.mock.calls[0]?.[1]).not.toHaveProperty("profile");
     expect(RequestId.parse(String(callTool.mock.calls[0]?.[2]?.requestId)).length).toBeGreaterThan(0);

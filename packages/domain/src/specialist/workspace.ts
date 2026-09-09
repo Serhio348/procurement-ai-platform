@@ -3,6 +3,7 @@ import {
   SpecialistWorkingProfile,
   SpecialistWorkspaceState,
   electricalEquipmentSeedV1,
+  type SpecialistProfileWrite,
   type SpecialistTriageKind,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
@@ -17,7 +18,6 @@ export function emptySpecialistWorkingProfile(
     name: "",
     purpose: "",
     description: "",
-    instructions: "",
     keywords: [],
     excludeKeywords: [],
     watchNewProcurements: false,
@@ -131,26 +131,11 @@ export class SpecialistWorkspace {
     return this.profile();
   }
 
-  replaceProfile(input: {
-    name: string;
-    purpose: string;
-    description: string;
-    instructions: string;
-    keywords: readonly string[];
-  }): void {
+  replaceProfile(input: SpecialistProfileWrite): void {
     this.#replace(this.#activeProfileId, input);
   }
 
-  replaceProfileById(
-    id: string,
-    input: {
-      name: string;
-      purpose: string;
-      description: string;
-      instructions: string;
-      keywords: readonly string[];
-    },
-  ): SpecialistWorkingProfileValue {
+  replaceProfileById(id: string, input: SpecialistProfileWrite): SpecialistWorkingProfileValue {
     this.#replace(id, input);
     return this.profileById(id);
   }
@@ -194,26 +179,19 @@ export class SpecialistWorkspace {
     return ids;
   }
 
-  #replace(
-    id: string,
-    input: {
-      name: string;
-      purpose: string;
-      description: string;
-      instructions: string;
-      keywords: readonly string[];
-    },
-  ): void {
+  #replace(id: string, input: SpecialistProfileWrite): void {
     const current = this.profileById(id);
-    const lookingFor = input.description.trim();
+    const lookingFor = (input.description ?? "").trim();
+    const keywords = resolvePlatformKeywords(lookingFor, input.keywords);
     const next = SpecialistWorkingProfile.parse({
       ...current,
       name: input.name.trim(),
-      purpose: input.purpose.trim() || lookingFor,
+      purpose: (input.purpose ?? "").trim() || lookingFor,
       description: lookingFor,
-      instructions: input.instructions,
-      keywords: resolvePlatformKeywords(lookingFor, input.keywords),
-      excludeKeywords: [],
+      keywords,
+      excludeKeywords: input.excludeKeywords.map((phrase) => phrase.trim()).filter((phrase) => phrase.length > 0),
+      statuses: input.statuses ?? current.statuses,
+      filters: input.filters ?? current.filters,
     });
     this.#profiles = this.#profiles.map((item) => (item.id === id ? next : item));
   }
@@ -284,7 +262,6 @@ function stripStockElectricalSeed(raw: unknown): unknown {
     name: "",
     purpose: "",
     description: "",
-    instructions: "",
     keywords: [],
     excludeKeywords: [],
   };

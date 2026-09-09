@@ -166,8 +166,29 @@ export const SearchQuery = z.object({
   sourceId: SourceId,
   keywords: z.array(z.string().min(1)).default([]),
   excludeKeywords: z.array(z.string().min(1)).default([]),
+  /** Buyer / organizer UNP, passed to the source when supported. */
+  buyerUnp: z.string().max(32).default(""),
+  /** Buyer / organizer name substring. */
+  buyerText: z.string().max(300).default(""),
+  /** Procedure number / lot number prefix. */
+  procurementNumber: z.string().max(64).default(""),
+  /** Approximate price range in source currency. */
+  priceFrom: z.number().nonnegative().optional(),
+  priceTo: z.number().nonnegative().optional(),
   publishedFrom: IsoDateTime.optional(),
   publishedTo: IsoDateTime.optional(),
+  /** Bids-acceptance deadline range. */
+  requestEndFrom: IsoDateTime.optional(),
+  requestEndTo: IsoDateTime.optional(),
+  /** Auction / tender date range. */
+  auctionFrom: IsoDateTime.optional(),
+  auctionTo: IsoDateTime.optional(),
+  /** Source-specific region codes. */
+  regionIds: z.array(z.string().min(1)).default([]),
+  /** Source-specific procedure type codes. */
+  typeIds: z.array(z.string().min(1)).default([]),
+  /** Source-specific status codes. */
+  statusIds: z.array(z.string().min(1)).default([]),
   kinds: z.array(ProcedureKind).default([]),
   limit: z.number().int().positive().max(500).default(50),
   offset: z.number().int().nonnegative().default(0),

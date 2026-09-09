@@ -196,13 +196,42 @@ function sourcePath(id: SourceProcurementId): string {
 function searchPath(query: SearchQuery, term: string | undefined, page: number): string {
   const parameters = new URLSearchParams();
   if (term !== undefined) parameters.set("TendersSearch[text]", term);
-  const publishedFrom = sourceDate(query.publishedFrom);
-  const publishedTo = sourceDate(query.publishedTo);
-  if (publishedFrom !== undefined) parameters.set("TendersSearch[created_from]", publishedFrom);
-  if (publishedTo !== undefined) parameters.set("TendersSearch[created_to]", publishedTo);
+  setText(parameters, "num", query.procurementNumber);
+  setText(parameters, "unp", query.buyerUnp);
+  setText(parameters, "customer_text", query.buyerText);
+  setNumber(parameters, "price_from", query.priceFrom);
+  setNumber(parameters, "price_to", query.priceTo);
+  setDate(parameters, "created_from", query.publishedFrom);
+  setDate(parameters, "created_to", query.publishedTo);
+  setDate(parameters, "request_end_from", query.requestEndFrom);
+  setDate(parameters, "request_end_to", query.requestEndTo);
+  setDate(parameters, "auction_date_from", query.auctionFrom);
+  setDate(parameters, "auction_date_to", query.auctionTo);
+  setList(parameters, "type", query.typeIds);
+  setList(parameters, "status", query.statusIds);
+  setList(parameters, "region", query.regionIds);
   if (page > 1) parameters.set("page", String(page));
   const encoded = parameters.toString();
   return encoded.length === 0 ? "/tenders/posted" : `/tenders/posted?${encoded}`;
+}
+
+function setText(parameters: URLSearchParams, key: string, value: string | undefined): void {
+  if (value !== undefined && value.trim().length > 0) parameters.set(`TendersSearch[${key}]`, value.trim());
+}
+
+function setNumber(parameters: URLSearchParams, key: string, value: number | undefined): void {
+  if (value !== undefined) parameters.set(`TendersSearch[${key}]`, String(value));
+}
+
+function setDate(parameters: URLSearchParams, key: string, value: string | undefined): void {
+  const formatted = sourceDate(value);
+  if (formatted !== undefined) parameters.set(`TendersSearch[${key}]`, formatted);
+}
+
+function setList(parameters: URLSearchParams, key: string, values: readonly string[]): void {
+  for (const value of values) {
+    if (value.trim().length > 0) parameters.append(`TendersSearch[${key}][]`, value.trim());
+  }
 }
 
 function sourceDate(value: string | undefined): string | undefined {

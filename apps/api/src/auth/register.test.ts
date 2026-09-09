@@ -216,7 +216,7 @@ describe("specialist auth API", () => {
       method: "PUT",
       url: "/api/profile",
       headers: { cookie },
-      payload: { name: "Кабель", keywords: ["кабель"], purpose: "", description: "", instructions: "", excludeKeywords: [] },
+      payload: { name: "Кабель", keywords: ["кабель"], purpose: "", description: "", excludeKeywords: [], statuses: ["accepting_bids"], filters: {} },
     });
     const searched = await app.inject({
       method: "POST",

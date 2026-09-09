@@ -4,6 +4,34 @@ import { ExtractedPage, ExtractionStatus } from "./documents.js";
 import { ProcurementId } from "./ids.js";
 import { ChangeEvent, ChangeKind, ProcedureCard, ProcedureStatus, SearchHit } from "./procurement.js";
 
+export const SpecialistSearchFilters = z.object({
+  /** Site-side: buyer / organizer UNP. */
+  buyerUnp: z.string().max(32).optional(),
+  /** Site-side: buyer / organizer name substring. */
+  buyerText: z.string().max(300).optional(),
+  /** Site-side: procedure number or lot number. */
+  procurementNumber: z.string().max(64).optional(),
+  /** Site-side: approximate price range in BYN, inclusive. */
+  priceFrom: z.number().nonnegative().finite().optional(),
+  priceTo: z.number().nonnegative().finite().optional(),
+  /** Site-side: invitation posting dates. */
+  publishedFrom: IsoDate.optional(),
+  publishedTo: IsoDate.optional(),
+  /** Site-side: bids acceptance deadline. */
+  requestEndFrom: IsoDate.optional(),
+  requestEndTo: IsoDate.optional(),
+  /** Site-side: auction date. */
+  auctionFrom: IsoDate.optional(),
+  auctionTo: IsoDate.optional(),
+  /** Site-side goszakupki.by procedure type codes. */
+  typeIds: z.array(z.string().min(1)).optional(),
+  /** Site-side goszakupki.by region codes. */
+  regionIds: z.array(z.string().min(1)).optional(),
+  /** Site-side goszakupki.by status codes. Empty means no site-side status filter. */
+  statusIds: z.array(z.string().min(1)).optional(),
+});
+export type SpecialistSearchFilters = z.infer<typeof SpecialistSearchFilters>;
+
 export const InboxFixtureProcurement = z.object({
   title: z.string().min(1),
   status: ProcedureStatus,
@@ -181,21 +209,20 @@ export const SpecialistTriageDecision = z.object({
 export type SpecialistTriageDecision = z.infer<typeof SpecialistTriageDecision>;
 
 /**
- * Console working copy of a Domain Profile. Watch is off until the specialist
- * presses the dedicated button; saving looking-for text must not start discovery.
- * `keywords` are the platform queries: collected from `description` when empty,
- * otherwise the specialist's edited list.
+ * Console working copy of a profile. Watch is off until the specialist
+ * presses the dedicated button. `keywords` are the platform search phrases.
  */
 export const SpecialistWorkingProfile = z.object({
   id: z.string().uuid().default(() => crypto.randomUUID()),
   name: z.string().max(200).default(""),
   purpose: z.string().max(4000).default(""),
   description: z.string().max(4000).default(""),
-  instructions: z.string().max(8000).default(""),
   keywords: z.array(z.string().min(1)).max(50).default([]),
   excludeKeywords: z.array(z.string().min(1)).max(50).default([]),
   /** Procedure statuses this profile collects. Empty array means no status filter. */
   statuses: z.array(ProcedureStatus).default(["accepting_bids"]),
+  /** Site-side filters sent with the search query. */
+  filters: SpecialistSearchFilters.default({}),
   watchNewProcurements: z.boolean().default(false),
 });
 export type SpecialistWorkingProfile = z.infer<typeof SpecialistWorkingProfile>;

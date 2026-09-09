@@ -1,5 +1,6 @@
 import {
   InboxFixtureItem,
+  type SearchQuery,
   SpecialistDecisionWrite,
   SpecialistDiscoveryResponse,
   SpecialistIngestProgress,
@@ -57,12 +58,7 @@ import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 
 export interface SpecialistSearchHitsPort {
-  search: (
-    limit: number,
-    keywords: readonly string[],
-    excludeKeywords?: readonly string[],
-    offset?: number,
-  ) => Promise<readonly SearchHit[]>;
+  search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
 }
 
 export interface SpecialistApi extends FastifyInstance {
@@ -130,17 +126,41 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     journal,
   });
 
+  function buildSearchQuery(
+    profile: SpecialistWorkingProfile,
+    limit: number,
+    offset: number,
+  ): Omit<SearchQuery, "sourceId"> {
+    const { filters } = profile;
+    return {
+      keywords: [...profile.keywords],
+      excludeKeywords: [...profile.excludeKeywords],
+      buyerUnp: filters.buyerUnp ?? "",
+      buyerText: filters.buyerText ?? "",
+      procurementNumber: filters.procurementNumber ?? "",
+      priceFrom: filters.priceFrom,
+      priceTo: filters.priceTo,
+      publishedFrom: filters.publishedFrom ? toIsoDateTime(filters.publishedFrom) : undefined,
+      publishedTo: filters.publishedTo ? toIsoDateTime(filters.publishedTo) : undefined,
+      requestEndFrom: filters.requestEndFrom ? toIsoDateTime(filters.requestEndFrom) : undefined,
+      requestEndTo: filters.requestEndTo ? toIsoDateTime(filters.requestEndTo) : undefined,
+      auctionFrom: filters.auctionFrom ? toIsoDateTime(filters.auctionFrom) : undefined,
+      auctionTo: filters.auctionTo ? toIsoDateTime(filters.auctionTo) : undefined,
+      typeIds: [...(filters.typeIds ?? [])],
+      statusIds: [...(filters.statusIds ?? [])],
+      regionIds: [...(filters.regionIds ?? [])],
+      kinds: [],
+      limit,
+      offset,
+    };
+  }
+
   async function runManualSearch(
     limit: number,
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace.profile();
-    const hits = await searchHits.search(
-      limit,
-      profile.keywords,
-      profile.excludeKeywords,
-      offset,
-    );
+    const hits = await searchHits.search(buildSearchQuery(profile, limit, offset));
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -220,7 +240,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     for (const profile of ready) {
       let hits: readonly SearchHit[];
       try {
-        hits = await searchHits.search(limit, profile.keywords, profile.excludeKeywords);
+        hits = await searchHits.search(buildSearchQuery(profile, limit, 0));
       } catch (error) {
         logger.error("Specialist discovery search failed", error);
         await recordJournal(journal, {
@@ -639,12 +659,7 @@ function mapSearchError(reply: FastifyReply, error: unknown) {
   return reply.code(502).send({ error: "search_failed" });
 }
 
-async function loadDefaultSearchHits(
-  _limit: number,
-  _keywords: readonly string[],
-  _excludeKeywords?: readonly string[],
-  _offset?: number,
-): Promise<readonly SearchHit[]> {
+async function loadDefaultSearchHits(_query: Omit<SearchQuery, "sourceId">): Promise<readonly SearchHit[]> {
   return loadFixtureSearchHits();
 }
 
@@ -657,4 +672,8 @@ function findCatalogDocument(
     if (document !== undefined) return document;
   }
   return undefined;
+}
+
+function toIsoDateTime(value: string): string {
+  return `${value}T00:00:00+03:00`;
 }

@@ -27,8 +27,10 @@ describe("openSpecialistPersistence", () => {
       name: "Кабель",
       purpose: "",
       description: "кабель",
-      instructions: "",
       keywords: ["кабель"],
+      excludeKeywords: [],
+      statuses: ["accepting_bids"],
+      filters: {},
     });
 
     await persistence.persistWorkspace(workspace.snapshot());

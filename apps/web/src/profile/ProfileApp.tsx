@@ -112,10 +112,6 @@ export function ProfileApp({
     setFilters((current) => ({ ...current, [key]: value } as typeof current));
   }
 
-  function toggleArrayValue(current: readonly string[], value: string, selected: boolean): string[] {
-    return selected ? [...current, value] : current.filter((item) => item !== value);
-  }
-
   async function saveProfile(): Promise<void> {
     if (busy) return;
     setBusy(true);
@@ -277,129 +273,172 @@ export function ProfileApp({
           <section className="profile-section" aria-labelledby="profile-filters">
             <h2 id="profile-filters">Уточнить поиск на площадке</h2>
             <p className="profile-hint">Эти поля отправляются прямо на goszakupki.by — чем точнее, тем меньше лишних страниц.</p>
-            <div className="profile-filters-grid">
-              <label htmlFor="profile-unp">УНП заказчика</label>
-              <input
-                id="profile-unp"
-                value={filters.buyerUnp}
-                onChange={(event) => setFilter("buyerUnp", event.target.value)}
-              />
-
-              <label htmlFor="profile-customer">Заказчик / организатор</label>
-              <input
-                id="profile-customer"
-                value={filters.buyerText}
-                onChange={(event) => setFilter("buyerText", event.target.value)}
-              />
-
-              <label htmlFor="profile-number">Номер закупки</label>
-              <input
-                id="profile-number"
-                value={filters.procurementNumber}
-                onChange={(event) => setFilter("procurementNumber", event.target.value)}
-              />
-
-              <label htmlFor="profile-price-from">Цена с (BYN)</label>
-              <input
-                id="profile-price-from"
-                type="number"
-                value={filters.priceFrom ?? ""}
-                onChange={(event) => setPrice("priceFrom", event.target.value)}
-              />
-
-              <label htmlFor="profile-price-to">Цена по (BYN)</label>
-              <input
-                id="profile-price-to"
-                type="number"
-                value={filters.priceTo ?? ""}
-                onChange={(event) => setPrice("priceTo", event.target.value)}
-              />
-
-              <label htmlFor="profile-published-from">Дата размещения с</label>
-              <input
-                id="profile-published-from"
-                type="date"
-                value={filters.publishedFrom ?? ""}
-                onChange={(event) => setDate("publishedFrom", event.target.value)}
-              />
-
-              <label htmlFor="profile-published-to">Дата размещения по</label>
-              <input
-                id="profile-published-to"
-                type="date"
-                value={filters.publishedTo ?? ""}
-                onChange={(event) => setDate("publishedTo", event.target.value)}
-              />
-
-              <label htmlFor="profile-request-from">Дата окончания приёма с</label>
-              <input
-                id="profile-request-from"
-                type="date"
-                value={filters.requestEndFrom ?? ""}
-                onChange={(event) => setDate("requestEndFrom", event.target.value)}
-              />
-
-              <label htmlFor="profile-request-to">Дата окончания приёма по</label>
-              <input
-                id="profile-request-to"
-                type="date"
-                value={filters.requestEndTo ?? ""}
-                onChange={(event) => setDate("requestEndTo", event.target.value)}
-              />
-
-              <label htmlFor="profile-auction-from">Дата торгов с</label>
-              <input
-                id="profile-auction-from"
-                type="date"
-                value={filters.auctionFrom ?? ""}
-                onChange={(event) => setDate("auctionFrom", event.target.value)}
-              />
-
-              <label htmlFor="profile-auction-to">Дата торгов по</label>
-              <input
-                id="profile-auction-to"
-                type="date"
-                value={filters.auctionTo ?? ""}
-                onChange={(event) => setDate("auctionTo", event.target.value)}
-              />
-            </div>
-
-            <div className="profile-filters-lists">
-              <div>
-                <h3>Вид процедуры</h3>
-                <fieldset className="profile-statuses">
-                  <legend className="sr-only">Вид процедуры</legend>
-                  {TYPE_OPTIONS.map((option) => (
-                    <label key={option.value} className="profile-status-option">
-                      <input
-                        type="checkbox"
-                        checked={(filters.typeIds ?? []).includes(option.value)}
-                        onChange={(event) =>
-                          setFilter("typeIds", toggleArrayValue(filters.typeIds ?? [], option.value, event.target.checked))
-                        }
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </fieldset>
+            <div className="profile-filters-form">
+              <div className="profile-filter-group">
+                <label htmlFor="profile-unp">УНП заказчика</label>
+                <input
+                  id="profile-unp"
+                  value={filters.buyerUnp}
+                  onChange={(event) => setFilter("buyerUnp", event.target.value)}
+                />
               </div>
-              <div>
-                <h3>Область заказчика</h3>
-                <fieldset className="profile-statuses">
-                  <legend className="sr-only">Область</legend>
-                  {REGION_OPTIONS.map((option) => (
-                    <label key={option.value} className="profile-status-option">
-                      <input
-                        type="checkbox"
-                        checked={(filters.regionIds ?? []).includes(option.value)}
-                        onChange={(event) =>
-                          setFilter("regionIds", toggleArrayValue(filters.regionIds ?? [], option.value, event.target.checked))
-                        }
-                      />
+
+              <div className="profile-filter-group">
+                <label htmlFor="profile-customer">Заказчик / организатор</label>
+                <input
+                  id="profile-customer"
+                  value={filters.buyerText}
+                  onChange={(event) => setFilter("buyerText", event.target.value)}
+                />
+              </div>
+
+              <div className="profile-filter-group">
+                <label htmlFor="profile-number">Номер закупки</label>
+                <input
+                  id="profile-number"
+                  value={filters.procurementNumber}
+                  onChange={(event) => setFilter("procurementNumber", event.target.value)}
+                />
+              </div>
+
+              <div className="profile-filter-group profile-filter-range">
+                <span className="profile-filter-label">Цена (BYN)</span>
+                <div className="profile-filter-range-row">
+                  <div>
+                    <label htmlFor="profile-price-from" className="profile-sublabel">с</label>
+                    <input
+                      id="profile-price-from"
+                      type="number"
+                      value={filters.priceFrom ?? ""}
+                      onChange={(event) => setPrice("priceFrom", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="profile-price-to" className="profile-sublabel">по</label>
+                    <input
+                      id="profile-price-to"
+                      type="number"
+                      value={filters.priceTo ?? ""}
+                      onChange={(event) => setPrice("priceTo", event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="profile-filter-group profile-filter-range">
+                <span className="profile-filter-label">Дата размещения приглашения</span>
+                <div className="profile-filter-range-row">
+                  <div>
+                    <label htmlFor="profile-published-from" className="profile-sublabel">с</label>
+                    <input
+                      id="profile-published-from"
+                      type="date"
+                      value={filters.publishedFrom ?? ""}
+                      onChange={(event) => setDate("publishedFrom", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="profile-published-to" className="profile-sublabel">по</label>
+                    <input
+                      id="profile-published-to"
+                      type="date"
+                      value={filters.publishedTo ?? ""}
+                      onChange={(event) => setDate("publishedTo", event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="profile-filter-group profile-filter-range">
+                <span className="profile-filter-label">Дата окончания приёма</span>
+                <div className="profile-filter-range-row">
+                  <div>
+                    <label htmlFor="profile-request-from" className="profile-sublabel">с</label>
+                    <input
+                      id="profile-request-from"
+                      type="date"
+                      value={filters.requestEndFrom ?? ""}
+                      onChange={(event) => setDate("requestEndFrom", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="profile-request-to" className="profile-sublabel">по</label>
+                    <input
+                      id="profile-request-to"
+                      type="date"
+                      value={filters.requestEndTo ?? ""}
+                      onChange={(event) => setDate("requestEndTo", event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="profile-filter-group profile-filter-range">
+                <span className="profile-filter-label">Дата торгов</span>
+                <div className="profile-filter-range-row">
+                  <div>
+                    <label htmlFor="profile-auction-from" className="profile-sublabel">с</label>
+                    <input
+                      id="profile-auction-from"
+                      type="date"
+                      value={filters.auctionFrom ?? ""}
+                      onChange={(event) => setDate("auctionFrom", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="profile-auction-to" className="profile-sublabel">по</label>
+                    <input
+                      id="profile-auction-to"
+                      type="date"
+                      value={filters.auctionTo ?? ""}
+                      onChange={(event) => setDate("auctionTo", event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="profile-filter-group">
+                <label htmlFor="profile-types">Вид процедуры</label>
+                <select
+                  id="profile-types"
+                  multiple
+                  size={4}
+                  value={filters.typeIds ?? []}
+                  onChange={(event) =>
+                    setFilter(
+                      "typeIds",
+                      [...event.target.selectedOptions].map((option) => option.value),
+                    )
+                  }
+                >
+                  {TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
                       {option.label}
-                    </label>
+                    </option>
                   ))}
-                </fieldset>
+                </select>
+              </div>
+
+              <div className="profile-filter-group">
+                <label htmlFor="profile-regions">Область заказчика</label>
+                <select
+                  id="profile-regions"
+                  multiple
+                  size={4}
+                  value={filters.regionIds ?? []}
+                  onChange={(event) =>
+                    setFilter(
+                      "regionIds",
+                      [...event.target.selectedOptions].map((option) => option.value),
+                    )
+                  }
+                >
+                  {REGION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </section>

@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   SpecialistCaseDocument,
   SpecialistIngestFileProgress,
@@ -193,6 +193,22 @@ export function ProcurementsApp({
   const [notice, setNotice] = useState<string | undefined>();
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
+  const [searchPct, setSearchPct] = useState(0);
+  const searching = busy && busyKind === undefined;
+  useEffect(() => {
+    if (!searching) {
+      setSearchPct(0);
+      return undefined;
+    }
+    // Simulated progress: the request is a single call, so the percent eases
+    // toward 90 and the overlay closes when the response arrives.
+    const timer = setInterval(() => {
+      setSearchPct((pct) =>
+        pct >= 90 ? pct : pct + Math.max(1, Math.round((90 - pct) * 0.08)),
+      );
+    }, 300);
+    return () => clearInterval(timer);
+  }, [searching]);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const ingestGeneration = useRef(0);
   const catalogRef = useRef(catalog);
@@ -331,7 +347,7 @@ export function ProcurementsApp({
                   void runSearch();
                 }}
               >
-                {busy && busyKind === undefined ? "Ищем…" : "Искать по профилю"}
+                {searching ? "Ищем…" : "Искать по профилю"}
               </button>
               {hasMore && search !== undefined ? (
                 <button
@@ -348,6 +364,14 @@ export function ProcurementsApp({
             </div>
           </div>
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}
+          {searching ? (
+            <div className="search-overlay" role="status" aria-live="polite">
+              <div className="search-spinner">
+                <span className="search-spinner-pct">{searchPct}%</span>
+              </div>
+              <p className="search-overlay-text">Ищем закупки на площадке…</p>
+            </div>
+          ) : null}
           {items.length === 0 ? (
             <p className="empty">Нет закупок в работе</p>
           ) : (

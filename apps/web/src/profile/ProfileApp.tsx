@@ -270,7 +270,7 @@ export function ProfileApp({
             </fieldset>
           </section>
 
-          <section className="profile-section" aria-labelledby="profile-filters">
+          <section className="profile-section profile-filters-section" aria-labelledby="profile-filters">
             <h2 id="profile-filters">Уточнить поиск на площадке</h2>
             <p className="profile-hint">Эти поля отправляются прямо на goszakupki.by — чем точнее, тем меньше лишних страниц.</p>
             <div className="profile-filters-form">
@@ -402,7 +402,7 @@ export function ProfileApp({
                 <select
                   id="profile-types"
                   multiple
-                  size={4}
+                  size={3}
                   value={filters.typeIds ?? []}
                   onChange={(event) =>
                     setFilter(
@@ -424,7 +424,7 @@ export function ProfileApp({
                 <select
                   id="profile-regions"
                   multiple
-                  size={4}
+                  size={3}
                   value={filters.regionIds ?? []}
                   onChange={(event) =>
                     setFilter(
@@ -448,27 +448,27 @@ export function ProfileApp({
               {busy ? "Сохраняем…" : "Сохранить профиль"}
             </button>
           </div>
-        </form>
 
-        <section className="profile-section" aria-labelledby="profile-watch">
-          <h2 id="profile-watch">Новые закупки</h2>
-          <p className="profile-hint">
-            Если кнопка не нажата, площадка сама не проверяется. Найденное появится во вкладке
-            «Закупки», не во входящих.
-          </p>
-          <div className="profile-actions">
-            <button
-              type="button"
-              className={profile.watchNewProcurements ? "search-profile is-watching" : "search-profile"}
-              disabled={busy}
-              onClick={() => {
-                void toggleWatch();
-              }}
-            >
-              {profile.watchNewProcurements ? "Слежение включено" : "Следить за новыми закупками"}
-            </button>
-          </div>
-        </section>
+          <section className="profile-section profile-watch-section" aria-labelledby="profile-watch">
+            <h2 id="profile-watch">Новые закупки</h2>
+            <p className="profile-hint">
+              Если кнопка не нажата, площадка сама не проверяется. Найденное появится во вкладке
+              «Закупки», не во входящих.
+            </p>
+            <div className="profile-actions">
+              <button
+                type="button"
+                className={profile.watchNewProcurements ? "search-profile is-watching" : "search-profile"}
+                disabled={busy}
+                onClick={() => {
+                  void toggleWatch();
+                }}
+              >
+                {profile.watchNewProcurements ? "Слежение включено" : "Следить за новыми закупками"}
+              </button>
+            </div>
+          </section>
+        </form>
       </main>
     </Shell>
   );

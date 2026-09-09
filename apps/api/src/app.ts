@@ -181,6 +181,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       catalog.upsertCase(owned);
       resultItems.push(owned);
     }
+    // Weak and keyword-less hits wait in the inbox for a human look; they are
+    // not listed among the confident matches returned to the console.
     let ambiguousCount = 0;
     for (const card of selected.ambiguousCards) {
       if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
@@ -192,7 +194,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         workspace,
       );
       catalog.upsertCase(owned);
-      resultItems.push(owned);
       ambiguousCount += 1;
       if (existing === undefined) {
         catalog.record(inboxItemFromFoundCard(owned, clock()));

@@ -1,8 +1,10 @@
 /**
  * Title-level classification before any LLM call. Exact keyword hits can be
- * kept; exclude keywords always win. Ambiguous titles are left for the model.
+ * kept; exclude keywords always win. A keyword found only inside a foreign
+ * code ("КТПБ" in "БКТПБ-746") is a weak hint that needs a human or model.
+ * Titles with no keyword at all are ambiguous and also left for review.
  */
-import { termMatches } from "./term-match.js";
+import { termMatchStrength } from "./term-match.js";
 
 export interface CheapClassifyProfile {
   keywords: readonly string[];
@@ -15,7 +17,7 @@ export interface CheapClassifyText {
   sourceStatus?: string;
 }
 
-export type CheapClassifyVerdict = "relevant" | "irrelevant" | "ambiguous";
+export type CheapClassifyVerdict = "relevant" | "weak" | "irrelevant" | "ambiguous";
 
 export interface CheapClassifyResult {
   verdict: CheapClassifyVerdict;
@@ -30,13 +32,24 @@ export function cheapClassifyHit(
   const haystack = [text.title, text.buyerName, text.sourceStatus]
     .filter((part) => part !== undefined)
     .join(" ");
-  const excludedBy = profile.excludeKeywords.filter((term) => termMatches(haystack, term));
+  const excludedBy = profile.excludeKeywords.filter(
+    (term) => termMatchStrength(haystack, term) !== "none",
+  );
   if (excludedBy.length > 0) {
     return { verdict: "irrelevant", matchedTerms: [], excludedBy };
   }
-  const matchedTerms = profile.keywords.filter((term) => termMatches(haystack, term));
-  if (matchedTerms.length > 0) {
-    return { verdict: "relevant", matchedTerms, excludedBy: [] };
+  const exact: string[] = [];
+  const embedded: string[] = [];
+  for (const term of profile.keywords) {
+    const strength = termMatchStrength(haystack, term);
+    if (strength === "exact") exact.push(term);
+    else if (strength === "embedded") embedded.push(term);
+  }
+  if (exact.length > 0) {
+    return { verdict: "relevant", matchedTerms: exact, excludedBy: [] };
+  }
+  if (embedded.length > 0) {
+    return { verdict: "weak", matchedTerms: embedded, excludedBy: [] };
   }
   return { verdict: "ambiguous", matchedTerms: [], excludedBy: [] };
 }

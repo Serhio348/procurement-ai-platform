@@ -156,6 +156,30 @@ describe("selectRelevantSearchCards", () => {
     );
   });
 
+  it("sends a keyword buried inside a foreign code to review instead of the list", () => {
+    const hits = [
+      hit(
+        "etrade/3643981",
+        "Выбор подрядной организации на выполнение строительно-монтажных работ по объекту «Реконструкция ВЛ-0,4 кВ от БКТПБ-746 в аг. Каменюки»",
+      ),
+      hit("auction-002", "Поставка КТПБ-250 для подстанции"),
+    ];
+
+    const selected = selectRelevantSearchCards(
+      hits,
+      { keywords: ["КТПБ", "КТП"], excludeKeywords: [] },
+      20,
+    );
+
+    expect(selected.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-002"]);
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual([
+      "etrade/3643981",
+    ]);
+    expect(selected.ambiguousCards[0]?.actions[0]?.detail).toContain("внутри чужого кода");
+    expect(selected.ambiguousCards[0]?.actions[0]?.detail).toContain("КТПБ, КТП");
+    expect(selected.discardedCount).toBe(0);
+  });
+
   it("caps the listed keyword matches at the requested limit", () => {
     const hits = [
       hit("a", "подстанция 1"),

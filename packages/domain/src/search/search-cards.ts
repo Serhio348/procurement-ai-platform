@@ -30,45 +30,23 @@ export interface SearchSelectionProfile extends CheapClassifyProfile {
 
 /**
  * Turns listing hits into specialist cases. Exact profile-keyword matches
- * become cards; hits that survived the source but match no keyword become
+ * become cards. Hits where a keyword is only buried inside a foreign code
+ * ("КТПБ" in "БКТПБ-746") and hits that match no keyword at all become
  * ambiguous cards for human review, capped at MAX_AMBIGUOUS_PER_SEARCH.
+ * Only an exclude keyword drops a hit outright.
  */
 export function selectRelevantSearchCards(
   hits: readonly SearchHitValue[],
   profile: SearchSelectionProfile,
   limit: number,
 ): ProfileSearchSelection {
-  const uniqueHits: SearchHitValue[] = [];
   const seen = new Set<string>();
+  const cards: SpecialistProcurementCardValue[] = [];
+  const ambiguousCards: SpecialistProcurementCardValue[] = [];
   for (const hit of hits) {
     const key = `${hit.sourceId}:${hit.sourceProcurementId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    uniqueHits.push(hit);
-  }
-  const listed = uniqueHits
-    .filter((hit) => hitMatchesProfileKeywords(hit, profile.keywords))
-    .filter((hit) => hitMatchesProfileStatuses(hit, profile.statuses))
-    .slice(0, limit);
-  const cards: SpecialistProcurementCardValue[] = [];
-  for (const hit of listed) {
-    const classified = cheapClassifyHit(
-      {
-        title: hit.title,
-        ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
-        ...(hit.sourceStatus === undefined ? {} : { sourceStatus: hit.sourceStatus }),
-      },
-      profile,
-    );
-    if (classified.verdict !== "relevant") {
-      continue;
-    }
-    cards.push(cardFromRelevantHit(hit, classified.matchedTerms));
-  }
-  const ambiguousCards: SpecialistProcurementCardValue[] = [];
-  for (const hit of uniqueHits) {
-    if (ambiguousCards.length >= MAX_AMBIGUOUS_PER_SEARCH) break;
-    if (hitMatchesProfileKeywords(hit, profile.keywords)) continue;
     if (!hitMatchesProfileStatuses(hit, profile.statuses)) continue;
     const classified = cheapClassifyHit(
       {
@@ -79,7 +57,16 @@ export function selectRelevantSearchCards(
       profile,
     );
     if (classified.verdict === "irrelevant") continue;
-    ambiguousCards.push(cardFromAmbiguousHit(hit));
+    if (classified.verdict === "relevant") {
+      if (cards.length < limit) cards.push(cardFromRelevantHit(hit, classified.matchedTerms));
+      continue;
+    }
+    if (ambiguousCards.length >= MAX_AMBIGUOUS_PER_SEARCH) continue;
+    ambiguousCards.push(
+      classified.verdict === "weak"
+        ? cardFromWeakHit(hit, classified.matchedTerms)
+        : cardFromAmbiguousHit(hit),
+    );
   }
   const discardedCount = hits.length - cards.length - ambiguousCards.length;
   return { cards, ambiguousCards, discardedCount };
@@ -175,6 +162,24 @@ export function cardFromRelevantHit(
 export function cardFromAmbiguousHit(
   hit: SearchHitValue,
 ): SpecialistProcurementCardValue {
+  return reviewCard(
+    hit,
+    `procurement.search: найдена «${hit.title}». Точных совпадений по словам нет — проверьте по смыслу. Документы ещё не брали.`,
+  );
+}
+
+/** A weak hit: a profile term sits inside a foreign code such as "БКТПБ-746". */
+export function cardFromWeakHit(
+  hit: SearchHitValue,
+  matchedTerms: readonly string[],
+): SpecialistProcurementCardValue {
+  return reviewCard(
+    hit,
+    `procurement.search: найдена «${hit.title}». Слова ${matchedTerms.join(", ")} встречаются только внутри чужого кода — проверьте по смыслу. Документы ещё не брали.`,
+  );
+}
+
+function reviewCard(hit: SearchHitValue, detail: string): SpecialistProcurementCardValue {
   const label = amountLabel(hit);
   return SpecialistProcurementCard.parse({
     id: ProcurementId.parse(uuidFromHex(`${hit.sourceId}:${hit.sourceProcurementId}`)),
@@ -186,14 +191,7 @@ export function cardFromAmbiguousHit(
     live: hit.sourceId === "goszakupki_by",
     ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
     ...(label === undefined ? {} : { amountLabel: label }),
-    actions: [
-      {
-        step: 1,
-        actor: "DomainSearchAgent",
-        status: "done",
-        detail: `procurement.search: найдена «${hit.title}». Точных совпадений по словам нет — проверьте по смыслу. Документы ещё не брали.`,
-      },
-    ],
+    actions: [{ step: 1, actor: "DomainSearchAgent", status: "done", detail }],
   });
 }
 

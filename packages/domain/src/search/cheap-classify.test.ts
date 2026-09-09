@@ -26,6 +26,24 @@ describe("cheapClassifyHit", () => {
     expect(result.matchedTerms).toEqual(["КТПБ"]);
   });
 
+  it("downgrades a keyword buried inside a foreign code to a weak hint", () => {
+    const result = cheapClassifyHit(
+      { title: "Реконструкция ВЛ-0,4 кВ от БКТПБ-746 в аг. Каменюки" },
+      profile,
+    );
+    expect(result.verdict).toBe("weak");
+    expect(result.matchedTerms).toEqual(["КТПБ"]);
+  });
+
+  it("keeps the exact verdict when an exact and an embedded hit coexist", () => {
+    const result = cheapClassifyHit(
+      { title: "Поставка КТПБ для замены БКТПБ-746" },
+      profile,
+    );
+    expect(result.verdict).toBe("relevant");
+    expect(result.matchedTerms).toEqual(["КТПБ"]);
+  });
+
   it("leaves synonym-only titles for the model instead of guessing", () => {
     const result = cheapClassifyHit(
       { title: "Поставка распределительного устройства 10 кВ" },

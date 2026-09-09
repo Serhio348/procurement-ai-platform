@@ -277,11 +277,11 @@ describe("specialist API", () => {
     // hits are dropped by the default status filter before human review.
     expect(body.ambiguousCount).toBe(1);
     expect(body.discardedCount).toBe(2);
-    expect(body.items.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
-      true,
-    );
+    expect(body.items.map((item) => item.title)).toEqual([
+      "Комплектная трансформаторная подстанция",
+    ]);
     // Non-matching hits are not dropped silently: they wait in the inbox as
-    // ambiguous cases for a human look.
+    // ambiguous cases for a human look, but are not listed as confident matches.
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
       (item) => item.title,
@@ -342,10 +342,16 @@ describe("specialist API", () => {
     expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
     expect(JSON.parse(saved.body).keywords).toEqual(["кабель"]);
     expect(searched.statusCode).toBe(200);
-    // A keyword-miss is kept as an ambiguous inbox case, not silently dropped.
+    // A keyword-miss goes to the inbox for review, not into the confident list.
     expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
-      true,
+      false,
     );
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(inbox.body).items as Array<{ title: string }>).some(
+        (item) => item.title === "Комплектная трансформаторная подстанция",
+      ),
+    ).toBe(true);
     expect(cable).toBeDefined();
     expect(rejected.statusCode).toBe(200);
     expect(remaining.some((item) => item.title === "Кабель силовой")).toBe(false);

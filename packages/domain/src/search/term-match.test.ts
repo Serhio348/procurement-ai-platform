@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { termMatches } from "./term-match.js";
+import { termMatchStrength, termMatches } from "./term-match.js";
 
 describe("termMatches", () => {
   it("rejects an abbreviation inside an ordinary word", () => {
@@ -34,5 +34,35 @@ describe("termMatches", () => {
     expect(
       termMatches("комплект сетей электроснабжениями", "сетей электроснабжения"),
     ).toBe(false);
+  });
+});
+
+describe("termMatchStrength", () => {
+  it("treats a whole word, a phrase, and a term leading a model code as exact", () => {
+    expect(termMatchStrength("Низковольтное комплектное устройство НКУ", "НКУ")).toBe("exact");
+    expect(termMatchStrength("НКУ-0,4 кВ", "НКУ")).toBe("exact");
+    expect(termMatchStrength("Поставка КТПБ-250", "КТПБ")).toBe("exact");
+    expect(termMatchStrength("монтаж трансформаторной подстанции", "трансформатор")).toBe(
+      "exact",
+    );
+    expect(
+      termMatchStrength("КТП и сетей электроснабжения района", "сетей электроснабжения"),
+    ).toBe("exact");
+  });
+
+  it("marks a term buried inside a foreign code as embedded, not exact", () => {
+    expect(termMatchStrength("Реконструкция ВЛ-0,4 кВ от БКТПБ-746", "КТПБ")).toBe("embedded");
+    expect(termMatchStrength("2БКТПБ 400кВА-10/0,4 кВ", "КТПБ")).toBe("embedded");
+    expect(termMatchStrength("Комплектная подстанция БКТПБ", "КТПБ")).toBe("embedded");
+    expect(termMatchStrength("Реконструкция ВЛ-0,4 кВ от БКТПБ-746", "КТП")).toBe("embedded");
+  });
+
+  it("prefers exact over embedded when both are present", () => {
+    expect(termMatchStrength("Поставка КТПБ для замены БКТПБ-746", "КТПБ")).toBe("exact");
+  });
+
+  it("returns none for abbreviations inside ordinary words", () => {
+    expect(termMatchStrength("СО2-инкубатор (термостат электронный)", "НКУ")).toBe("none");
+    expect(termMatchStrength("услуги круглосуточной охраны", "КРУ")).toBe("none");
   });
 });

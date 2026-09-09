@@ -171,12 +171,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       limit,
     );
     let skippedRejected = 0;
+    const resultItems: SpecialistProcurementCardValue[] = [];
     for (const card of selected.cards) {
       if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) {
         skippedRejected += 1;
         continue;
       }
-      catalog.upsertCase(withTriage(attachProfileToCard(card, profile.id), workspace));
+      const owned = withTriage(attachProfileToCard(card, profile.id), workspace);
+      catalog.upsertCase(owned);
+      resultItems.push(owned);
     }
     let ambiguousCount = 0;
     for (const card of selected.ambiguousCards) {
@@ -189,6 +192,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         workspace,
       );
       catalog.upsertCase(owned);
+      resultItems.push(owned);
       ambiguousCount += 1;
       if (existing === undefined) {
         catalog.record(inboxItemFromFoundCard(owned, clock()));
@@ -207,7 +211,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: selected.discardedCount + skippedRejected,
       ambiguousCount,
       hasMore: hits.length >= limit,
-      items: listed(),
+      items: resultItems,
     });
   }
 

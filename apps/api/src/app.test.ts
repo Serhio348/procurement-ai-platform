@@ -224,6 +224,123 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("keeps review cases out of the list until opened, and prunes untouched stale cases", async () => {
+    const removeCases = vi.fn(async (_ids: readonly string[]) => undefined);
+    let now = "2026-09-01T10:00:00.000Z";
+    let hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/exact-1",
+        url: "https://goszakupki.by/auction/view/exact-1",
+        title: "Поставка КТПБ-250",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "etrade/weak-1",
+        url: "https://goszakupki.by/etrade/view/weak-1",
+        title: "Реконструкция ВЛ-0,4 кВ от БКТПБ-746",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "single-source/none-1",
+        url: "https://goszakupki.by/single-source/view/none-1",
+        title: "СО2-инкубатор (термостат электронный)",
+      }),
+    ];
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      removeCases,
+      clock: () => now,
+      searchHits: { search: async () => hits },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const listedAfterFirst = await app.inject({ method: "GET", url: "/api/procurements" });
+    const inboxAfterFirst = await app.inject({ method: "GET", url: "/api/inbox" });
+    const titles = (body: string) =>
+      (JSON.parse(body).items as Array<{ title: string }>).map((item) => item.title);
+
+    expect(first.statusCode).toBe(200);
+    expect(titles(first.body)).toEqual(["Поставка КТПБ-250"]);
+    // Review cases live in the inbox only; the list shows confident matches.
+    expect(titles(listedAfterFirst.body)).toEqual(["Поставка КТПБ-250"]);
+    expect(titles(inboxAfterFirst.body).sort()).toEqual(
+      ["Реконструкция ВЛ-0,4 кВ от БКТПБ-746", "СО2-инкубатор (термостат электронный)"].sort(),
+    );
+
+    // Opening the weak one from the inbox takes it on: it joins the list.
+    const weakRow = (JSON.parse(inboxAfterFirst.body).items as Array<{ id: string; title: string }>)
+      .find((item) => item.title.includes("БКТПБ-746"));
+    const opened = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${weakRow?.id ?? ""}/resolve`,
+      payload: { action: "open" },
+    });
+    expect(opened.statusCode).toBe(200);
+    const listedAfterOpen = await app.inject({ method: "GET", url: "/api/procurements" });
+    expect(titles(listedAfterOpen.body).sort()).toEqual(
+      ["Поставка КТПБ-250", "Реконструкция ВЛ-0,4 кВ от БКТПБ-746"].sort(),
+    );
+
+    // Eight days later the source no longer returns anything. Untouched cases
+    // vanish from the catalog and the database; the opened one is still untouched
+    // by a decision, so it goes too. The inbox row of the incubator goes with it.
+    now = "2026-09-09T10:00:00.000Z";
+    hits = [];
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const listedAfterPrune = await app.inject({ method: "GET", url: "/api/procurements" });
+    const inboxAfterPrune = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(titles(listedAfterPrune.body)).toEqual([]);
+    expect(titles(inboxAfterPrune.body)).toEqual([]);
+    expect(removeCases).toHaveBeenCalledTimes(1);
+    expect(removeCases.mock.calls[0]?.[0]).toHaveLength(3);
+
+    await app.close();
+  });
+
+  it("does not prune a case the specialist decided on", async () => {
+    let now = "2026-09-01T10:00:00.000Z";
+    let hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/keep-1",
+        url: "https://goszakupki.by/auction/view/keep-1",
+        title: "Поставка КТПБ-250",
+      }),
+    ];
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      clock: () => now,
+      searchHits: { search: async () => hits },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const id = (JSON.parse(first.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "monitor" },
+    });
+
+    now = "2026-10-01T10:00:00.000Z";
+    hits = [];
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+    const items = JSON.parse(listed.body).items as Array<{ title: string; triage?: string }>;
+    expect(items).toEqual([expect.objectContaining({ title: "Поставка КТПБ-250", triage: "monitor" })]);
+
+    await app.close();
+  });
+
   it("returns delivery and warranty from the live Word TZ and does not treat 99.5% cap as advance", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     const list = await app.inject({ method: "GET", url: "/api/procurements" });

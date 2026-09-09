@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { SpecialistCatalog } from "./catalog.js";
+import { inboxItemFromFoundCard } from "./inbox-action.js";
 
 const fixture = {
   items: [
@@ -125,5 +126,61 @@ describe("SpecialistCatalog", () => {
       "00000000-0000-4000-8000-000000000901",
       "00000000-0000-4000-8000-000000000902",
     ]);
+  });
+
+  it("prunes stale undecided live cases together with their inbox rows, keeps decided and fresh ones", () => {
+    const catalog = new SpecialistCatalog();
+    const base = {
+      status: "unknown",
+      statusLabel: "неизвестно",
+      live: true,
+      foundAs: "review",
+    };
+    const stale = SpecialistProcurementCard.parse({
+      ...base,
+      id: "00000000-0000-4000-8000-000000000a01",
+      title: "СО2-инкубатор",
+      url: "https://goszakupki.by/single-source/view/1",
+      sourceProcurementId: "single-source/1",
+      lastSeenAt: "2026-09-01T00:00:00.000Z",
+    });
+    const legacy = SpecialistProcurementCard.parse({
+      ...base,
+      id: "00000000-0000-4000-8000-000000000a02",
+      title: "Старая карточка без отметки",
+      url: "https://goszakupki.by/auction/view/2",
+      sourceProcurementId: "auction/2",
+    });
+    const fresh = SpecialistProcurementCard.parse({
+      ...base,
+      id: "00000000-0000-4000-8000-000000000a03",
+      title: "Свежая",
+      url: "https://goszakupki.by/auction/view/3",
+      sourceProcurementId: "auction/3",
+      lastSeenAt: "2026-09-08T12:00:00.000Z",
+    });
+    const decided = SpecialistProcurementCard.parse({
+      ...base,
+      id: "00000000-0000-4000-8000-000000000a04",
+      title: "Под наблюдением",
+      url: "https://goszakupki.by/auction/view/4",
+      sourceProcurementId: "auction/4",
+      triage: "monitor",
+      lastSeenAt: "2026-08-01T00:00:00.000Z",
+    });
+    for (const card of [stale, legacy, fresh, decided]) catalog.upsertCase(card);
+    catalog.record(inboxItemFromFoundCard(stale, "2026-09-01T00:00:00.000Z"));
+
+    const removed = catalog.prune({
+      now: "2026-09-09T00:00:00.000Z",
+      maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+      keepSourceIds: new Set(),
+    });
+
+    expect(removed.sort()).toEqual([stale.id, legacy.id].sort());
+    expect(catalog.procurements().map((card) => card.id).sort()).toEqual(
+      [fresh.id, decided.id].sort(),
+    );
+    expect(catalog.urgentInbox()).toEqual([]);
   });
 });

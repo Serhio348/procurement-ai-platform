@@ -57,6 +57,8 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 
+export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
 }
@@ -75,6 +77,9 @@ export interface BuildApiOptions {
   liveProcurementsOnly?: boolean;
   persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
   persistCases?: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
+  removeCases?: (ids: readonly string[]) => Promise<void>;
+  /** How long an undecided live case survives without a search returning it. */
+  caseMaxAgeMs?: number;
   blobStore?: BlobStore;
   clock?: () => string;
   ingestProgress?: ReturnType<typeof createIngestProgressHub>;
@@ -98,6 +103,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
   const clock = options.clock ?? (() => new Date().toISOString());
   const journal = options.journal ?? createMemoryAdminJournal();
+  const caseMaxAgeMs = options.caseMaxAgeMs ?? DEFAULT_CASE_MAX_AGE_MS;
   const persist = async (): Promise<void> => {
     if (options.persistWorkspace !== undefined) {
       await options.persistWorkspace(workspace.snapshot());
@@ -107,13 +113,30 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   };
 
+  // Cases the specialist never touched do not pile up: once a search stops
+  // returning them for caseMaxAgeMs they leave the catalog and the database.
+  const pruneStaleCases = async (): Promise<void> => {
+    const removed = catalog.prune({
+      now: clock(),
+      maxAgeMs: caseMaxAgeMs,
+      keepSourceIds: workspace.decidedSourceIds(),
+    });
+    if (removed.length === 0) return;
+    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    logger.info("Specialist stale cases pruned", { count: removed.length });
+    if (options.removeCases !== undefined) await options.removeCases(removed);
+  };
+
+  // Review cases wait in the inbox; they enter the list only after a
+  // specialist opens or decides them.
   const listed = (): SpecialistProcurementCardValue[] => {
     const rejected = workspace.rejectedSourceIds();
     return catalog
       .procurements()
       .filter((item) => !rejected.has(item.sourceProcurementId))
       .filter((item) => !liveProcurementsOnly || item.live)
-      .map((item) => withTriage(item, workspace));
+      .map((item) => withTriage(item, workspace))
+      .filter((item) => item.foundAs !== "review" || item.triage !== undefined);
   };
 
   const app = Fastify({ logger: false });
@@ -155,6 +178,38 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     };
   }
 
+  /**
+   * Puts a found card into the catalog. A case seen before keeps its
+   * documents and facts; only the listing fields, lastSeenAt and the profile
+   * link are refreshed. A review case that a later search matches exactly is
+   * promoted to "match"; the reverse never happens.
+   */
+  function rememberFound(
+    card: SpecialistProcurementCardValue,
+    profileId: string,
+    now: string,
+  ): { card: SpecialistProcurementCardValue; isNew: boolean } {
+    const existing = catalog
+      .procurements()
+      .find((item) => item.sourceProcurementId === card.sourceProcurementId);
+    const foundAs = card.foundAs === "match" || existing?.foundAs === "match" ? "match" : card.foundAs;
+    const merged: SpecialistProcurementCardValue =
+      existing === undefined
+        ? { ...card, lastSeenAt: now }
+        : {
+            ...existing,
+            title: card.title,
+            statusLabel: card.statusLabel,
+            ...(card.buyerName === undefined ? {} : { buyerName: card.buyerName }),
+            ...(card.amountLabel === undefined ? {} : { amountLabel: card.amountLabel }),
+            ...(foundAs === undefined ? {} : { foundAs }),
+            lastSeenAt: now,
+          };
+    const owned = withTriage(attachProfileToCard(merged, profileId), workspace);
+    catalog.upsertCase(owned);
+    return { card: owned, isNew: existing === undefined };
+  }
+
   async function runManualSearch(
     limit: number,
     offset: number,
@@ -170,6 +225,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       },
       limit,
     );
+    const now = clock();
     let skippedRejected = 0;
     const resultItems: SpecialistProcurementCardValue[] = [];
     for (const card of selected.cards) {
@@ -177,26 +233,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         skippedRejected += 1;
         continue;
       }
-      const owned = withTriage(attachProfileToCard(card, profile.id), workspace);
-      catalog.upsertCase(owned);
-      resultItems.push(owned);
+      resultItems.push(rememberFound(card, profile.id, now).card);
     }
     // Weak and keyword-less hits wait in the inbox for a human look; they are
     // not listed among the confident matches returned to the console.
     let ambiguousCount = 0;
     for (const card of selected.ambiguousCards) {
       if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
-      const existing = catalog
-        .procurements()
-        .find((item) => item.sourceProcurementId === card.sourceProcurementId);
-      const owned = withTriage(
-        attachProfileToCard(existing ?? card, profile.id),
-        workspace,
-      );
-      catalog.upsertCase(owned);
+      const remembered = rememberFound(card, profile.id, now);
       ambiguousCount += 1;
-      if (existing === undefined) {
-        catalog.record(inboxItemFromFoundCard(owned, clock()));
+      if (remembered.isNew) {
+        catalog.record(inboxItemFromFoundCard(remembered.card, now));
       }
     }
     logger.info("Specialist profile search recorded", {
@@ -205,6 +252,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: selected.discardedCount + skippedRejected,
       ambiguousCount,
     });
+    await pruneStaleCases();
     await persist();
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
@@ -266,31 +314,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         },
         limit,
       );
+      const now = clock();
       for (const card of selected.cards) {
-        const existing = catalog
-          .procurements()
-          .find((item) => item.sourceProcurementId === card.sourceProcurementId);
-        if (existing !== undefined) {
-          catalog.upsertCase(withTriage(attachProfileToCard(existing, profile.id), workspace));
-          continue;
-        }
-        catalog.upsertCase(withTriage(attachProfileToCard(card, profile.id), workspace));
-        catalog.record(inboxItemFromFoundCard(card, clock()));
+        const remembered = rememberFound(card, profile.id, now);
+        if (!remembered.isNew) continue;
+        catalog.record(inboxItemFromFoundCard(remembered.card, now));
         known.add(card.sourceProcurementId);
         addedCount += 1;
       }
       for (const card of selected.ambiguousCards) {
         if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) continue;
-        const existing = catalog
-          .procurements()
-          .find((item) => item.sourceProcurementId === card.sourceProcurementId);
-        const owned = withTriage(
-          attachProfileToCard(existing ?? card, profile.id),
-          workspace,
-        );
-        catalog.upsertCase(owned);
-        if (existing === undefined) {
-          catalog.record(inboxItemFromFoundCard(owned, clock()));
+        const remembered = rememberFound(card, profile.id, now);
+        if (remembered.isNew) {
+          catalog.record(inboxItemFromFoundCard(remembered.card, now));
         }
       }
       logger.info("Specialist discovery recorded", {
@@ -299,7 +335,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         skippedDecidedCount,
       });
     }
-    if (addedCount > 0) await persist();
+    await pruneStaleCases();
+    await persist();
     await recordJournal(journal, {
       kind: "discovery",
       level: "info",
@@ -489,6 +526,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
 
     let card = catalog.procurement(item.change.procurementId);
+    // Opening a review case from the inbox is the specialist taking it on:
+    // from now on it belongs in the list like any confident match.
+    if (action !== "dismiss" && card !== undefined && card.foundAs === "review") {
+      card = withTriage({ ...card, foundAs: "match" }, workspace);
+      catalog.upsertCase(card);
+    }
     if (action === "refresh" && card !== undefined) {
       card = withTriage(applyInboxChangeToCard(card, item.change), workspace);
       catalog.upsertCase(card);

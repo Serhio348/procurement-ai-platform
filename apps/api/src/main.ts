@@ -67,6 +67,7 @@ async function main(): Promise<void> {
     blobStore,
     persistWorkspace: persistence.persistWorkspace,
     persistCases: persistence.persistCases,
+    removeCases: persistence.removeCases,
     journal: persistence.journal,
     ingestProgress,
     authDirectory: persistence.authDirectory,

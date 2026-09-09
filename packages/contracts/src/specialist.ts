@@ -168,8 +168,17 @@ export const SpecialistProcurementCard = z.object({
   triage: SpecialistTriageKind.optional(),
   /** Profiles that found this case. Empty: not yet tied to a direction. */
   profileIds: z.array(z.string().uuid()).default([]),
+  /**
+   * How the case reached the console. "match": a confident keyword hit, shown
+   * in the list. "review": a weak or keyword-less hit that waits in the inbox
+   * and stays out of the list until a specialist opens or decides it.
+   */
+  foundAs: z.enum(["match", "review"]).optional(),
+  /** When a search last returned this case. Undecided cases not seen for a while are pruned. */
+  lastSeenAt: IsoDateTime.optional(),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
+export type SpecialistFoundAs = NonNullable<SpecialistProcurementCard["foundAs"]>;
 
 export const SpecialistInboxResolveResponse = z.object({
   items: z.array(SpecialistInboxEntry),

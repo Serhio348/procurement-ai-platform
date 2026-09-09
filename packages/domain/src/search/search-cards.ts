@@ -5,6 +5,7 @@ import {
   SpecialistProcurementCard,
   type ProcedureCard as ProcedureCardValue,
   type SearchHit as SearchHitValue,
+  type SpecialistFoundAs,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type ProcedureStatus as ProcedureStatusValue,
 } from "@procurement/contracts";
@@ -136,34 +137,20 @@ export function cardFromRelevantHit(
   matchedTerms: readonly string[],
 ): SpecialistProcurementCardValue {
   const terms = matchedTerms.length > 0 ? matchedTerms.join(", ") : "ключевые слова профиля";
-  const label = amountLabel(hit);
-  return SpecialistProcurementCard.parse({
-    id: ProcurementId.parse(uuidFromHex(`${hit.sourceId}:${hit.sourceProcurementId}`)),
-    title: hit.title,
-    status: "unknown",
-    statusLabel: hit.sourceStatus ?? statusLabel("unknown"),
-    url: hit.url,
-    sourceProcurementId: hit.sourceProcurementId,
-    live: hit.sourceId === "goszakupki_by",
-    ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
-    ...(label === undefined ? {} : { amountLabel: label }),
-    actions: [
-      {
-        step: 1,
-        actor: "DomainSearchAgent",
-        status: "done",
-        detail: `procurement.search: найдена «${hit.title}». Релевантна по словам: ${terms}. Документы ещё не брали.`,
-      },
-    ],
-  });
+  return foundCard(
+    hit,
+    "match",
+    `procurement.search: найдена «${hit.title}». Релевантна по словам: ${terms}. Документы ещё не брали.`,
+  );
 }
 
 /** A borderline hit: the source returned it, but no profile term matched. */
 export function cardFromAmbiguousHit(
   hit: SearchHitValue,
 ): SpecialistProcurementCardValue {
-  return reviewCard(
+  return foundCard(
     hit,
+    "review",
     `procurement.search: найдена «${hit.title}». Точных совпадений по словам нет — проверьте по смыслу. Документы ещё не брали.`,
   );
 }
@@ -173,13 +160,18 @@ export function cardFromWeakHit(
   hit: SearchHitValue,
   matchedTerms: readonly string[],
 ): SpecialistProcurementCardValue {
-  return reviewCard(
+  return foundCard(
     hit,
+    "review",
     `procurement.search: найдена «${hit.title}». Слова ${matchedTerms.join(", ")} встречаются только внутри чужого кода — проверьте по смыслу. Документы ещё не брали.`,
   );
 }
 
-function reviewCard(hit: SearchHitValue, detail: string): SpecialistProcurementCardValue {
+function foundCard(
+  hit: SearchHitValue,
+  foundAs: SpecialistFoundAs,
+  detail: string,
+): SpecialistProcurementCardValue {
   const label = amountLabel(hit);
   return SpecialistProcurementCard.parse({
     id: ProcurementId.parse(uuidFromHex(`${hit.sourceId}:${hit.sourceProcurementId}`)),
@@ -189,6 +181,7 @@ function reviewCard(hit: SearchHitValue, detail: string): SpecialistProcurementC
     url: hit.url,
     sourceProcurementId: hit.sourceProcurementId,
     live: hit.sourceId === "goszakupki_by",
+    foundAs,
     ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
     ...(label === undefined ? {} : { amountLabel: label }),
     actions: [{ step: 1, actor: "DomainSearchAgent", status: "done", detail }],

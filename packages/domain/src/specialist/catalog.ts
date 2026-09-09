@@ -16,6 +16,7 @@ export class SpecialistCatalog {
   readonly #order: InboxFixtureItemValue[] = [];
   readonly #cases = new Map<string, SpecialistProcurementCardValue>();
   readonly #dismissed = new Set<string>();
+  readonly #pruned = new Set<string>();
 
   static parse(raw: unknown): SpecialistCatalog {
     const fixture = InboxFixture.parse(raw);
@@ -78,6 +79,30 @@ export class SpecialistCatalog {
     return [...this.#dismissed];
   }
 
+  /**
+   * Drops undecided live cases a search has not returned for `maxAgeMs`.
+   * Cases from a fixture inbox are left alone; a legacy live case without
+   * lastSeenAt counts as stale. Inbox rows of pruned cases are dismissed so the
+   * inbox cannot point at a card that no longer exists.
+   */
+  prune(input: { now: string; maxAgeMs: number; keepSourceIds: ReadonlySet<string> }): string[] {
+    const cutoff = Date.parse(input.now) - input.maxAgeMs;
+    const removed: string[] = [];
+    for (const card of this.#cases.values()) {
+      if (!card.live || card.triage !== undefined) continue;
+      if (input.keepSourceIds.has(card.sourceProcurementId)) continue;
+      const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
+      if (Number.isFinite(seen) && seen >= cutoff) continue;
+      removed.push(card.id);
+    }
+    for (const id of removed) {
+      this.#cases.delete(id);
+      this.#pruned.add(id);
+      this.dismissByProcurementId(id);
+    }
+    return removed;
+  }
+
   urgentInbox(): SpecialistInboxEntry[] {
     return this.#order
       .filter((item) => item.change.urgent && !this.#dismissed.has(item.change.id))
@@ -90,7 +115,9 @@ export class SpecialistCatalog {
       latest.set(item.change.procurementId, item);
     }
     const fromChanges = [...latest.values()].map(toProcurementCard);
-    const rest = fromChanges.filter((item) => !this.#cases.has(item.id));
+    const rest = fromChanges.filter(
+      (item) => !this.#cases.has(item.id) && !this.#pruned.has(item.id),
+    );
     return [...this.#cases.values(), ...rest];
   }
 

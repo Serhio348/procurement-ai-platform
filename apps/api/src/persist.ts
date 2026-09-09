@@ -28,6 +28,7 @@ export interface SpecialistPersistence {
   hydrateCatalog: (catalog: SpecialistCatalog) => Promise<void>;
   persistWorkspace: (state: SpecialistWorkspaceState) => Promise<void>;
   persistCases: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
+  removeCases: (ids: readonly string[]) => Promise<void>;
   journal: AdminJournalPort;
   close: () => Promise<void>;
 }
@@ -106,6 +107,20 @@ export async function openSpecialistPersistence(options: {
     }
   };
 
+  const removeCases = async (ids: readonly string[]): Promise<void> => {
+    if (store === undefined) return;
+    try {
+      await store.removeCases(ids);
+    } catch (error) {
+      options.logger.error("PostgreSQL case removal failed", error);
+      await recordJournal(journal, {
+        kind: "platform",
+        level: "error",
+        message: "Не удалось удалить устаревшие карточки из PostgreSQL.",
+      });
+    }
+  };
+
   return {
     workspace,
     postgres: store !== undefined,
@@ -122,6 +137,7 @@ export async function openSpecialistPersistence(options: {
     },
     persistWorkspace,
     persistCases,
+    removeCases,
     journal,
     async close() {
       if (connected !== undefined) await connected.pool.end();

@@ -5,7 +5,7 @@ import {
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Database } from "./client.js";
 import {
   documentVersions,
@@ -60,6 +60,12 @@ export function createSpecialistStore(db: Database) {
       for (const card of cards) {
         await saveSpecialistCase(db, card);
       }
+    },
+
+    /** Removes console cards only; the normalized procurements row stays as history. */
+    async removeCases(ids: readonly string[]): Promise<void> {
+      if (ids.length === 0) return;
+      await db.delete(specialistCases).where(inArray(specialistCases.id, [...ids]));
     },
   };
 }

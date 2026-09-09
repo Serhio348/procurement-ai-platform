@@ -448,46 +448,28 @@ export function ProfileApp({
 
                 <div className="profile-filter-group">
                   <label htmlFor="profile-types">Вид процедуры</label>
-                  <select
+                  <MultiSelectDropdown
                     id="profile-types"
-                    multiple
-                    size={3}
-                    value={filters.typeIds ?? []}
-                    onChange={(event) =>
-                      setFilter(
-                        "typeIds",
-                        [...event.target.selectedOptions].map((option) => option.value),
-                      )
-                    }
-                  >
-                    {TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={TYPE_OPTIONS}
+                    selected={filters.typeIds ?? []}
+                    onChange={(next) => {
+                      setFilter("typeIds", next);
+                    }}
+                    placeholder="Выберите виды процедур"
+                  />
                 </div>
 
                 <div className="profile-filter-group">
                   <label htmlFor="profile-regions">Область заказчика</label>
-                  <select
+                  <MultiSelectDropdown
                     id="profile-regions"
-                    multiple
-                    size={3}
-                    value={filters.regionIds ?? []}
-                    onChange={(event) =>
-                      setFilter(
-                        "regionIds",
-                        [...event.target.selectedOptions].map((option) => option.value),
-                      )
-                    }
-                  >
-                    {REGION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={REGION_OPTIONS}
+                    selected={filters.regionIds ?? []}
+                    onChange={(next) => {
+                      setFilter("regionIds", next);
+                    }}
+                    placeholder="Выберите области"
+                  />
                 </div>
               </div>
             </section>
@@ -501,6 +483,78 @@ export function ProfileApp({
         </form>
       </main>
     </Shell>
+  );
+}
+
+function MultiSelectDropdown({
+  id,
+  options,
+  selected,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  selected: readonly string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(event: MouseEvent): void {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClick);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [open]);
+
+  const label =
+    selected.length === 0
+      ? placeholder
+      : selected.length === 1
+        ? options.find((option) => option.value === selected[0])?.label ?? placeholder
+        : `Выбрано ${selected.length}`;
+
+  return (
+    <div className="profile-filter-dropdown" ref={ref}>
+      <button
+        id={id}
+        type="button"
+        className="profile-filter-dropdown-toggle"
+        onClick={() => {
+          setOpen((current) => !current);
+        }}
+      >
+        {label}
+      </button>
+      {open ? (
+        <div className="profile-filter-dropdown-menu">
+          {options.map((option) => (
+            <label key={option.value} className="profile-filter-dropdown-option">
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={(event) => {
+                  const next = event.target.checked
+                    ? [...selected, option.value]
+                    : selected.filter((value) => value !== option.value);
+                  onChange(next);
+                }}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -639,19 +639,29 @@ h3 {
 .profile-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 16px 0 0;
+  gap: 6px;
+  margin: 0;
 }
 
 .profile-page {
   height: 100%;
   min-height: 0;
   overflow: auto;
-  padding: 12px 20px 24px;
+  padding: 8px 16px 16px;
 }
 
 .profile-back {
+  margin: 0 0 4px;
+}
+
+.profile-back a {
+  color: #2f5d8a;
+  font-size: 12px;
+}
+
+.profile-page h1 {
   margin: 0 0 8px;
+  font-size: 16px;
 }
 
 .profile-back a {
@@ -722,13 +732,13 @@ h3 {
 .profile-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .profile-section {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px 12px;
+  gap: 6px;
+  padding: 8px 10px 10px;
   background: #fff;
   border: 1px solid #d5dae2;
   border-radius: 4px;
@@ -736,17 +746,18 @@ h3 {
 
 .profile-section h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .profile-form label {
   font-weight: 600;
+  font-size: 13px;
 }
 
 .profile-tabs {
   display: flex;
-  gap: 4px;
-  padding: 4px;
+  gap: 3px;
+  padding: 3px;
   background: #f4f6f8;
   border: 1px solid #d5dae2;
   border-radius: 4px;
@@ -754,9 +765,9 @@ h3 {
 
 .profile-tab {
   flex: 1;
-  padding: 8px 12px;
+  padding: 5px 8px;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   color: #3a4b5c;
   background: transparent;
   border: 1px solid transparent;
@@ -777,7 +788,8 @@ h3 {
 .profile-tab-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 10px;
+  align-items: start;
 }
 
 @media (max-width: 800px) {
@@ -787,18 +799,41 @@ h3 {
 }
 
 .profile-hint {
+  margin: 0;
   color: #5c6778;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .profile-form input,
 .profile-form textarea {
   font: inherit;
-  padding: 8px 10px;
+  font-size: 13px;
+  padding: 5px 8px;
   border: 1px solid #d5dae2;
   border-radius: 4px;
   width: 100%;
   box-sizing: border-box;
+}
+
+.profile-form input[type="checkbox"] {
+  width: auto;
+}
+
+.profile-statuses {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.profile-status-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .search-profile.is-watching {
@@ -838,17 +873,19 @@ h3 {
 
 .profile-fill {
   font: inherit;
-  padding: 6px 10px;
+  font-size: 13px;
+  padding: 5px 8px;
   color: #2f3a4a;
   background: #f4f6f8;
   border: 1px solid #d5dae2;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
 .profile-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -857,18 +894,18 @@ h3 {
 .profile-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px 4px 8px;
+  gap: 3px;
+  padding: 3px 5px 3px 6px;
   background: #f4f6f8;
   border: 1px solid #d5dae2;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .profile-chip-remove {
   font: inherit;
   line-height: 1;
-  padding: 0 4px;
+  padding: 0 3px;
   color: #5c6778;
   background: transparent;
   border: 0;
@@ -877,12 +914,12 @@ h3 {
 .profile-empty-queries {
   margin: 0;
   color: #5c6778;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .profile-add-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .profile-add-row input {
@@ -1107,46 +1144,47 @@ h3 {
 .profile-filters-form {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px 12px;
+  gap: 8px 10px;
   align-items: start;
 }
 
 .profile-filter-group {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .profile-filter-group label,
 .profile-filter-label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .profile-filter-group input,
 .profile-filter-group select {
   font: inherit;
-  padding: 6px 8px;
+  font-size: 13px;
+  padding: 5px 8px;
   border: 1px solid #d5dae2;
   border-radius: 4px;
   width: 100%;
 }
 
 .profile-filter-group select[multiple] {
-  padding: 4px 6px;
-  min-height: 88px;
+  padding: 3px 5px;
+  min-height: 74px;
 }
 
 .profile-filter-range-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
 }
 
 .profile-sublabel {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   color: #5c6778;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 @media (max-width: 900px) {

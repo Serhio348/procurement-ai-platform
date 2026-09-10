@@ -804,6 +804,15 @@ h3 {
   font-size: 12px;
 }
 
+.profile-unsaved {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff4d6;
+  color: #7a5200;
+  font-size: 13px;
+}
+
 .profile-form input,
 .profile-form textarea {
   font: inherit;

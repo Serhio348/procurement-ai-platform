@@ -113,19 +113,34 @@ export function ProfileApp({
     setFilters((current) => ({ ...current, [key]: value } as typeof current));
   }
 
+  function currentWrite(): SpecialistProfileWrite {
+    return {
+      name: name.trim(),
+      purpose: name.trim(),
+      description: "",
+      keywords,
+      excludeKeywords: splitExcludeLines(excluded),
+      statuses: [...statuses],
+      filters,
+    };
+  }
+
+  const dirty = !sameWrite(currentWrite(), profile);
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    function warn(event: BeforeUnloadEvent): void {
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   async function saveProfile(): Promise<void> {
     if (busy) return;
     setBusy(true);
     try {
-      const next = await save({
-        name: name.trim(),
-        purpose: name.trim(),
-        description: "",
-        keywords,
-        excludeKeywords: splitExcludeLines(excluded),
-        statuses: [...statuses],
-        filters,
-      });
+      const next = await save(currentWrite());
       setProfile(next);
       const title = profileDisplayName(next);
       await navigate("/profiles", {
@@ -144,7 +159,10 @@ export function ProfileApp({
     if (busy) return;
     setBusy(true);
     try {
-      const next = await setWatch(!profile.watchNewProcurements);
+      // Watch without saved keywords runs a search that finds nothing, so the
+      // form is written first and only then the switch is flipped.
+      const saved = dirty ? await save(currentWrite()) : profile;
+      const next = await setWatch(!saved.watchNewProcurements);
       setProfile(next);
       setNotice(
         next.watchNewProcurements
@@ -162,9 +180,17 @@ export function ProfileApp({
     <Shell>
       <main className="profile-page">
         <p className="profile-back">
-          <Link to="/profiles">Все профили</Link>
+          <Link
+            to="/profiles"
+            onClick={(event) => {
+              if (dirty && !window.confirm(UNSAVED_PROMPT)) event.preventDefault();
+            }}
+          >
+            Все профили
+          </Link>
         </p>
         <h1>Профиль направления</h1>
+        {dirty ? <p className="profile-unsaved">Есть несохранённые изменения — нажмите «Сохранить профиль».</p> : null}
         {notice === undefined ? null : <p className="search-notice">{notice}</p>}
         <form
           className="profile-form"
@@ -555,6 +581,22 @@ function MultiSelectDropdown({
         </div>
       ) : null}
     </div>
+  );
+}
+
+const UNSAVED_PROMPT = "Изменения профиля не сохранены. Уйти без сохранения?";
+
+function sameWrite(
+  write: SpecialistProfileWrite,
+  saved: SpecialistWorkingProfile,
+): boolean {
+  const list = (items: readonly string[]) => items.map((item) => item.trim().toLowerCase()).join("\n");
+  return (
+    write.name === saved.name.trim() &&
+    list(write.keywords) === list(saved.keywords) &&
+    list(write.excludeKeywords) === list(saved.excludeKeywords) &&
+    [...write.statuses].sort().join(",") === [...saved.statuses].sort().join(",") &&
+    JSON.stringify(write.filters) === JSON.stringify(saved.filters)
   );
 }
 

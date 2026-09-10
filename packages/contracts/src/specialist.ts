@@ -322,12 +322,32 @@ export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
 
 export const SpecialistDiscoveryResponse = z.object({
   ran: z.boolean(),
-  reason: z.enum(["watch_off", "no_keywords", "ok"]),
+  reason: z.enum(["watch_off", "no_keywords", "ok", "already_running", "cooldown"]),
   addedCount: z.number().int().nonnegative(),
   skippedDecidedCount: z.number().int().nonnegative(),
   items: z.array(SpecialistProcurementCard),
 });
 export type SpecialistDiscoveryResponse = z.infer<typeof SpecialistDiscoveryResponse>;
+
+export const SpecialistDiscoveryHealth = z.object({
+  isRunning: z.boolean(),
+  startedAt: IsoDateTime.optional(),
+  finishedAt: IsoDateTime.optional(),
+  lastErrorAt: IsoDateTime.optional(),
+  cooldownUntil: IsoDateTime.optional(),
+  consecutiveFailures: z.number().int().nonnegative(),
+  circuitOpen: z.boolean(),
+  watchingCount: z.number().int().nonnegative(),
+  intervalMs: z.number().int().nonnegative(),
+  lastAddedCount: z.number().int().nonnegative().optional(),
+  lastSkippedCount: z.number().int().nonnegative().optional(),
+});
+export type SpecialistDiscoveryHealth = z.infer<typeof SpecialistDiscoveryHealth>;
+
+export const SpecialistDiscoveryHealthResponse = z.object({
+  health: SpecialistDiscoveryHealth,
+});
+export type SpecialistDiscoveryHealthResponse = z.infer<typeof SpecialistDiscoveryHealthResponse>;
 
 export const SpecialistLiveRun = z.object({
   capturedAt: IsoDateTime,

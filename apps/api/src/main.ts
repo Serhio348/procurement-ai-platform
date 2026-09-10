@@ -19,6 +19,7 @@ import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
 import { createSearchClassifierFromEnv } from "./search-classifier.js";
 import { createProcurementSearchReview } from "./search-review.js";
+import { createDiscoveryController } from "./discovery-control.js";
 
 async function main(): Promise<void> {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -73,6 +74,20 @@ async function main(): Promise<void> {
     );
   }
   const authMail = createSmtpMailPort(process.env);
+  const discoveryController = createDiscoveryController({
+    requestIntervalMs: Math.max(
+      0,
+      Number.parseInt(process.env["SPECIALIST_DISCOVERY_REQUEST_INTERVAL_MS"] ?? "0", 10) || 0,
+    ),
+    failureThreshold: Math.max(
+      1,
+      Number.parseInt(process.env["SPECIALIST_DISCOVERY_FAILURE_THRESHOLD"] ?? "3", 10) || 3,
+    ),
+    cooldownMs: Math.max(
+      1_000,
+      Number.parseInt(process.env["SPECIALIST_DISCOVERY_COOLDOWN_MS"] ?? "300000", 10) || 300_000,
+    ),
+  });
   const app = await buildSpecialistApi({
     catalog,
     workspace,
@@ -85,6 +100,7 @@ async function main(): Promise<void> {
     removeCases: persistence.removeCases,
     journal: persistence.journal,
     ingestProgress,
+    discoveryController,
     authDirectory: persistence.authDirectory,
     ...(authMail === undefined ? {} : { authMail }),
     authCookieSecure: process.env["AUTH_COOKIE_SECURE"] === "1",

@@ -2,6 +2,7 @@ import {
   InboxFixtureItem,
   type SearchQuery,
   SpecialistDecisionWrite,
+  SpecialistDiscoveryHealthResponse,
   SpecialistDiscoveryResponse,
   SpecialistIngestProgress,
   SpecialistInboxListResponse,
@@ -54,6 +55,11 @@ import {
   getBlob,
   isSha256Hex,
 } from "./blobs.js";
+import {
+  createDiscoveryController,
+  type DiscoveryController,
+  type DiscoveryResult,
+} from "./discovery-control.js";
 import { discoveryDoneMessage, discoveryFailedMessage } from "./discovery-transport.js";
 import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
@@ -102,6 +108,7 @@ export interface BuildApiOptions {
   authPublicUrl?: string;
   internalApiToken?: string;
   journal?: AdminJournalPort;
+  discoveryController?: DiscoveryController;
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
@@ -118,6 +125,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const clock = options.clock ?? (() => new Date().toISOString());
   const journal = options.journal ?? createMemoryAdminJournal();
   const caseMaxAgeMs = options.caseMaxAgeMs ?? DEFAULT_CASE_MAX_AGE_MS;
+  const discoveryController = options.discoveryController ?? createDiscoveryController();
   const persist = async (): Promise<void> => {
     if (options.persistWorkspace !== undefined) {
       await options.persistWorkspace(workspace.snapshot());
@@ -371,116 +379,153 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   async function runDiscovery(limit = DEFAULT_DISCOVERY_LIMIT) {
-    const watched = workspace.profiles().filter((item) =>
-      shouldRunDiscovery(item.watchNewProcurements),
-    );
-    if (watched.length === 0) {
+    const start = discoveryController.tryStart(new Date());
+    if (start.kind !== "started") {
       return SpecialistDiscoveryResponse.parse({
         ran: false,
-        reason: "watch_off",
+        reason: start.kind === "busy" ? "already_running" : "cooldown",
         addedCount: 0,
         skippedDecidedCount: 0,
         items: listed(),
       });
     }
-    const ready = watched.filter((item) => item.keywords.length > 0);
-    if (ready.length === 0) {
-      return SpecialistDiscoveryResponse.parse({
-        ran: false,
-        reason: "no_keywords",
-        addedCount: 0,
-        skippedDecidedCount: 0,
-        items: listed(),
-      });
-    }
-    let addedCount = 0;
-    let skippedDecidedCount = 0;
-    const known = new Set(catalog.procurements().map((item) => item.sourceProcurementId));
-    const failed: Array<{ profile: SpecialistWorkingProfile; error: unknown }> = [];
-    const succeeded: SpecialistWorkingProfile[] = [];
-    for (const profile of ready) {
-      // One profile's failure must not cost the others their pass, nor lose
-      // what earlier profiles already found: the loop goes on and persists.
-      let hits: readonly SearchHit[];
-      const startedAt = clock();
-      try {
-        hits = await searchHits.search(
-          buildSearchQuery(profile, limit, 0, discoveryPublishedFrom(profile)),
-        );
-      } catch (error) {
-        logger.error("Specialist discovery search failed", error, {
-          profileName: profileDisplayName(profile),
-        });
-        failed.push({ profile, error });
-        continue;
-      }
-      succeeded.push(profile);
-      const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
-      skippedDecidedCount += partitioned.skippedDecidedCount;
-      const selected = selectRelevantSearchCards(
-        partitioned.undecided,
-        {
-          keywords: profile.keywords,
-          excludeKeywords: profile.excludeKeywords,
-          statuses: profile.statuses,
-        },
-        limit,
+    try {
+      const watched = workspace.profiles().filter((item) =>
+        shouldRunDiscovery(item.watchNewProcurements),
       );
-      const now = clock();
-      for (const card of selected.cards) {
-        const remembered = rememberFound(card, profile.id, now);
-        if (!remembered.isNew) continue;
-        catalog.record(inboxItemFromFoundCard(remembered.card, now));
-        known.add(card.sourceProcurementId);
-        addedCount += 1;
+      if (watched.length === 0) {
+        const result: DiscoveryResult = {
+          ran: false,
+          reason: "watch_off",
+          addedCount: 0,
+          skippedDecidedCount: 0,
+        };
+        discoveryController.finish(result, new Date());
+        return SpecialistDiscoveryResponse.parse({
+          ...result,
+          items: listed(),
+        });
       }
-      const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: true });
-      for (const card of reviewed.matched) {
-        if (known.has(card.sourceProcurementId)) continue;
-        known.add(card.sourceProcurementId);
-        addedCount += 1;
+      const ready = watched.filter((item) => item.keywords.length > 0);
+      if (ready.length === 0) {
+        const result: DiscoveryResult = {
+          ran: false,
+          reason: "no_keywords",
+          addedCount: 0,
+          skippedDecidedCount: 0,
+        };
+        discoveryController.finish(result, new Date());
+        return SpecialistDiscoveryResponse.parse({
+          ...result,
+          items: listed(),
+        });
       }
-      // The watermark is the pass start, not its end: a procedure posted while
-      // the pass ran must fall into the next window.
-      workspace.markDiscovered(profile.id, startedAt);
-      logger.info("Specialist discovery recorded", {
-        profileName: profileDisplayName(profile),
-        addedCount,
-        skippedDecidedCount,
-      });
-    }
-    workspace.forgetStaleVerdicts(clock());
-    await pruneStaleCases();
-    await persist();
-    for (const item of failed) {
+      let addedCount = 0;
+      let skippedDecidedCount = 0;
+      const known = new Set(catalog.procurements().map((item) => item.sourceProcurementId));
+      const failed: Array<{ profile: SpecialistWorkingProfile; error: unknown }> = [];
+      const succeeded: SpecialistWorkingProfile[] = [];
+      for (const profile of ready) {
+        // One profile's failure must not cost the others their pass, nor lose
+        // what earlier profiles already found: the loop goes on and persists.
+        let hits: readonly SearchHit[];
+        const startedAt = clock();
+        try {
+          await discoveryController.beforeRequest(new Date());
+          hits = await searchHits.search(
+            buildSearchQuery(profile, limit, 0, discoveryPublishedFrom(profile)),
+          );
+        } catch (error) {
+          logger.error("Specialist discovery search failed", error, {
+            profileName: profileDisplayName(profile),
+          });
+          failed.push({ profile, error });
+          continue;
+        }
+        succeeded.push(profile);
+        const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
+        skippedDecidedCount += partitioned.skippedDecidedCount;
+        const selected = selectRelevantSearchCards(
+          partitioned.undecided,
+          {
+            keywords: profile.keywords,
+            excludeKeywords: profile.excludeKeywords,
+            statuses: profile.statuses,
+          },
+          limit,
+        );
+        const now = clock();
+        for (const card of selected.cards) {
+          const remembered = rememberFound(card, profile.id, now);
+          if (!remembered.isNew) continue;
+          catalog.record(inboxItemFromFoundCard(remembered.card, now));
+          known.add(card.sourceProcurementId);
+          addedCount += 1;
+        }
+        const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: true });
+        for (const card of reviewed.matched) {
+          if (known.has(card.sourceProcurementId)) continue;
+          known.add(card.sourceProcurementId);
+          addedCount += 1;
+        }
+        // The watermark is the pass start, not its end: a procedure posted while
+        // the pass ran must fall into the next window.
+        workspace.markDiscovered(profile.id, startedAt);
+        logger.info("Specialist discovery recorded", {
+          profileName: profileDisplayName(profile),
+          addedCount,
+          skippedDecidedCount,
+        });
+      }
+      workspace.forgetStaleVerdicts(clock());
+      await pruneStaleCases();
+      await persist();
+      for (const item of failed) {
+        await recordJournal(journal, {
+          kind: "discovery",
+          level: "error",
+          message: discoveryFailedMessage(profileDisplayName(item.profile), item.error),
+        });
+      }
+      if (succeeded.length === 0) {
+        throw failed[0]?.error ?? new Error("discovery found no profile to search");
+      }
       await recordJournal(journal, {
         kind: "discovery",
-        level: "error",
-        message: discoveryFailedMessage(profileDisplayName(item.profile), item.error),
+        level: "info",
+        message: discoveryDoneMessage({
+          profileNames: succeeded.map((item) => profileDisplayName(item)),
+          addedCount,
+          skippedDecidedCount,
+        }),
       });
-    }
-    if (succeeded.length === 0) {
-      throw failed[0]?.error ?? new Error("discovery found no profile to search");
-    }
-    await recordJournal(journal, {
-      kind: "discovery",
-      level: "info",
-      message: discoveryDoneMessage({
-        profileNames: succeeded.map((item) => profileDisplayName(item)),
+      const result: DiscoveryResult = {
+        ran: true,
+        reason: "ok",
         addedCount,
         skippedDecidedCount,
-      }),
-    });
-    return SpecialistDiscoveryResponse.parse({
-      ran: true,
-      reason: "ok",
-      addedCount,
-      skippedDecidedCount,
-      items: listed(),
-    });
+      };
+      discoveryController.finish(result, new Date());
+      return SpecialistDiscoveryResponse.parse({
+        ...result,
+        items: listed(),
+      });
+    } catch (error) {
+      discoveryController.recordFailure(error, new Date());
+      throw error;
+    }
   }
 
   app.get("/api/health", async () => ({ ok: true as const }));
+
+  app.get("/api/admin/discovery", async () => {
+    const watchingCount = workspace.profiles().filter((item) =>
+      shouldRunDiscovery(item.watchNewProcurements),
+    ).length;
+    return SpecialistDiscoveryHealthResponse.parse({
+      health: discoveryController.health(watchingCount),
+    });
+  });
 
   function profileList() {
     return SpecialistProfileListResponse.parse({

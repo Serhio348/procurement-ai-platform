@@ -29,4 +29,5 @@ export * from "./specialist/looking-for.js";
 export * from "./specialist/participate.js";
 export * from "./specialist/profile-cases.js";
 export * from "./specialist/triage.js";
+export * from "./specialist/watch.js";
 export * from "./specialist/workspace.js";

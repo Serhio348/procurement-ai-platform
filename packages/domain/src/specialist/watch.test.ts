@@ -1,0 +1,147 @@
+import { describe, expect, it } from "vitest";
+import { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
+import {
+  cardSnapshot,
+  diffCardSnapshots,
+  inboxItemFromWatchChange,
+  isWatchedTriage,
+  normalizePriceKey,
+  withWatchSnapshot,
+} from "./watch.js";
+
+function sourceCard(input: {
+  status?: "accepting_bids" | "completed" | "cancelled";
+  raw?: string;
+  amount?: number;
+  bidsDeadline?: unknown;
+}) {
+  return ProcedureCard.parse({
+    sourceId: "goszakupki_by",
+    sourceProcurementId: "auction/100",
+    url: "https://goszakupki.by/auction/view/auction-100",
+    title: "Поставка НКУ-0,4",
+    fetchedAt: "2026-09-10T00:00:00.000Z",
+    status: input.status ?? "accepting_bids",
+    ...(input.raw !== undefined
+      ? { amount: { kind: "limit", amount: null, raw: input.raw } }
+      : input.amount !== undefined
+        ? { amount: { kind: "limit", amount: input.amount, raw: `${String(input.amount)} BYN` } }
+        : {}),
+    ...(input.bidsDeadline === undefined ? {} : { bidsDeadline: input.bidsDeadline }),
+  });
+}
+
+function consoleCard(triage?: "monitor" | "participate" | "reject") {
+  return SpecialistProcurementCard.parse({
+    id: "0f1e2d3c-4b5a-4c6d-8e9f-0a1b2c3d4e5f",
+    title: "Поставка НКУ-0,4",
+    status: "accepting_bids",
+    statusLabel: "приём предложений",
+    url: "https://goszakupki.by/auction/view/auction-100",
+    sourceProcurementId: "auction/100",
+    live: true,
+    ...(triage === undefined ? {} : { triage }),
+  });
+}
+
+describe("normalizePriceKey", () => {
+  it("reads the same sum through different printings", () => {
+    expect(normalizePriceKey("1 234,56 руб.")).toBe("1234.56");
+    expect(normalizePriceKey("1 234.56 BYN")).toBe("1234.56");
+    expect(normalizePriceKey("1 234,00")).toBe("1234");
+    expect(normalizePriceKey("1.234.567,89")).toBe("1234567.89");
+    expect(normalizePriceKey("  12 345  ")).toBe("12345");
+  });
+
+  it("stays silent when there is no figure at all", () => {
+    expect(normalizePriceKey(undefined)).toBeUndefined();
+    expect(normalizePriceKey("")).toBeUndefined();
+    expect(normalizePriceKey("цена по запросу")).toBeUndefined();
+  });
+});
+
+describe("cardSnapshot", () => {
+  it("keeps the printed label next to the normalized key", () => {
+    const snapshot = cardSnapshot(
+      sourceCard({ status: "accepting_bids", raw: "1 000,50 BYN", bidsDeadline: { precision: "date", date: "2026-09-20", timeZone: "Europe/Minsk" } }),
+      "2026-09-10T00:00:00.000Z",
+    );
+    expect(snapshot.status).toBe("accepting_bids");
+    expect(snapshot.priceLabel).toBe("1 000,50 BYN");
+    expect(snapshot.priceKey).toBe("1000.5");
+    expect(snapshot.bidsDeadline).toBe("2026-09-20");
+  });
+});
+
+describe("diffCardSnapshots", () => {
+  it("does not fire when only the price formatting moved", () => {
+    const previous = cardSnapshot(sourceCard({ raw: "1 000,00 BYN" }), "2026-09-10T00:00:00.000Z");
+    const current = cardSnapshot(sourceCard({ raw: "1 000.00 BYN" }), "2026-09-11T00:00:00.000Z");
+    expect(diffCardSnapshots(previous, current)).toEqual([]);
+  });
+
+  it("fires on a real price change and keeps both wordings", () => {
+    const previous = cardSnapshot(sourceCard({ raw: "1 000,00 BYN" }), "2026-09-10T00:00:00.000Z");
+    const current = cardSnapshot(sourceCard({ raw: "1 050,00 BYN" }), "2026-09-11T00:00:00.000Z");
+    const changes = diffCardSnapshots(previous, current);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toEqual({
+      kind: "price_changed",
+      field: "price",
+      previous: "1 000,00 BYN",
+      current: "1 050,00 BYN",
+    });
+  });
+
+  it("fires on status and deadline changes", () => {
+    const previous = cardSnapshot(
+      sourceCard({
+        status: "accepting_bids",
+        bidsDeadline: { precision: "date", date: "2026-09-20", timeZone: "Europe/Minsk" },
+      }),
+      "2026-09-10T00:00:00.000Z",
+    );
+    const current = cardSnapshot(
+      sourceCard({
+        status: "cancelled",
+        bidsDeadline: { precision: "date", date: "2026-09-25", timeZone: "Europe/Minsk" },
+      }),
+      "2026-09-11T00:00:00.000Z",
+    );
+    const kinds = diffCardSnapshots(previous, current).map((item) => item.kind);
+    expect(kinds).toContain("status_changed");
+    expect(kinds).toContain("deadline_changed");
+  });
+
+  it("ignores a field that simply disappeared from the page", () => {
+    const previous = cardSnapshot(sourceCard({ raw: "1 000,00 BYN" }), "2026-09-10T00:00:00.000Z");
+    const current = cardSnapshot(sourceCard({}), "2026-09-11T00:00:00.000Z");
+    expect(diffCardSnapshots(previous, current)).toEqual([]);
+  });
+});
+
+describe("watch inbox item and card snapshot", () => {
+  it("reports a change once and stores the fresh snapshot on the case", () => {
+    const card = withWatchSnapshot(
+      consoleCard("monitor"),
+      cardSnapshot(sourceCard({ raw: "1 000,00 BYN" }), "2026-09-10T00:00:00.000Z"),
+    );
+    expect(card.watchSnapshot?.priceKey).toBe("1000");
+
+    const item = inboxItemFromWatchChange(
+      card,
+      { kind: "status_changed", field: "status", previous: "приём предложений", current: "отменена" },
+      "2026-09-11T00:00:00.000Z",
+    );
+    expect(item.change.kind).toBe("status_changed");
+    expect(item.change.urgent).toBe(true);
+    expect(item.procurement.sourceProcurementId).toBe("auction/100");
+  });
+
+  it("only monitor and participate keep being read", () => {
+    expect(isWatchedTriage(consoleCard("monitor"))).toBe(true);
+    expect(isWatchedTriage(consoleCard("participate"))).toBe(true);
+    expect(isWatchedTriage(consoleCard("reject"))).toBe(false);
+    expect(isWatchedTriage(consoleCard())).toBe(false);
+  });
+});

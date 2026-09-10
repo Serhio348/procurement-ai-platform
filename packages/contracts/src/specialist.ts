@@ -144,6 +144,22 @@ export type SpecialistCaseDocument = z.infer<typeof SpecialistCaseDocument>;
 export const SpecialistTriageKind = z.enum(["monitor", "participate", "reject"]);
 export type SpecialistTriageKind = z.infer<typeof SpecialistTriageKind>;
 
+/**
+ * What the source said about a decided case the last time the platform read
+ * it. `priceKey` is the normalized figure used for comparison; `priceLabel` is
+ * the wording as printed, shown to the specialist. Comparing labels directly
+ * would turn a reformatted page into a fake price change.
+ */
+export const SpecialistCardSnapshot = z.object({
+  capturedAt: IsoDateTime,
+  status: ProcedureStatus,
+  priceKey: z.string().min(1).optional(),
+  priceLabel: z.string().min(1).optional(),
+  /** Bids deadline as published: a plain date or an instant, verbatim. */
+  bidsDeadline: z.string().min(1).optional(),
+});
+export type SpecialistCardSnapshot = z.infer<typeof SpecialistCardSnapshot>;
+
 export const SpecialistProcurementCard = z.object({
   id: ProcurementId,
   title: z.string().min(1),
@@ -176,6 +192,12 @@ export const SpecialistProcurementCard = z.object({
   foundAs: z.enum(["match", "review"]).optional(),
   /** When a search last returned this case. Undecided cases not seen for a while are pruned. */
   lastSeenAt: IsoDateTime.optional(),
+  /**
+   * Last source reading of a case the specialist decided to follow. Present
+   * only after the first monitoring pass; absent means there is nothing to
+   * compare against yet, so the next pass only records, never alerts.
+   */
+  watchSnapshot: SpecialistCardSnapshot.optional(),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
 export type SpecialistFoundAs = NonNullable<SpecialistProcurementCard["foundAs"]>;
@@ -325,6 +347,10 @@ export const SpecialistDiscoveryResponse = z.object({
   reason: z.enum(["watch_off", "no_keywords", "ok", "already_running", "cooldown"]),
   addedCount: z.number().int().nonnegative(),
   skippedDecidedCount: z.number().int().nonnegative(),
+  /** Decided cases re-read from the source during this pass. */
+  monitoredCount: z.number().int().nonnegative().default(0),
+  /** Decided cases whose price, status or deadline moved. */
+  changedCount: z.number().int().nonnegative().default(0),
   items: z.array(SpecialistProcurementCard),
 });
 export type SpecialistDiscoveryResponse = z.infer<typeof SpecialistDiscoveryResponse>;

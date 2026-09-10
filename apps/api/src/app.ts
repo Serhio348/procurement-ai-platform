@@ -25,16 +25,21 @@ import {
 import {
   applyInboxChangeToCard,
   attachProfileToCard,
+  cardSnapshot,
+  diffCardSnapshots,
   discoveryPublishedFrom,
   inboxDocumentLinks,
   inboxItemFromFoundCard,
+  inboxItemFromWatchChange,
   inboxTopic,
+  isWatchedTriage,
   partitionHitsByDecision,
   profileDisplayName,
   selectRelevantSearchCards,
   shouldRunDiscovery,
   SpecialistCatalog,
   SpecialistWorkspace,
+  withWatchSnapshot,
   type ReviewOutcome,
 } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
@@ -60,7 +65,12 @@ import {
   type DiscoveryController,
   type DiscoveryResult,
 } from "./discovery-control.js";
-import { discoveryDoneMessage, discoveryFailedMessage } from "./discovery-transport.js";
+import type { SpecialistCardWatchPort } from "./card-watch.js";
+import {
+  discoveryDoneMessage,
+  discoveryFailedMessage,
+  watchDoneMessage,
+} from "./discovery-transport.js";
 import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
@@ -74,6 +84,12 @@ export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  * this is a ceiling for the first pass and for busy days, not a per-hour cap.
  */
 export const DEFAULT_DISCOVERY_LIMIT = 100;
+/**
+ * Decided cases one background pass re-reads. Each one costs a procurement.get,
+ * so the ceiling keeps a growing watch list from turning an hourly pass into a
+ * crawl of the whole source.
+ */
+export const DEFAULT_WATCH_LIMIT = 40;
 
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
@@ -91,6 +107,10 @@ export interface BuildApiOptions {
   searchHits?: SpecialistSearchHitsPort;
   /** Second look at weak / keyword-less hits. Absent: they all wait in the inbox. */
   searchReview?: SpecialistReviewPort;
+  /** Re-reads cases the specialist follows. Absent: monitoring stays off. */
+  cardWatch?: SpecialistCardWatchPort;
+  /** Decided cases one pass may re-read. */
+  watchLimit?: number;
   documentIngest?: SpecialistDocumentIngestPort;
   liveProcurementsOnly?: boolean;
   persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
@@ -119,6 +139,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
   const searchReview = options.searchReview;
+  const cardWatch = options.cardWatch;
+  const watchLimit = options.watchLimit ?? DEFAULT_WATCH_LIMIT;
   const documentIngest = options.documentIngest;
   const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
@@ -331,6 +353,77 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return { matched, discarded, ambiguousCount };
   }
 
+  /**
+   * Re-reads the cases the specialist chose to follow and reports what moved.
+   * The first reading of a case only stores a snapshot: without a previous one
+   * there is no change, and announcing "found" again would be noise. Cases are
+   * taken oldest-snapshot-first so a watch list longer than the per-pass
+   * ceiling still gets round-robin coverage instead of starving its tail.
+   */
+  async function monitorDecidedCases(now: string): Promise<{
+    monitoredCount: number;
+    changedCount: number;
+  }> {
+    if (cardWatch === undefined || watchLimit <= 0) {
+      return { monitoredCount: 0, changedCount: 0 };
+    }
+    const followed = catalog
+      .procurements()
+      .filter((item) => item.live && isWatchedTriage(withTriage(item, workspace)))
+      .sort((left, right) => watchOrder(left) - watchOrder(right))
+      .slice(0, watchLimit);
+    let monitoredCount = 0;
+    let changedCount = 0;
+    for (const card of followed) {
+      await discoveryController.beforeRequest(new Date());
+      const fresh = await cardWatch.read(card.sourceProcurementId);
+      if (fresh === undefined) continue;
+      monitoredCount += 1;
+      const snapshot = cardSnapshot(fresh, now);
+      const previous = card.watchSnapshot;
+      let next = withWatchSnapshot(card, snapshot);
+      if (previous === undefined) {
+        catalog.upsertCase(next);
+        continue;
+      }
+      const changes = diffCardSnapshots(previous, snapshot);
+      if (changes.length === 0) {
+        catalog.upsertCase(next);
+        continue;
+      }
+      changedCount += 1;
+      for (const change of changes) {
+        const item = catalog.record(inboxItemFromWatchChange(next, change, now));
+        next = withTriage(applyInboxChangeToCard(next, item.item.change), workspace);
+        next = withWatchSnapshot(next, snapshot);
+      }
+      catalog.upsertCase(next);
+      logger.info("Specialist watched case changed", {
+        sourceProcurementId: card.sourceProcurementId,
+        kinds: changes.map((item) => item.kind),
+      });
+    }
+    return { monitoredCount, changedCount };
+  }
+
+  /**
+   * A pass that only monitored (profile watch is off) must still keep what it
+   * found: the snapshots and the new inbox rows are saved and journalled here,
+   * because the discovery path below returns before reaching persist().
+   */
+  async function finishMonitoringOnly(monitored: {
+    monitoredCount: number;
+    changedCount: number;
+  }): Promise<void> {
+    if (monitored.monitoredCount === 0) return;
+    await persist();
+    await recordJournal(journal, {
+      kind: "discovery",
+      level: "info",
+      message: watchDoneMessage(monitored),
+    });
+  }
+
   async function runManualSearch(
     limit: number,
     offset: number,
@@ -390,6 +483,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
     }
     try {
+      // Following a decided case is not the same promise as looking for new
+      // ones: a specialist who turned "watch new" off still expects to hear
+      // that the procedure he entered was cancelled.
+      const monitored = await monitorDecidedCases(clock());
       const watched = workspace.profiles().filter((item) =>
         shouldRunDiscovery(item.watchNewProcurements),
       );
@@ -400,9 +497,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           addedCount: 0,
           skippedDecidedCount: 0,
         };
+        await finishMonitoringOnly(monitored);
         discoveryController.finish(result, new Date());
         return SpecialistDiscoveryResponse.parse({
           ...result,
+          ...monitored,
           items: listed(),
         });
       }
@@ -414,9 +513,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           addedCount: 0,
           skippedDecidedCount: 0,
         };
+        await finishMonitoringOnly(monitored);
         discoveryController.finish(result, new Date());
         return SpecialistDiscoveryResponse.parse({
           ...result,
+          ...monitored,
           items: listed(),
         });
       }
@@ -497,6 +598,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           profileNames: succeeded.map((item) => profileDisplayName(item)),
           addedCount,
           skippedDecidedCount,
+          ...monitored,
         }),
       });
       const result: DiscoveryResult = {
@@ -508,6 +610,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discoveryController.finish(result, new Date());
       return SpecialistDiscoveryResponse.parse({
         ...result,
+        ...monitored,
         items: listed(),
       });
     } catch (error) {
@@ -868,6 +971,14 @@ function withTriage(
   const triage = workspace.latestKind(card.sourceProcurementId);
   if (triage === undefined) return SpecialistProcurementCard.parse(card);
   return SpecialistProcurementCard.parse({ ...card, triage });
+}
+
+/** Never-read cases go first, then the ones whose snapshot is oldest. */
+function watchOrder(card: SpecialistProcurementCardValue): number {
+  const at = card.watchSnapshot?.capturedAt;
+  if (at === undefined) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(at);
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
 
 async function noteSearchFailure(journal: AdminJournalPort, error: unknown): Promise<void> {

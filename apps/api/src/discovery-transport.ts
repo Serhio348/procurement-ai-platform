@@ -9,9 +9,20 @@ export function discoveryDoneMessage(input: {
   profileNames: readonly string[];
   addedCount: number;
   skippedDecidedCount: number;
+  monitoredCount?: number;
+  changedCount?: number;
 }): string {
   const who = input.profileNames.length === 0 ? "профили" : input.profileNames.join(", ");
-  return `Фоновый поиск выполнен (${who}). Добавлено ${String(input.addedCount)}, уже решённых пропущено ${String(input.skippedDecidedCount)}.`;
+  const base = `Фоновый поиск выполнен (${who}). Добавлено ${String(input.addedCount)}, уже решённых пропущено ${String(input.skippedDecidedCount)}.`;
+  if (input.monitoredCount === undefined || input.monitoredCount === 0) return base;
+  return `${base} ${watchDoneMessage({ monitoredCount: input.monitoredCount, changedCount: input.changedCount ?? 0 })}`;
+}
+
+export function watchDoneMessage(input: {
+  monitoredCount: number;
+  changedCount: number;
+}): string {
+  return `Проверено отслеживаемых: ${String(input.monitoredCount)}, изменилось ${String(input.changedCount)}.`;
 }
 
 export function discoveryFailedMessage(profileName: string, error: unknown): string {

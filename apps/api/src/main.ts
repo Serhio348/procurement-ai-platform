@@ -20,6 +20,7 @@ import { createProcurementSearchHits } from "./procurement-search.js";
 import { createSearchClassifierFromEnv } from "./search-classifier.js";
 import { createProcurementSearchReview } from "./search-review.js";
 import { createDiscoveryController } from "./discovery-control.js";
+import { createProcurementCardWatch } from "./card-watch.js";
 
 async function main(): Promise<void> {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -52,6 +53,14 @@ async function main(): Promise<void> {
           sourceId: SourceId.parse("goszakupki_by"),
           logger,
         });
+  const cardWatch =
+    mcp === undefined
+      ? undefined
+      : createProcurementCardWatch({
+          caller: mcp.caller,
+          sourceId: SourceId.parse("goszakupki_by"),
+          logger,
+        });
   const classifier = createSearchClassifierFromEnv(process.env);
   const searchReview =
     mcp === undefined
@@ -74,6 +83,9 @@ async function main(): Promise<void> {
     );
   }
   const authMail = createSmtpMailPort(process.env);
+  const watchLimitRaw = process.env["SPECIALIST_WATCH_LIMIT"];
+  const watchLimit =
+    watchLimitRaw === undefined ? undefined : Math.max(0, Number.parseInt(watchLimitRaw, 10) || 0);
   const discoveryController = createDiscoveryController({
     requestIntervalMs: Math.max(
       0,
@@ -111,6 +123,8 @@ async function main(): Promise<void> {
       : { internalApiToken: process.env["INTERNAL_API_TOKEN"] }),
     ...(searchHits === undefined ? {} : { searchHits }),
     ...(searchReview === undefined ? {} : { searchReview }),
+    ...(cardWatch === undefined ? {} : { cardWatch }),
+    ...(watchLimit === undefined ? {} : { watchLimit }),
     ...(mcp === undefined
       ? {}
       : {

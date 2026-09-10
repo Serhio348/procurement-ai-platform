@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  ProcedureCard,
   SearchHit,
   SpecialistProcurementCard,
   electricalEquipmentSeedV1,
@@ -1097,6 +1098,93 @@ describe("specialist API", () => {
       true,
     );
     expect(log.some((item) => item.message.includes("watch_off"))).toBe(false);
+
+    await app.close();
+  });
+
+  it("monitors a decided case and reports a real change once", async () => {
+    const journal = createMemoryAdminJournal();
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(
+        ProcedureCard.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/777",
+          url: "https://goszakupki.by/auction/view/auction-777",
+          title: "Поставка кабеля",
+          fetchedAt: "2026-09-10T00:00:00.000Z",
+          status: "accepting_bids",
+          amount: { kind: "limit", amount: null, raw: "1 000,00 BYN" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        ProcedureCard.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/777",
+          url: "https://goszakupki.by/auction/view/auction-777",
+          title: "Поставка кабеля",
+          fetchedAt: "2026-09-11T00:00:00.000Z",
+          status: "cancelled",
+          amount: { kind: "limit", amount: null, raw: "1 000.00 BYN" },
+        }),
+      );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      journal,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/777",
+            url: "https://goszakupki.by/auction/view/auction-777",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    const decided = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    const decidedItems = JSON.parse(decided.body).items as Array<{ triage?: string }>;
+    expect(decidedItems[0]?.triage).toBe("monitor");
+
+    const second = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const third = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rows = JSON.parse(inbox.body).items as Array<{
+      topic: string;
+      summary: string;
+      detail: string;
+    }>;
+
+    expect(second.statusCode).toBe(200);
+    expect(JSON.parse(second.body).monitoredCount).toBe(1);
+    expect(JSON.parse(second.body).changedCount).toBe(0);
+    expect(third.statusCode).toBe(200);
+    expect(JSON.parse(third.body).monitoredCount).toBe(1);
+    expect(JSON.parse(third.body).changedCount).toBe(1);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(rows.some((item) => item.topic === "card_update")).toBe(true);
+    expect(rows.some((item) => item.summary.includes("Статус"))).toBe(true);
+    const log = await journal.list();
+    expect(log.some((item) => item.message.includes("Проверено отслеживаемых"))).toBe(true);
 
     await app.close();
   });

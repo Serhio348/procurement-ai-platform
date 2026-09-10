@@ -32,7 +32,7 @@ describe("specialist triage", () => {
     expect(() => workspace.removeProfile(remaining.id)).toThrow("last_profile");
   });
 
-  it("clears the stock electrical seed so the form starts empty", () => {
+  it("does not wipe a saved profile just because it looks like the stock seed", () => {
     const workspace = SpecialistWorkspace.parse({
       profile: {
         name: electricalEquipmentSeedV1.name,
@@ -40,9 +40,8 @@ describe("specialist triage", () => {
         keywords: electricalEquipmentSeedV1.keywords,
       },
     });
-    expect(workspace.profile().name).toBe("");
-    expect(workspace.profile().description).toBe("");
-    expect(workspace.profile().keywords).toEqual([]);
+    expect(workspace.profile().name).toBe(electricalEquipmentSeedV1.name);
+    expect(workspace.profile().keywords).toEqual(electricalEquipmentSeedV1.keywords);
   });
 
   it("does not start discovery until the specialist turns watch on", () => {

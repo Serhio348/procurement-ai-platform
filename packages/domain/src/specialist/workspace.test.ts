@@ -45,6 +45,37 @@ describe("discovery watermark", () => {
   });
 });
 
+describe("profile survives a restart", () => {
+  it("keeps the specialist's own keywords even when the profile is called like the stock seed", () => {
+    const workspace = new SpecialistWorkspace();
+    workspace.replaceProfile({
+      ...write,
+      name: "Электротехническое оборудование",
+      keywords: ["КТПБ", "НКУ", "кабель"],
+      excludeKeywords: ["ремонт"],
+    });
+
+    const restored = SpecialistWorkspace.parse(workspace.snapshot());
+
+    expect(restored.profile().name).toBe("Электротехническое оборудование");
+    expect(restored.profile().keywords).toEqual(["КТПБ", "НКУ", "кабель"]);
+    expect(restored.profile().excludeKeywords).toEqual(["ремонт"]);
+  });
+
+  it("keeps the stock keyword set when the specialist typed it in by hand", () => {
+    const workspace = new SpecialistWorkspace();
+    workspace.replaceProfile({
+      ...write,
+      name: "Подстанции",
+      keywords: ["КТПБ", "КТПП", "НКУ", "ВРУ", "ЩО", "подстанция", "трансформаторная подстанция", "2БКТПБ", "БКТП"],
+    });
+
+    const restored = SpecialistWorkspace.parse(workspace.snapshot());
+
+    expect(restored.profile().keywords).toHaveLength(9);
+  });
+});
+
 describe("remembered review verdicts", () => {
   it("remembers an irrelevant hit per profile and forgets it when the phrases change", () => {
     const workspace = new SpecialistWorkspace();

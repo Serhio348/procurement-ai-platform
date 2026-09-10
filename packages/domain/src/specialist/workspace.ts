@@ -3,7 +3,6 @@ import {
   SpecialistTriageDecision,
   SpecialistWorkingProfile,
   SpecialistWorkspaceState,
-  electricalEquipmentSeedV1,
   type SpecialistProfileWrite,
   type SpecialistTriageKind,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
@@ -61,7 +60,7 @@ export class SpecialistWorkspace {
   #reviewedIrrelevant: SpecialistReviewVerdict[] = [];
 
   constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
-    const parsed = SpecialistWorkingProfile.parse(stripStockElectricalSeed(profile));
+    const parsed = SpecialistWorkingProfile.parse(profile);
     this.#profiles = [parsed];
     this.#activeProfileId = parsed.id;
   }
@@ -69,9 +68,7 @@ export class SpecialistWorkspace {
   static parse(raw: unknown): SpecialistWorkspace {
     const state = SpecialistWorkspaceState.parse(migrateWorkspaceState(raw));
     const workspace = new SpecialistWorkspace(state.profiles[0]);
-    workspace.#profiles = state.profiles.map((item) =>
-      SpecialistWorkingProfile.parse(stripStockElectricalSeed(item)),
-    );
+    workspace.#profiles = state.profiles.map((item) => SpecialistWorkingProfile.parse(item));
     const active =
       workspace.#profiles.find((item) => item.id === state.activeProfileId) ?? workspace.#profiles[0];
     if (active === undefined) {
@@ -280,9 +277,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
   const dismissedInboxIds = Array.isArray(record.dismissedInboxIds) ? record.dismissedInboxIds : [];
   const reviewedIrrelevant = Array.isArray(record.reviewedIrrelevant) ? record.reviewedIrrelevant : [];
   if (Array.isArray(record.profiles) && record.profiles.length > 0) {
-    const profiles = record.profiles.map((item) =>
-      SpecialistWorkingProfile.parse(stripStockElectricalSeed(item)),
-    );
+    const profiles = record.profiles.map((item) => SpecialistWorkingProfile.parse(item));
     const active =
       profiles.find((item) => item.id === record.activeProfileId) ?? profiles[0];
     return {
@@ -294,7 +289,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
     };
   }
   if (record.profile !== undefined) {
-    const profile = SpecialistWorkingProfile.parse(stripStockElectricalSeed(record.profile));
+    const profile = SpecialistWorkingProfile.parse(record.profile);
     return {
       profiles: [profile],
       activeProfileId: profile.id,
@@ -310,32 +305,6 @@ function migrateWorkspaceState(raw: unknown): unknown {
     decisions: record.decisions ?? [],
     dismissedInboxIds,
     reviewedIrrelevant,
-  };
-}
-
-function stripStockElectricalSeed(raw: unknown): unknown {
-  if (typeof raw !== "object" || raw === null) return raw;
-  const profile = raw as {
-    name?: unknown;
-    description?: unknown;
-    keywords?: unknown;
-  };
-  const name = typeof profile.name === "string" ? profile.name : "";
-  const description = typeof profile.description === "string" ? profile.description : "";
-  const keywords = Array.isArray(profile.keywords)
-    ? profile.keywords.filter((item): item is string => typeof item === "string")
-    : [];
-  const stockName = name === electricalEquipmentSeedV1.name;
-  const stockDescription = description === electricalEquipmentSeedV1.description;
-  const stockKeywords = sameSearchPhrases(keywords, electricalEquipmentSeedV1.keywords);
-  if (!stockName && !stockDescription && !stockKeywords) return raw;
-  return {
-    ...raw,
-    name: "",
-    purpose: "",
-    description: "",
-    keywords: [],
-    excludeKeywords: [],
   };
 }
 

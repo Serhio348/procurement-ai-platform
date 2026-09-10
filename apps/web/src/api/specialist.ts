@@ -1,4 +1,5 @@
 import {
+  ProcedureCard,
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
@@ -176,6 +177,17 @@ export async function setProfileWatch(
     throw new Error("Не удалось изменить слежение за новыми закупками");
   }
   return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function fetchProcurementCard(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<ProcedureCard> {
+  const response = await fetcher(`/api/procurements/${id}/card`, withCredentials());
+  if (!response.ok) {
+    throw new Error("Не удалось открыть карточку закупки");
+  }
+  return ProcedureCard.parse(await response.json());
 }
 
 export async function fetchIngestProgress(

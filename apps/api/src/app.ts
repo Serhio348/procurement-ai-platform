@@ -1,5 +1,6 @@
 import {
   InboxFixtureItem,
+  ProcedureCard,
   type SearchQuery,
   SpecialistDecisionWrite,
   SpecialistDiscoveryHealthResponse,
@@ -923,6 +924,22 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     return card;
+  });
+
+  app.get("/api/procurements/:id/card", async (request, reply) => {
+    if (cardWatch === undefined) {
+      return reply.code(503).send({ error: "card_read_unavailable" });
+    }
+    const params = request.params as { id: string };
+    const card = listed().find((item) => item.id === params.id);
+    if (card === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const live = await cardWatch.read(card.sourceProcurementId);
+    if (live === undefined) {
+      return reply.code(404).send({ error: "card_unavailable" });
+    }
+    return ProcedureCard.parse(live);
   });
 
   app.get("/api/documents/:hash", async (request, reply) => {

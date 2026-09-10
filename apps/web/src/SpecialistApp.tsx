@@ -15,6 +15,8 @@ import type {
 import { AdminApp } from "./admin/AdminApp.js";
 import { InboxAlertProvider } from "./inbox/InboxAlert.js";
 import { InboxApp } from "./inbox/InboxApp.js";
+import { MyProcurementsApp } from "./procurements/MyProcurementsApp.js";
+import { ProcurementDetailApp } from "./procurements/ProcurementDetailApp.js";
 import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
 import { ProfileList } from "./profile/ProfileList.js";
@@ -216,27 +218,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             />
           }
         />
-        <Route path="/admin/:pane?" element={<AdminApp />} />
+        <Route
+          path="/my-procurements"
+          element={<MyProcurementsApp procurements={procurements} />}
+        />
         <Route
           path="/procurements/:id"
-          element={
-            <ProcurementsApp
-              items={procurements}
-              profiles={profiles}
-              {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
-              {...(search === undefined ? {} : { search })}
-              {...(activateProfile === undefined
-                ? {}
-                : {
-                    selectProfile: async (id: string) => {
-                      remember(await activateProfile(id), true);
-                    },
-                  })}
-              {...(decide === undefined ? {} : { decide })}
-              {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
-            />
-          }
+          element={<ProcurementDetailApp procurements={procurements} />}
         />
+        <Route path="/admin/:pane?" element={<AdminApp />} />
       </Routes>
     </BrowserRouter>
     </InboxAlertProvider>

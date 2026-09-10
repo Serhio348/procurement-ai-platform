@@ -1,4 +1,4 @@
-import { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
+import { InboxFixtureItem, ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyBootstrap } from "./bootstrap.js";
@@ -161,11 +161,34 @@ integration("PostgreSQL migrations and invariants", () => {
       activeProfileId: "00000000-0000-4000-8000-000000000902",
       decisions: [],
       dismissedInboxIds: [],
+      reviewedIrrelevant: [],
     });
     await store.saveCases([card]);
+    await store.saveInbox([
+      InboxFixtureItem.parse({
+        procurement: {
+          title: card.title,
+          status: card.status,
+          url: card.url,
+          sourceProcurementId: card.sourceProcurementId,
+        },
+        change: {
+          id: "00000000-0000-4000-8000-000000000903",
+          procurementId: card.id,
+          kind: "procedure_found",
+          previous: null,
+          current: card.title,
+          detectedAt: "2026-09-01T10:00:00.000Z",
+          urgent: true,
+        },
+      }),
+    ]);
 
     const loadedWorkspace = await store.loadWorkspace();
     const loadedCases = await store.loadCases();
+    const loadedInbox = await store.loadInbox();
+    await store.removeCases([card.id]);
+    const inboxAfterRemove = await store.loadInbox();
     const versions = await db
       .select()
       .from(documentVersions)
@@ -175,6 +198,12 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(loadedCases.map((item) => item.sourceProcurementId)).toContain("auction/901-persist");
     expect(versions[0]?.hash).toBe(hash);
     expect(versions[0]?.storageKey).toBe(blobStorageKey(hash));
+    expect(loadedInbox.map((item) => item.change.id)).toContain(
+      "00000000-0000-4000-8000-000000000903",
+    );
+    // Removing the case takes its inbox row with it: the inbox never points
+    // at a card that no longer exists.
+    expect(inboxAfterRemove.some((item) => item.change.procurementId === card.id)).toBe(false);
   });
 
   it("rejects a fact that is committed without evidence", async () => {

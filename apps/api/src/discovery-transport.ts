@@ -14,6 +14,20 @@ export function discoveryDoneMessage(input: {
   return `Фоновый поиск выполнен (${who}). Добавлено ${String(input.addedCount)}, уже решённых пропущено ${String(input.skippedDecidedCount)}.`;
 }
 
+export function discoveryFailedMessage(profileName: string, error: unknown): string {
+  const kind =
+    typeof error === "object" && error !== null && "kind" in error
+      ? (error as { kind: unknown }).kind
+      : undefined;
+  const cause =
+    kind === "source_unavailable"
+      ? "площадка goszakupki.by недоступна"
+      : kind === "timeout"
+        ? "площадка отвечала слишком долго"
+        : "ошибка поиска";
+  return `Фоновый поиск не выполнен (${profileName}): ${cause}.`;
+}
+
 export function discoveryTransport(env: NodeJS.ProcessEnv): DiscoveryTransport {
   const intervalMs = Number.parseInt(
     env["SPECIALIST_DISCOVERY_INTERVAL_MS"] ?? String(DISCOVERY_INTERVAL_MS),

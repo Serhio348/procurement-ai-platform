@@ -1,4 +1,5 @@
 import {
+  SpecialistReviewVerdict,
   SpecialistTriageDecision,
   SpecialistWorkingProfile,
   SpecialistWorkspaceState,
@@ -9,6 +10,25 @@ import {
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
 import { resolvePlatformKeywords, sameSearchPhrases } from "./looking-for.js";
+
+/** How long a review verdict of "irrelevant" is trusted before the hit may be looked at again. */
+export const REVIEW_VERDICT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Margin subtracted from lastDiscoveryAt when asking the source for new
+ * procedures. Covers clock skew and procedures posted with a past date.
+ */
+export const DISCOVERY_WATERMARK_MARGIN_MS = 24 * 60 * 60 * 1000;
+
+/** Calendar day (YYYY-MM-DD) the next discovery pass should ask the source from, or undefined for a full pass. */
+export function discoveryPublishedFrom(
+  profile: Pick<SpecialistWorkingProfileValue, "lastDiscoveryAt">,
+): string | undefined {
+  if (profile.lastDiscoveryAt === undefined) return undefined;
+  const since = Date.parse(profile.lastDiscoveryAt) - DISCOVERY_WATERMARK_MARGIN_MS;
+  if (!Number.isFinite(since)) return undefined;
+  return new Date(since).toISOString().slice(0, 10);
+}
 
 export function emptySpecialistWorkingProfile(
   id = crypto.randomUUID(),
@@ -38,6 +58,7 @@ export class SpecialistWorkspace {
   #activeProfileId: string;
   readonly #decisions: SpecialistTriageDecision[] = [];
   #dismissedInboxIds: string[] = [];
+  #reviewedIrrelevant: SpecialistReviewVerdict[] = [];
 
   constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
     const parsed = SpecialistWorkingProfile.parse(stripStockElectricalSeed(profile));
@@ -62,6 +83,7 @@ export class SpecialistWorkspace {
       workspace.#decisions.push(SpecialistTriageDecision.parse(decision));
     }
     workspace.#dismissedInboxIds = [...state.dismissedInboxIds];
+    workspace.#reviewedIrrelevant = [...state.reviewedIrrelevant];
     return workspace;
   }
 
@@ -71,7 +93,40 @@ export class SpecialistWorkspace {
       activeProfileId: this.#activeProfileId,
       decisions: this.#decisions,
       dismissedInboxIds: this.#dismissedInboxIds,
+      reviewedIrrelevant: this.#reviewedIrrelevant,
     });
+  }
+
+  /** Records that a discovery pass for the profile finished at `at`. */
+  markDiscovered(id: string, at: string): SpecialistWorkingProfileValue {
+    this.#profiles = this.#profiles.map((item) =>
+      item.id === id ? SpecialistWorkingProfile.parse({ ...item, lastDiscoveryAt: at }) : item,
+    );
+    return this.profileById(id);
+  }
+
+  rememberIrrelevant(profileId: string, sourceProcurementId: string, decidedAt: string): void {
+    if (this.isReviewedIrrelevant(profileId, sourceProcurementId)) return;
+    this.#reviewedIrrelevant.push(
+      SpecialistReviewVerdict.parse({ profileId, sourceProcurementId, decidedAt }),
+    );
+  }
+
+  isReviewedIrrelevant(profileId: string, sourceProcurementId: string): boolean {
+    return this.#reviewedIrrelevant.some(
+      (item) => item.profileId === profileId && item.sourceProcurementId === sourceProcurementId,
+    );
+  }
+
+  /** Forgets verdicts older than `maxAgeMs` and verdicts of profiles that no longer exist. */
+  forgetStaleVerdicts(now: string, maxAgeMs = REVIEW_VERDICT_MAX_AGE_MS): number {
+    const cutoff = Date.parse(now) - maxAgeMs;
+    const profileIds = new Set(this.#profiles.map((item) => item.id));
+    const before = this.#reviewedIrrelevant.length;
+    this.#reviewedIrrelevant = this.#reviewedIrrelevant.filter(
+      (item) => profileIds.has(item.profileId) && Date.parse(item.decidedAt) >= cutoff,
+    );
+    return before - this.#reviewedIrrelevant.length;
   }
 
   dismissedInboxIds(): readonly string[] {
@@ -183,17 +238,29 @@ export class SpecialistWorkspace {
     const current = this.profileById(id);
     const lookingFor = (input.description ?? "").trim();
     const keywords = resolvePlatformKeywords(lookingFor, input.keywords);
+    const excludeKeywords = input.excludeKeywords
+      .map((phrase) => phrase.trim())
+      .filter((phrase) => phrase.length > 0);
+    // New search phrases mean the source must be re-read from scratch and
+    // earlier "irrelevant" verdicts no longer describe this profile.
+    const phrasesChanged =
+      !sameSearchPhrases(keywords, current.keywords) ||
+      !sameSearchPhrases(excludeKeywords, current.excludeKeywords);
     const next = SpecialistWorkingProfile.parse({
       ...current,
+      lastDiscoveryAt: phrasesChanged ? undefined : current.lastDiscoveryAt,
       name: input.name.trim(),
       purpose: (input.purpose ?? "").trim() || lookingFor,
       description: lookingFor,
       keywords,
-      excludeKeywords: input.excludeKeywords.map((phrase) => phrase.trim()).filter((phrase) => phrase.length > 0),
+      excludeKeywords,
       statuses: input.statuses ?? current.statuses,
       filters: input.filters ?? current.filters,
     });
     this.#profiles = this.#profiles.map((item) => (item.id === id ? next : item));
+    if (phrasesChanged) {
+      this.#reviewedIrrelevant = this.#reviewedIrrelevant.filter((item) => item.profileId !== id);
+    }
   }
 }
 
@@ -208,8 +275,10 @@ function migrateWorkspaceState(raw: unknown): unknown {
     activeProfileId?: unknown;
     decisions?: unknown;
     dismissedInboxIds?: unknown;
+    reviewedIrrelevant?: unknown;
   };
   const dismissedInboxIds = Array.isArray(record.dismissedInboxIds) ? record.dismissedInboxIds : [];
+  const reviewedIrrelevant = Array.isArray(record.reviewedIrrelevant) ? record.reviewedIrrelevant : [];
   if (Array.isArray(record.profiles) && record.profiles.length > 0) {
     const profiles = record.profiles.map((item) =>
       SpecialistWorkingProfile.parse(stripStockElectricalSeed(item)),
@@ -221,6 +290,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       activeProfileId: active?.id,
       decisions: record.decisions ?? [],
       dismissedInboxIds,
+      reviewedIrrelevant,
     };
   }
   if (record.profile !== undefined) {
@@ -230,6 +300,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       activeProfileId: profile.id,
       decisions: record.decisions ?? [],
       dismissedInboxIds,
+      reviewedIrrelevant,
     };
   }
   const created = emptySpecialistWorkingProfile();
@@ -238,6 +309,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
     activeProfileId: created.id,
     decisions: record.decisions ?? [],
     dismissedInboxIds,
+    reviewedIrrelevant,
   };
 }
 

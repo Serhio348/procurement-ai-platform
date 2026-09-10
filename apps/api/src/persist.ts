@@ -16,6 +16,7 @@ import type { SpecialistCatalog } from "@procurement/domain";
 import { SpecialistWorkspace } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type {
+  InboxFixtureItem,
   SpecialistProcurementCard as SpecialistProcurementCardValue,
   SpecialistWorkspaceState,
 } from "@procurement/contracts";
@@ -28,6 +29,7 @@ export interface SpecialistPersistence {
   hydrateCatalog: (catalog: SpecialistCatalog) => Promise<void>;
   persistWorkspace: (state: SpecialistWorkspaceState) => Promise<void>;
   persistCases: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
+  persistInbox: (items: readonly InboxFixtureItem[]) => Promise<void>;
   removeCases: (ids: readonly string[]) => Promise<void>;
   journal: AdminJournalPort;
   close: () => Promise<void>;
@@ -107,6 +109,20 @@ export async function openSpecialistPersistence(options: {
     }
   };
 
+  const persistInbox = async (items: readonly InboxFixtureItem[]): Promise<void> => {
+    if (store === undefined) return;
+    try {
+      await store.saveInbox(items);
+    } catch (error) {
+      options.logger.error("PostgreSQL inbox save failed", error);
+      await recordJournal(journal, {
+        kind: "platform",
+        level: "error",
+        message: "Не удалось записать Входящие в PostgreSQL.",
+      });
+    }
+  };
+
   const removeCases = async (ids: readonly string[]): Promise<void> => {
     if (store === undefined) return;
     try {
@@ -134,9 +150,22 @@ export async function openSpecialistPersistence(options: {
       for (const card of cards) {
         catalog.upsertCase(card);
       }
+      let inbox: InboxFixtureItem[];
+      try {
+        inbox = await store.loadInbox();
+      } catch (error) {
+        // A half-migrated database must not silently drop to disk: the cases
+        // above already came from PostgreSQL. Stop and ask for the migration.
+        options.logger.error("PostgreSQL specialist_inbox missing; run npm run db:migrate", error);
+        throw error;
+      }
+      for (const item of inbox) {
+        catalog.record(item);
+      }
     },
     persistWorkspace,
     persistCases,
+    persistInbox,
     removeCases,
     journal,
     async close() {

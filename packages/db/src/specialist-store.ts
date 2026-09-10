@@ -1,6 +1,8 @@
 import {
+  InboxFixtureItem,
   SpecialistProcurementCard,
   SpecialistWorkspaceState,
+  type InboxFixtureItem as InboxFixtureItemValue,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
@@ -12,6 +14,7 @@ import {
   documents,
   procurements,
   specialistCases,
+  specialistInbox,
   specialistWorkspaces,
 } from "./schema.js";
 
@@ -62,10 +65,42 @@ export function createSpecialistStore(db: Database) {
       }
     },
 
-    /** Removes console cards only; the normalized procurements row stays as history. */
+    /**
+     * Removes console cards and their inbox rows; the normalized procurements
+     * row stays as history.
+     */
     async removeCases(ids: readonly string[]): Promise<void> {
       if (ids.length === 0) return;
+      await db.delete(specialistInbox).where(inArray(specialistInbox.procurementId, [...ids]));
       await db.delete(specialistCases).where(inArray(specialistCases.id, [...ids]));
+    },
+
+    async loadInbox(): Promise<InboxFixtureItemValue[]> {
+      const rows = await db
+        .select()
+        .from(specialistInbox)
+        .orderBy(specialistInbox.detectedAt, specialistInbox.id);
+      return rows.map((row) => InboxFixtureItem.parse(row.item));
+    },
+
+    async saveInbox(items: readonly InboxFixtureItemValue[]): Promise<void> {
+      const now = new Date().toISOString();
+      for (const raw of items) {
+        const item = InboxFixtureItem.parse(raw);
+        await db
+          .insert(specialistInbox)
+          .values({
+            id: item.change.id,
+            procurementId: item.change.procurementId,
+            item,
+            detectedAt: item.change.detectedAt,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: specialistInbox.id,
+            set: { procurementId: item.change.procurementId, item, updatedAt: now },
+          });
+      }
     },
   };
 }

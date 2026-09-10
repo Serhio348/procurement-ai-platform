@@ -15,6 +15,7 @@ import {
   SpecialistSearchResponse,
   SpecialistWatchWrite,
   SpecialistWorkingProfile,
+  type InboxFixtureItem as InboxFixtureItemValue,
   type SearchHit,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
@@ -23,6 +24,7 @@ import {
 import {
   applyInboxChangeToCard,
   attachProfileToCard,
+  discoveryPublishedFrom,
   inboxDocumentLinks,
   inboxItemFromFoundCard,
   inboxTopic,
@@ -52,7 +54,7 @@ import {
   getBlob,
   isSha256Hex,
 } from "./blobs.js";
-import { discoveryDoneMessage } from "./discovery-transport.js";
+import { discoveryDoneMessage, discoveryFailedMessage } from "./discovery-transport.js";
 import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
@@ -60,6 +62,12 @@ import type { BlobStore } from "./object-store.js";
 import type { SpecialistReviewPort } from "./search-review.js";
 
 export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Listing rows one background pass may take per profile. With the discovery
+ * watermark the source returns only what was posted since the last pass, so
+ * this is a ceiling for the first pass and for busy days, not a per-hour cap.
+ */
+export const DEFAULT_DISCOVERY_LIMIT = 100;
 
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
@@ -81,6 +89,7 @@ export interface BuildApiOptions {
   liveProcurementsOnly?: boolean;
   persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
   persistCases?: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
+  persistInbox?: (items: readonly InboxFixtureItemValue[]) => Promise<void>;
   removeCases?: (ids: readonly string[]) => Promise<void>;
   /** How long an undecided live case survives without a search returning it. */
   caseMaxAgeMs?: number;
@@ -115,6 +124,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     if (options.persistCases !== undefined) {
       await options.persistCases(catalog.procurements());
+    }
+    if (options.persistInbox !== undefined) {
+      await options.persistInbox(catalog.inboxItems());
     }
   };
 
@@ -154,12 +166,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     journal,
   });
 
+  /**
+   * `publishedFrom` narrows the site query for background discovery: the
+   * later of the profile's own filter and the discovery watermark wins.
+   */
   function buildSearchQuery(
     profile: SpecialistWorkingProfile,
     limit: number,
     offset: number,
+    publishedFrom?: string,
   ): Omit<SearchQuery, "sourceId"> {
     const { filters } = profile;
+    const fromDate = [filters.publishedFrom, publishedFrom]
+      .filter((value): value is string => value !== undefined)
+      .sort()
+      .at(-1);
     return {
       keywords: [...profile.keywords],
       excludeKeywords: [...profile.excludeKeywords],
@@ -168,7 +189,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       procurementNumber: filters.procurementNumber ?? "",
       priceFrom: filters.priceFrom,
       priceTo: filters.priceTo,
-      publishedFrom: filters.publishedFrom ? toIsoDateTime(filters.publishedFrom) : undefined,
+      publishedFrom: fromDate === undefined ? undefined : toIsoDateTime(fromDate),
       publishedTo: filters.publishedTo ? toIsoDateTime(filters.publishedTo) : undefined,
       requestEndFrom: filters.requestEndFrom ? toIsoDateTime(filters.requestEndFrom) : undefined,
       requestEndTo: filters.requestEndTo ? toIsoDateTime(filters.requestEndTo) : undefined,
@@ -218,8 +239,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   /**
    * Weak and keyword-less hits get a second look when a review port is
    * configured: the card first, then the model. A confident "relevant" joins
-   * the list as a match; a confident "irrelevant" is discarded; everything
-   * else waits in the inbox with the reason attached to the card.
+   * the list as a match; a confident "irrelevant" is discarded and remembered
+   * for the profile; everything else waits in the inbox with the reason
+   * attached to the card. A hit already remembered as irrelevant, or already
+   * waiting in the inbox as a review case, is not looked at again: the source
+   * returning it once more is not new information.
    */
   async function reviewAmbiguous(
     selected: ReturnType<typeof selectRelevantSearchCards>,
@@ -228,12 +252,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     options: { inboxForMatches: boolean },
   ): Promise<{ matched: SpecialistProcurementCardValue[]; discarded: number; ambiguousCount: number }> {
     const rejected = workspace.rejectedSourceIds();
-    const pending = selected.ambiguousCards
-      .map((card, index) => ({ card, hit: selected.ambiguousHits[index] }))
-      .filter(
-        (item): item is { card: SpecialistProcurementCardValue; hit: SearchHit } =>
-          item.hit !== undefined && !rejected.has(item.card.sourceProcurementId),
-      );
+    const known = new Map(
+      catalog.procurements().map((item) => [item.sourceProcurementId, item] as const),
+    );
+    let discarded = 0;
+    let ambiguousCount = 0;
+    const pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }> = [];
+    selected.ambiguousCards.forEach((card, index) => {
+      const hit = selected.ambiguousHits[index];
+      if (hit === undefined || rejected.has(card.sourceProcurementId)) return;
+      if (workspace.isReviewedIrrelevant(profile.id, card.sourceProcurementId)) {
+        discarded += 1;
+        return;
+      }
+      if (known.get(card.sourceProcurementId)?.foundAs === "review") {
+        rememberFound(card, profile.id, now);
+        ambiguousCount += 1;
+        return;
+      }
+      pending.push({ card, hit });
+    });
     const outcomes =
       searchReview === undefined || pending.length === 0
         ? undefined
@@ -248,12 +286,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             },
           );
     const matched: SpecialistProcurementCardValue[] = [];
-    let discarded = 0;
-    let ambiguousCount = 0;
     pending.forEach(({ card }, index) => {
       const outcome = outcomes?.[index];
       if (outcome?.verdict === "irrelevant") {
         discarded += 1;
+        workspace.rememberIrrelevant(profile.id, card.sourceProcurementId, now);
         return;
       }
       const reviewedCard: SpecialistProcurementCardValue =
@@ -333,7 +370,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   }
 
-  async function runDiscovery(limit = 20) {
+  async function runDiscovery(limit = DEFAULT_DISCOVERY_LIMIT) {
     const watched = workspace.profiles().filter((item) =>
       shouldRunDiscovery(item.watchNewProcurements),
     );
@@ -359,19 +396,25 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     let addedCount = 0;
     let skippedDecidedCount = 0;
     const known = new Set(catalog.procurements().map((item) => item.sourceProcurementId));
+    const failed: Array<{ profile: SpecialistWorkingProfile; error: unknown }> = [];
+    const succeeded: SpecialistWorkingProfile[] = [];
     for (const profile of ready) {
+      // One profile's failure must not cost the others their pass, nor lose
+      // what earlier profiles already found: the loop goes on and persists.
       let hits: readonly SearchHit[];
+      const startedAt = clock();
       try {
-        hits = await searchHits.search(buildSearchQuery(profile, limit, 0));
+        hits = await searchHits.search(
+          buildSearchQuery(profile, limit, 0, discoveryPublishedFrom(profile)),
+        );
       } catch (error) {
-        logger.error("Specialist discovery search failed", error);
-        await recordJournal(journal, {
-          kind: "discovery",
-          level: "error",
-          message: "Фоновый поиск новых закупок не выполнен.",
+        logger.error("Specialist discovery search failed", error, {
+          profileName: profileDisplayName(profile),
         });
-        throw error;
+        failed.push({ profile, error });
+        continue;
       }
+      succeeded.push(profile);
       const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
       skippedDecidedCount += partitioned.skippedDecidedCount;
       const selected = selectRelevantSearchCards(
@@ -397,19 +440,33 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         known.add(card.sourceProcurementId);
         addedCount += 1;
       }
+      // The watermark is the pass start, not its end: a procedure posted while
+      // the pass ran must fall into the next window.
+      workspace.markDiscovered(profile.id, startedAt);
       logger.info("Specialist discovery recorded", {
         profileName: profileDisplayName(profile),
         addedCount,
         skippedDecidedCount,
       });
     }
+    workspace.forgetStaleVerdicts(clock());
     await pruneStaleCases();
     await persist();
+    for (const item of failed) {
+      await recordJournal(journal, {
+        kind: "discovery",
+        level: "error",
+        message: discoveryFailedMessage(profileDisplayName(item.profile), item.error),
+      });
+    }
+    if (succeeded.length === 0) {
+      throw failed[0]?.error ?? new Error("discovery found no profile to search");
+    }
     await recordJournal(journal, {
       kind: "discovery",
       level: "info",
       message: discoveryDoneMessage({
-        profileNames: ready.map((item) => profileDisplayName(item)),
+        profileNames: succeeded.map((item) => profileDisplayName(item)),
         addedCount,
         skippedDecidedCount,
       }),

@@ -6,8 +6,9 @@ import {
   SearchHit,
   SpecialistProcurementCard,
   electricalEquipmentSeedV1,
+  type InboxFixtureItem,
 } from "@procurement/contracts";
-import { SpecialistCatalog, type ReviewOutcome } from "@procurement/domain";
+import { SpecialistCatalog, SpecialistWorkspace, type ReviewOutcome } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
@@ -458,6 +459,199 @@ describe("specialist API", () => {
     expect(body.items.map((item) => item.title)).toEqual(["Поставка электрооборудования"]);
 
     await app.close();
+  });
+
+  it("asks the source only for procedures posted since the previous pass, and starts over when phrases change", async () => {
+    const search = vi.fn(async (_query: { publishedFrom?: string | undefined }) => [] as SearchHit[]);
+    let now = "2026-09-09T10:00:00.000Z";
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+      clock: () => now,
+    });
+    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: "/api/profile/watch", payload: { watchNewProcurements: true } });
+
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    now = "2026-09-09T11:00:00.000Z";
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    // A save that keeps the phrases keeps the watermark; new phrases drop it.
+    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "КТПБ и НКУ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "КТПБ и НКУ", keywords: ["КТПБ", "НКУ"] } });
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    // Manual search never narrows by the watermark: the specialist asked for everything.
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+
+    const froms = search.mock.calls.map((call) => call[0].publishedFrom);
+    expect(froms).toEqual([
+      undefined,
+      "2026-09-08T00:00:00+03:00",
+      "2026-09-08T00:00:00+03:00",
+      undefined,
+      undefined,
+    ]);
+    const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      lastDiscoveryAt?: string;
+    };
+    expect(profile.lastDiscoveryAt).toBe("2026-09-09T11:00:00.000Z");
+
+    await app.close();
+  });
+
+  it("keeps searching the other profiles when one fails, and reports the failure by name", async () => {
+    const journal = createMemoryAdminJournal();
+    const search = vi.fn(async (query: { keywords: string[] }) => {
+      if (query.keywords.includes("кабель")) {
+        throw new McpToolCallError("source_unavailable", "procurement.search", "blocked");
+      }
+      return [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/ok-1",
+          url: "https://goszakupki.by/auction/view/ok-1",
+          title: "Поставка КТПБ-250",
+        }),
+      ];
+    });
+    const persistCases = vi.fn(async (_cards: readonly unknown[]) => undefined);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+      journal,
+      persistCases,
+    });
+    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "Кабель", keywords: ["кабель"] } });
+    await app.inject({ method: "POST", url: "/api/profile/watch", payload: { watchNewProcurements: true } });
+    const second = JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as { id: string };
+    await app.inject({ method: "PUT", url: `/api/profiles/${second.id}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${second.id}/watch`, payload: { watchNewProcurements: true } });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const body = JSON.parse(ran.body) as { ran: boolean; addedCount: number; items: Array<{ title: string }> };
+    const log = await journal.list();
+
+    expect(ran.statusCode).toBe(200);
+    expect(body.addedCount).toBe(1);
+    expect(body.items.map((item) => item.title)).toEqual(["Поставка КТПБ-250"]);
+    expect(persistCases).toHaveBeenCalled();
+    expect(log.some((item) => item.level === "error" && item.message.includes("(Кабель)"))).toBe(true);
+    expect(log.some((item) => item.level === "info" && item.message.includes("(КТПБ)"))).toBe(true);
+    expect(log.some((item) => item.level === "info" && item.message.includes("Кабель"))).toBe(false);
+
+    // Only when every profile fails does the pass itself fail.
+    search.mockRejectedValue(new McpToolCallError("source_unavailable", "procurement.search", "blocked"));
+    const allFailed = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(allFailed.statusCode).toBe(503);
+
+    await app.close();
+  });
+
+  it("does not ask the card or the model twice about the same hit", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/incubator-2",
+        url: "https://goszakupki.by/auction/view/incubator-2",
+        title: "СО2-инкубатор",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/unclear-2",
+        url: "https://goszakupki.by/auction/view/unclear-2",
+        title: "Электромонтажные работы",
+      }),
+    ];
+    const review = vi.fn(async (reviewed: readonly SearchHit[]) =>
+      reviewed.map(
+        (item): ReviewOutcome =>
+          item.sourceProcurementId === "auction/incubator-2"
+            ? { verdict: "irrelevant", decidedBy: "model", reason: "Инкубатор.", matchedTerms: [], confidence: 0.95 }
+            : { verdict: "needs_human", decidedBy: "model", reason: "Неясно.", matchedTerms: [], confidence: 0.5 },
+      ),
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      searchReview: { review },
+    });
+    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "НКУ", keywords: ["НКУ"] } });
+
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(review.mock.calls[0]?.[0]).toHaveLength(2);
+    // Second pass: the incubator is remembered as irrelevant, the unclear one
+    // already waits in the inbox. Counts still describe the pass honestly.
+    expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 1 });
+    expect(JSON.parse(second.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 1 });
+    expect((JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
+      "Электромонтажные работы",
+    ]);
+
+    // Changing the phrases forgets the verdict: the next search asks again.
+    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "НКУ", keywords: ["НКУ", "ЩО"] } });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    expect(review).toHaveBeenCalledTimes(2);
+
+    await app.close();
+  });
+
+  it("persists inbox rows and restores review cases into the inbox after a restart", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/restart-1",
+        url: "https://goszakupki.by/auction/view/restart-1",
+        title: "Электромонтажные работы",
+      }),
+    ];
+    let storedCases: readonly SpecialistProcurementCard[] = [];
+    let storedInbox: readonly InboxFixtureItem[] = [];
+    const first = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      persistCases: async (cards) => {
+        storedCases = cards;
+      },
+      persistInbox: async (items) => {
+        storedInbox = items;
+      },
+    });
+    await first.inject({ method: "PUT", url: "/api/profile", payload: { name: "НКУ", keywords: ["НКУ"] } });
+    await first.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const workspaceState = JSON.parse(
+      (await first.inject({ method: "GET", url: "/api/profile" })).body,
+    ) as { id: string };
+    await first.close();
+
+    expect(storedCases.map((item) => item.foundAs)).toEqual(["review"]);
+    expect(storedInbox).toHaveLength(1);
+
+    // "Restart": a fresh catalog hydrated the way persist.ts does it.
+    const catalog = new SpecialistCatalog();
+    for (const card of storedCases) catalog.upsertCase(card);
+    for (const item of storedInbox) catalog.record(item);
+    const second = await buildSpecialistApi({
+      catalog,
+      workspace: SpecialistWorkspace.parse({
+        profiles: [{ id: workspaceState.id, name: "НКУ", keywords: ["НКУ"] }],
+        activeProfileId: workspaceState.id,
+      }),
+      searchHits: { search: async () => hits },
+    });
+    const inbox = await second.inject({ method: "GET", url: "/api/inbox" });
+    const listed = await second.inject({ method: "GET", url: "/api/procurements" });
+
+    // The review case is reachable again through the inbox and still out of the list.
+    expect((JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
+      "Электромонтажные работы",
+    ]);
+    expect(JSON.parse(listed.body).items).toEqual([]);
+
+    await second.close();
   });
 
   it("does not prune a case the specialist decided on", async () => {

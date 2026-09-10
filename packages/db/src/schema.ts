@@ -707,6 +707,23 @@ export const specialistCases = pgTable(
   (table) => [uniqueIndex("specialist_cases_source_uq").on(table.sourceProcurementId)],
 );
 
+/**
+ * Console inbox rows. Kept as the console's own JSON so a restart does not
+ * lose "new procedure found" rows that point at review cases; dismissed ids
+ * stay on the workspace snapshot.
+ */
+export const specialistInbox = pgTable(
+  "specialist_inbox",
+  {
+    id: uuid("id").primaryKey(),
+    procurementId: uuid("procurement_id").notNull(),
+    item: jsonb("item").notNull(),
+    detectedAt: timestamptz("detected_at").notNull(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("specialist_inbox_procurement_idx").on(table.procurementId)],
+);
+
 export const authAccessStatus = pgEnum("auth_access_status", [
   "pending",
   "active",

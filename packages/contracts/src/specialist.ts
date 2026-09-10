@@ -233,14 +233,34 @@ export const SpecialistWorkingProfile = z.object({
   /** Site-side filters sent with the search query. */
   filters: SpecialistSearchFilters.default({}),
   watchNewProcurements: z.boolean().default(false),
+  /**
+   * When background discovery last finished for this profile. The next pass
+   * asks the source only for procedures posted since then (minus a margin), so
+   * the page limit stops hiding older-but-new procedures. Reset when the
+   * search phrases change.
+   */
+  lastDiscoveryAt: IsoDateTime.optional(),
 });
 export type SpecialistWorkingProfile = z.infer<typeof SpecialistWorkingProfile>;
 
 export const SpecialistProfileWrite = SpecialistWorkingProfile.omit({
   id: true,
   watchNewProcurements: true,
+  lastDiscoveryAt: true,
 });
 export type SpecialistProfileWrite = z.infer<typeof SpecialistProfileWrite>;
+
+/**
+ * A hit the review step (card or model) confidently called irrelevant for a
+ * profile. Remembered so the next pass does not spend a card fetch and a model
+ * call on the same procedure again. Not a specialist decision.
+ */
+export const SpecialistReviewVerdict = z.object({
+  profileId: z.string().uuid(),
+  sourceProcurementId: z.string().min(1),
+  decidedAt: IsoDateTime,
+});
+export type SpecialistReviewVerdict = z.infer<typeof SpecialistReviewVerdict>;
 
 export const SpecialistProfileListResponse = z.object({
   items: z.array(SpecialistWorkingProfile),
@@ -296,6 +316,7 @@ export const SpecialistWorkspaceState = z.object({
   activeProfileId: z.string().uuid(),
   decisions: z.array(SpecialistTriageDecision).default([]),
   dismissedInboxIds: z.array(z.string().uuid()).default([]),
+  reviewedIrrelevant: z.array(SpecialistReviewVerdict).default([]),
 });
 export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
 

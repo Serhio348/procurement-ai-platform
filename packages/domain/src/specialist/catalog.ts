@@ -79,6 +79,11 @@ export class SpecialistCatalog {
     return [...this.#dismissed];
   }
 
+  /** Every recorded inbox row, dismissed ones included, in arrival order. For persistence. */
+  inboxItems(): InboxFixtureItemValue[] {
+    return [...this.#order];
+  }
+
   /**
    * Drops undecided live cases a search has not returned for `maxAgeMs`.
    * Cases from a fixture inbox are left alone; a legacy live case without

@@ -71,6 +71,11 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     return () => clearInterval(timer);
   }, [refreshInbox]);
 
+  // Ids of the last profile search, in source order. The search pane is
+  // unmounted on every tab switch; without this it would come back showing
+  // the whole catalog (old completed cases) instead of what was just found.
+  const [searchIds, setSearchIds] = useState<readonly string[] | undefined>(undefined);
+
   const search =
     searchProfile === undefined
       ? undefined
@@ -79,11 +84,24 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           // Keep decided / watched cases in memory so "Мои закупки" does not
           // empty when the search pane shows only the latest hit list.
           setProcurements((current) => mergeProcurementCards(current, result.items));
+          const ids = result.items.map((item) => item.id);
+          setSearchIds((current) =>
+            offset === undefined || offset === 0 || current === undefined
+              ? ids
+              : [...current, ...ids.filter((id) => !current.includes(id))],
+          );
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
           return result;
         };
+
+  const searchPaneItems =
+    searchIds === undefined
+      ? procurements
+      : searchIds
+          .map((id) => procurements.find((item) => item.id === id))
+          .filter((item): item is SpecialistProcurementCard => item !== undefined);
 
   const decide =
     decideCase === undefined
@@ -211,7 +229,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           path="/procurements"
           element={
             <ProcurementsApp
-              items={procurements}
+              items={searchPaneItems}
               profiles={profiles}
               {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
               {...(search === undefined ? {} : { search })}
@@ -231,7 +249,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           path="/procurements/:id"
           element={
             <ProcurementsApp
-              items={procurements}
+              items={searchPaneItems}
               profiles={profiles}
               {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
               {...(search === undefined ? {} : { search })}

@@ -203,6 +203,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   };
 
   const app = Fastify({ logger: false });
+  // Fastify's own logger is off; without this a throwing route answers 500
+  // and leaves nothing in the journal to debug from.
+  app.setErrorHandler((error: unknown, request, reply) => {
+    const failure = error as { statusCode?: unknown; code?: unknown };
+    const statusCode = typeof failure.statusCode === "number" ? failure.statusCode : 500;
+    if (statusCode >= 500) {
+      logger.error("Specialist API request failed", error, {
+        method: request.method,
+        url: request.url,
+      });
+    }
+    return reply.code(statusCode).send({
+      error:
+        statusCode >= 500
+          ? "internal_error"
+          : typeof failure.code === "string"
+            ? failure.code
+            : "request_failed",
+    });
+  });
   registerAuth(app, {
     ...(options.authDirectory === undefined ? {} : { directory: options.authDirectory }),
     ...(options.authMail === undefined ? {} : { mail: options.authMail }),
@@ -969,10 +989,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     const live = await cardWatch.read(card.sourceProcurementId);
     if (live === undefined) {
+      logger.warn("Specialist source card unavailable", {
+        sourceProcurementId: card.sourceProcurementId,
+      });
       return reply.code(404).send({ error: "card_unavailable" });
     }
-    catalog.upsertCase(withTriage(applySourceCard(card, live, clock()), workspace));
-    await persist();
+    try {
+      catalog.upsertCase(withTriage(applySourceCard(card, live, clock()), workspace));
+      await persist();
+    } catch (error) {
+      // The page was read fine; only the console copy failed. Still show it.
+      logger.error("Specialist source card store failed", error, {
+        sourceProcurementId: card.sourceProcurementId,
+      });
+    }
     return ProcedureCard.parse(live);
   });
 

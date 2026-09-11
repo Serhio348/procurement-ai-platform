@@ -1439,6 +1439,13 @@ h3 {
   color: #5c6778;
 }
 
+.my-procurements-card-contact {
+  margin: 0;
+  font-size: 13px;
+  color: #1c2430;
+  overflow-wrap: anywhere;
+}
+
 .procurement-detail-back {
   margin: 0 0 16px;
 }

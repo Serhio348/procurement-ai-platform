@@ -85,6 +85,9 @@ export function MyProcurementsApp({
                 {item.buyerName ? (
                   <p className="my-procurements-card-buyer">{item.buyerName}</p>
                 ) : null}
+                {item.sourceCard?.buyer?.contact ? (
+                  <p className="my-procurements-card-contact">{item.sourceCard.buyer.contact}</p>
+                ) : null}
                 </button>
               </li>
             ))}

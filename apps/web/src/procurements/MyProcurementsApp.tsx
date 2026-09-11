@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SpecialistProcurementCard, SpecialistTriageKind } from "@procurement/contracts";
+import { bidsDeadlinePassed, isSingleSourceAfterFailedProcedure } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
 
 const filterTabs: { key: "all" | SpecialistTriageKind; label: string }[] = [
@@ -15,10 +16,13 @@ function shortId(id: string): string {
 
 export function MyProcurementsApp({
   procurements,
+  now = () => new Date(),
 }: {
   procurements: readonly SpecialistProcurementCard[];
+  now?: () => Date;
 }): ReactElement {
   const navigate = useNavigate();
+  const today = now();
   const [filter, setFilter] = useState<"all" | SpecialistTriageKind>("all");
   const decided = procurements.filter(
     (item) => item.triage === "monitor" || item.triage === "participate",
@@ -69,6 +73,15 @@ export function MyProcurementsApp({
                       {item.triage === "monitor" ? "Слежу" : "Участвую"}
                     </span>
                     <span className="my-procurements-card-status">{item.statusLabel}</span>
+                    {bidsDeadlinePassed(item, today) ? (
+                      <span className="my-procurements-card-expired">срок подачи истёк</span>
+                    ) : null}
+                    {item.sourceCard !== undefined &&
+                    isSingleSourceAfterFailedProcedure(item.sourceCard) ? (
+                      <span className="my-procurements-card-after-failed">
+                        после несостоявшейся
+                      </span>
+                    ) : null}
                     <span className="my-procurements-card-id">{shortId(item.id)}</span>
                   </div>
                   <h2 className="my-procurements-card-title">{item.title}</h2>

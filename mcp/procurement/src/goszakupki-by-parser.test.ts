@@ -111,6 +111,40 @@ describe("parseGoszakupkiCard", () => {
     expect(parsed.card.buyer).toBeUndefined();
   });
 
+  it("reads the single-source basis and the failed procedure it replaces, and names a failed lot", async () => {
+    const html = (
+      await readFile(fileURLToPath(new URL("single-source.html", fixtureDirectory)), "utf8")
+    )
+      .replace(
+        "<tr><th>Отрасль</th>",
+        '<tr><th>Основание выбора процедуры закупки из одного источника</th><td>7. Признание процедуры государственной закупки несостоявшейся.</td></tr>' +
+          '<tr><th>Номер процедуры государственной закупки на ЭТП, признанной несостоявшейся</th><td><a href="/auction/view/3541262">auc0003541262</a></td></tr>' +
+          "<tr><th>Отрасль</th>",
+      )
+      .replace(
+        '<span class="badge">Подача документов/сведений</span>',
+        '<span class="badge">Рассмотрение документов/сведений. Процедура признана несостоявшейся</span>',
+      );
+    const parsed = parseGoszakupkiCard({
+      html,
+      url: "https://goszakupki.by/single-source/view/9000005",
+      fetchedAt,
+    });
+
+    expect(parsed.card.kind).toBe("single_source");
+    expect(parsed.card.singleSourceBasis).toContain("несостоявшейся");
+    expect(parsed.card.precedingProcedureNumber).toBe("auc0003541262");
+    expect(parsed.card.status).toBe("failed");
+    expect(parsed.card.rawFields["Основание выбора процедуры закупки из одного источника"]).toBeDefined();
+  });
+
+  it("carries the procedure kind on listing rows so a profile can drop single-source purchases", async () => {
+    const html = await readFile(fileURLToPath(new URL("search.html", fixtureDirectory)), "utf8");
+    const parsed = parseGoszakupkiSearchPage(html, "https://goszakupki.by/tenders/posted");
+    expect(parsed.rows[0]?.hit.kind).toBe("single_source");
+    expect(parsed.rows[3]?.hit.kind).toBe("electronic_auction");
+  });
+
   it("extracts document metadata and public chronology without downloading files", async () => {
     const html = await readFile(
       fileURLToPath(new URL("auction.html", fixtureDirectory)),

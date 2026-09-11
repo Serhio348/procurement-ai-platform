@@ -1579,6 +1579,32 @@ h3 {
   color: #3a4658;
 }
 
+.procurement-detail-expired,
+.procurement-detail-after-failed {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.procurement-detail-expired,
+.my-procurements-card-expired {
+  background: #fde8e8;
+  color: #8a1c1c;
+}
+
+.procurement-detail-after-failed,
+.my-procurements-card-after-failed {
+  background: #ece9f7;
+  color: #4b3c8a;
+}
+
+.my-procurements-card-expired,
+.my-procurements-card-after-failed {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
 .procurement-detail-toolbar {
   display: flex;
   align-items: center;

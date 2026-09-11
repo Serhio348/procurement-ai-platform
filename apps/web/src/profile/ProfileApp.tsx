@@ -41,6 +41,7 @@ const STATUS_OPTIONS: ReadonlyArray<{ value: ProcedureStatus; label: string }> =
   { value: "under_review", label: "На рассмотрении" },
   { value: "completed", label: "Завершена" },
   { value: "cancelled", label: "Отменена" },
+  { value: "failed", label: "Не состоялась" },
   { value: "unknown", label: "Прочие" },
 ];
 
@@ -61,6 +62,10 @@ export function ProfileApp({
   const [addWord, setAddWord] = useState("");
   const [excluded, setExcluded] = useState(initial.excludeKeywords.join("\n"));
   const [statuses, setStatuses] = useState<readonly ProcedureStatus[]>(initial.statuses);
+  const [excludeSingleSource, setExcludeSingleSource] = useState(initial.excludeSingleSource);
+  const [excludeSingleSourceAfterFailed, setExcludeSingleSourceAfterFailed] = useState(
+    initial.excludeSingleSourceAfterFailed,
+  );
   const [filters, setFilters] = useState(initial.filters);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
@@ -121,6 +126,8 @@ export function ProfileApp({
       keywords,
       excludeKeywords: splitExcludeLines(excluded),
       statuses: [...statuses],
+      excludeSingleSource,
+      excludeSingleSourceAfterFailed,
       filters,
     };
   }
@@ -304,6 +311,39 @@ export function ProfileApp({
                       {option.label}
                     </label>
                   ))}
+                </fieldset>
+              </section>
+
+              <section className="profile-section" aria-labelledby="profile-single-source">
+                <h2 id="profile-single-source">Закупки из одного источника</h2>
+                <p className="profile-hint">
+                  Такие закупки часто объявляют после несостоявшейся процедуры: срок подачи по
+                  первой процедуре уже прошёл, а в списке она выглядит живой.
+                </p>
+                <fieldset className="profile-statuses">
+                  <legend className="sr-only">Закупки из одного источника</legend>
+                  <label className="profile-status-option">
+                    <input
+                      type="checkbox"
+                      checked={excludeSingleSource}
+                      onChange={(event) => {
+                        setExcludeSingleSource(event.target.checked);
+                      }}
+                    />
+                    Не показывать закупки из одного источника
+                  </label>
+                  <label className="profile-status-option">
+                    <input
+                      type="checkbox"
+                      checked={excludeSingleSourceAfterFailed}
+                      disabled={excludeSingleSource}
+                      onChange={(event) => {
+                        setExcludeSingleSourceAfterFailed(event.target.checked);
+                      }}
+                    />
+                    Не показывать закупки из одного источника по итогам несостоявшейся процедуры
+                    (поиск медленнее: открывается карточка каждой такой закупки)
+                  </label>
                 </fieldset>
               </section>
 
@@ -596,6 +636,8 @@ function sameWrite(
     list(write.keywords) === list(saved.keywords) &&
     list(write.excludeKeywords) === list(saved.excludeKeywords) &&
     [...write.statuses].sort().join(",") === [...saved.statuses].sort().join(",") &&
+    write.excludeSingleSource === saved.excludeSingleSource &&
+    write.excludeSingleSourceAfterFailed === saved.excludeSingleSourceAfterFailed &&
     JSON.stringify(write.filters) === JSON.stringify(saved.filters)
   );
 }

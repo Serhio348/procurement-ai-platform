@@ -48,6 +48,7 @@
 - [`docs/architecture/STAGE-27.md`](docs/architecture/STAGE-27.md) — разбор входящих, а не склад сообщений
 - [`docs/architecture/STAGE-28.md`](docs/architecture/STAGE-28.md) — журнал: доступ, вход/выход, ошибки
 - [`docs/architecture/STAGE-38.md`](docs/architecture/STAGE-38.md) — карточка площадки при «Участвовать»
+- [`docs/architecture/STAGE-39.md`](docs/architecture/STAGE-39.md) — несостоявшиеся процедуры и закупки из одного источника
 
 ---
 

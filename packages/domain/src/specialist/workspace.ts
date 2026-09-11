@@ -252,6 +252,8 @@ export class SpecialistWorkspace {
       keywords,
       excludeKeywords,
       statuses: input.statuses ?? current.statuses,
+      excludeSingleSource: input.excludeSingleSource,
+      excludeSingleSourceAfterFailed: input.excludeSingleSourceAfterFailed,
       filters: input.filters ?? current.filters,
     });
     this.#profiles = this.#profiles.map((item) => (item.id === id ? next : item));

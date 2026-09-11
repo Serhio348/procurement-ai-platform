@@ -43,6 +43,13 @@
       "when": 1788205342800,
       "tag": "0005_specialist_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788205342801,
+      "tag": "0006_procedure_status_failed",
+      "breakpoints": true
     }
   ]
 }

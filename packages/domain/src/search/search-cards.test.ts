@@ -1,7 +1,7 @@
-import { SearchHit, electricalEquipmentSeedV1 } from "@procurement/contracts";
+import { ProcedureCard, SearchHit, electricalEquipmentSeedV1 } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import { uuidFromHex } from "../specialist/case.js";
-import { selectRelevantSearchCards } from "./search-cards.js";
+import { isSingleSourceAfterFailedProcedure, selectRelevantSearchCards } from "./search-cards.js";
 
 const profile = {
   keywords: electricalEquipmentSeedV1.keywords,
@@ -192,5 +192,64 @@ describe("selectRelevantSearchCards", () => {
     // "b" matches but is over the limit, "c" matches nothing and waits for review.
     expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["c"]);
     expect(selected.discardedCount).toBe(1);
+  });
+
+  it("drops single-source purchases only when the profile asks for it, and never a hit without a kind", () => {
+    const hits = [
+      hit("single-source/1", "Комплектная трансформаторная подстанция", { kind: "single_source" }),
+      hit("auction/1", "Комплектная трансформаторная подстанция", { kind: "electronic_auction" }),
+      hit("request/1", "Комплектная трансформаторная подстанция"),
+    ];
+    expect(
+      selectRelevantSearchCards(hits, profile, 20).cards.map((card) => card.sourceProcurementId),
+    ).toEqual(["single-source/1", "auction/1", "request/1"]);
+    const excluded = selectRelevantSearchCards(hits, { ...profile, excludeSingleSource: true }, 20);
+    expect(excluded.cards.map((card) => card.sourceProcurementId)).toEqual(["auction/1", "request/1"]);
+    expect(excluded.discardedCount).toBe(1);
+  });
+});
+
+describe("isSingleSourceAfterFailedProcedure", () => {
+  const base = {
+    sourceId: "goszakupki_by",
+    sourceProcurementId: "single-source/1",
+    url: "https://goszakupki.by/single-source/view/1",
+    title: "Выбор генподрядчика",
+    kind: "single_source",
+    fetchedAt: "2026-09-11T00:00:00.000Z",
+  };
+
+  it("is decided by the basis or the preceding procedure number, not by kind alone", () => {
+    expect(isSingleSourceAfterFailedProcedure(ProcedureCard.parse(base))).toBe(false);
+    expect(
+      isSingleSourceAfterFailedProcedure(
+        ProcedureCard.parse({
+          ...base,
+          singleSourceBasis: "7. Признание процедуры государственной закупки несостоявшейся.",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isSingleSourceAfterFailedProcedure(
+        ProcedureCard.parse({ ...base, precedingProcedureNumber: "auc0003541262" }),
+      ),
+    ).toBe(true);
+    expect(
+      isSingleSourceAfterFailedProcedure(
+        ProcedureCard.parse({ ...base, singleSourceBasis: "3. Закупка у единственного поставщика" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("ignores the basis on a competitive procedure", () => {
+    expect(
+      isSingleSourceAfterFailedProcedure(
+        ProcedureCard.parse({
+          ...base,
+          kind: "electronic_auction",
+          singleSourceBasis: "несостоявшейся",
+        }),
+      ),
+    ).toBe(false);
   });
 });

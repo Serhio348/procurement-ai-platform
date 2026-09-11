@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactElement } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
 import {
+  bidsDeadlinePassed,
+  isSingleSourceAfterFailedProcedure,
   procedureBuyerFields,
   procedureDetailFields,
   procedurePublicId,
@@ -85,6 +87,17 @@ export function ProcurementDetailApp({
               {stored.triage === "monitor" ? "Слежу" : "Участвую"}
             </span>
             <span className="procurement-detail-status">{stored.statusLabel}</span>
+            {bidsDeadlinePassed(
+              source === undefined ? stored : { ...stored, sourceCard: source },
+              new Date(),
+            ) ? (
+              <span className="procurement-detail-expired">срок подачи истёк</span>
+            ) : null}
+            {source !== undefined && isSingleSourceAfterFailedProcedure(source) ? (
+              <span className="procurement-detail-after-failed">
+                из одного источника после несостоявшейся процедуры
+              </span>
+            ) : null}
           </div>
         </header>
 

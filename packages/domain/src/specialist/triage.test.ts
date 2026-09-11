@@ -61,6 +61,8 @@ describe("specialist triage", () => {
       keywords: ["НКУ", "щиты", "ВРУ"],
       excludeKeywords: [],
       statuses: ["accepting_bids"],
+      excludeSingleSource: false,
+      excludeSingleSourceAfterFailed: false,
       filters: {},
     });
     expect(workspace.profile().watchNewProcurements).toBe(false);

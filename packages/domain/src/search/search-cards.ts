@@ -29,6 +29,8 @@ export const MAX_AMBIGUOUS_PER_SEARCH = 50;
 export interface SearchSelectionProfile extends CheapClassifyProfile {
   /** Watched procedure statuses; empty or absent means no status filter. */
   statuses?: readonly ProcedureStatusValue[];
+  /** Drop single-source purchases outright. */
+  excludeSingleSource?: boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export function selectRelevantSearchCards(
     if (seen.has(key)) continue;
     seen.add(key);
     if (!hitMatchesProfileStatuses(hit, profile.statuses)) continue;
+    if (profile.excludeSingleSource === true && hit.kind === "single_source") continue;
     const classified = cheapClassifyHit(
       {
         title: hit.title,
@@ -99,6 +102,18 @@ export function hitMatchesProfileStatuses(
   if (statuses === undefined || statuses.length === 0) return true;
   if (hit.status === undefined) return true;
   return statuses.includes(hit.status);
+}
+
+/**
+ * A single-source purchase that exists only because a competitive procedure
+ * failed. Decided from the card, never from the listing row: the basis is not
+ * shown there. A card without a basis is not treated as "after failed".
+ */
+export function isSingleSourceAfterFailedProcedure(card: ProcedureCardValue): boolean {
+  if (card.kind !== "single_source") return false;
+  if (card.precedingProcedureNumber !== undefined) return true;
+  const basis = card.singleSourceBasis?.normalize("NFKC").toLocaleLowerCase("ru-BY") ?? "";
+  return basis.includes("несостоя");
 }
 
 export function searchHitsFromFixtureDump(raw: unknown): SearchHitValue[] {

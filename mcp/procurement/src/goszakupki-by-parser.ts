@@ -66,6 +66,7 @@ export function parseGoszakupkiSearchPage(
       const sourceStatus = text(cells.eq(3));
       const amount = parsePlatformAmount(text(cells.eq(5)));
       const bidsDeadline = parsePlatformInstant(text(cells.eq(4)));
+      const kind = procedureKind(text(cells.eq(2)));
       return {
         hit: SearchHit.parse({
           sourceId: "goszakupki_by",
@@ -73,6 +74,7 @@ export function parseGoszakupkiSearchPage(
           url: targetUrl.href,
           title,
           pageFamily: pageFamilyFromSegment(family),
+          kind,
           ...(sourceStatus.length === 0
             ? {}
             : { sourceStatus, status: procedureStatus(sourceStatus) }),
@@ -83,7 +85,7 @@ export function parseGoszakupkiSearchPage(
           ...(amount === undefined ? {} : { amount }),
           ...(bidsDeadline === undefined ? {} : { bidsDeadline }),
         }),
-        kind: procedureKind(text(cells.eq(2))),
+        kind,
       };
     })
     .filter((row) => row !== undefined);
@@ -126,6 +128,14 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
     "Фамилии, имена и отчества, номера телефонов работников заказчика",
     "Контактные данные",
     "Контактные номера работников закупающей организации (организатора)",
+  ]);
+  const singleSourceBasis = firstField(fields, [
+    "Основание выбора процедуры закупки из одного источника",
+    "Основание проведения процедуры закупки из одного источника",
+  ]);
+  const precedingProcedureNumber = firstField(fields, [
+    "Номер процедуры государственной закупки на ЭТП, признанной несостоявшейся",
+    "Номер процедуры закупки, признанной несостоявшейся",
   ]);
   const giasId = findGiasId($);
   const externalIds = [
@@ -201,6 +211,8 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
             firstField(fields, ["Дата и время проведения электронного аукциона"]),
           ),
         }),
+    ...(singleSourceBasis === undefined ? {} : { singleSourceBasis }),
+    ...(precedingProcedureNumber === undefined ? {} : { precedingProcedureNumber }),
     lots,
     rawFields: Object.fromEntries(fields),
     fetchedAt: input.fetchedAt,
@@ -506,6 +518,8 @@ function aggregateSourceStatus(lots: readonly SourceLot[]): string | undefined {
 function procedureStatus(sourceStatus: string | undefined): ProcedureStatus {
   if (sourceStatus === undefined) return "unknown";
   const normalized = normalise(sourceStatus);
+  // Checked first: a failed lot may still carry "рассмотрение" in its badge text.
+  if (normalized.includes("несостоя")) return "failed";
   if (
     normalized.includes("подача предложений") ||
     normalized.includes("подача документов") ||

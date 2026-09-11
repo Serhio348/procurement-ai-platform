@@ -258,6 +258,13 @@ export const SpecialistWorkingProfile = z.object({
   excludeKeywords: z.array(z.string().min(1)).max(50).default([]),
   /** Procedure statuses this profile collects. Empty array means no status filter. */
   statuses: z.array(ProcedureStatus).default(["accepting_bids"]),
+  /** Drop every single-source purchase; the kind is visible in the listing row. */
+  excludeSingleSource: z.boolean().default(false),
+  /**
+   * Drop single-source purchases whose basis is a failed procedure. The basis
+   * lives only on the card, so each single-source hit costs one card read.
+   */
+  excludeSingleSourceAfterFailed: z.boolean().default(false),
   /** Site-side filters sent with the search query. */
   filters: SpecialistSearchFilters.default({}),
   watchNewProcurements: z.boolean().default(false),

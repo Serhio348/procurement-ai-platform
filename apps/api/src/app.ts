@@ -76,6 +76,7 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 import type { SpecialistReviewPort } from "./search-review.js";
+import { createFailedSingleSourceFilter } from "./single-source-filter.js";
 
 export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /**
@@ -140,6 +141,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
   const searchReview = options.searchReview;
   const cardWatch = options.cardWatch;
+  const failedSingleSource = createFailedSingleSourceFilter({
+    ...(cardWatch === undefined ? {} : { cardWatch }),
+    logger,
+  });
   const watchLimit = options.watchLimit ?? DEFAULT_WATCH_LIMIT;
   const documentIngest = options.documentIngest;
   const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
@@ -478,12 +483,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace.profile();
     const hits = await searchHits.search(buildSearchQuery(profile, limit, offset));
+    const filtered = await failedSingleSource.apply(hits, profile);
     const selected = selectRelevantSearchCards(
-      hits,
+      filtered.hits,
       {
         keywords: profile.keywords,
         excludeKeywords: profile.excludeKeywords,
         statuses: profile.statuses,
+        excludeSingleSource: profile.excludeSingleSource,
       },
       limit,
     );
@@ -500,7 +507,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: false });
     resultItems.push(...reviewed.matched);
     const relevantCount = resultItems.length;
-    const discardedCount = selected.discardedCount + skippedRejected + reviewed.discarded;
+    const discardedCount =
+      selected.discardedCount + filtered.droppedCount + skippedRejected + reviewed.discarded;
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
       relevantCount,
@@ -594,12 +602,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         succeeded.push(profile);
         const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
         skippedDecidedCount += partitioned.skippedDecidedCount;
+        const filtered = await failedSingleSource.apply(partitioned.undecided, profile, {
+          beforeRequest: () => discoveryController.beforeRequest(new Date()),
+        });
         const selected = selectRelevantSearchCards(
-          partitioned.undecided,
+          filtered.hits,
           {
             keywords: profile.keywords,
             excludeKeywords: profile.excludeKeywords,
             statuses: profile.statuses,
+            excludeSingleSource: profile.excludeSingleSource,
           },
           limit,
         );

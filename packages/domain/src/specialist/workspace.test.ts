@@ -12,6 +12,8 @@ const write = {
   keywords: ["КТПБ"],
   excludeKeywords: [],
   statuses: ["accepting_bids" as const],
+  excludeSingleSource: false,
+  excludeSingleSourceAfterFailed: false,
   filters: {},
 };
 

@@ -177,6 +177,8 @@ function statusLabel(status: ProcedureStatus): string {
       return "завершена";
     case "cancelled":
       return "отменена";
+    case "failed":
+      return "не состоялась";
     case "unknown":
       return "неизвестен";
   }

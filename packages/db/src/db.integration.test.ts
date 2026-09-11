@@ -154,6 +154,8 @@ integration("PostgreSQL migrations and invariants", () => {
           keywords: ["кабель"],
           excludeKeywords: [],
           statuses: ["accepting_bids"],
+          excludeSingleSource: false,
+          excludeSingleSourceAfterFailed: false,
           filters: {},
           watchNewProcurements: false,
         },

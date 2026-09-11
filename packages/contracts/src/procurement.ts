@@ -40,6 +40,8 @@ export const ProcedureStatus = z.enum([
   "under_review",
   "completed",
   "cancelled",
+  /** The source declared the procedure failed (e.g. no valid bids). */
+  "failed",
   "unknown",
 ]);
 export type ProcedureStatus = z.infer<typeof ProcedureStatus>;
@@ -155,6 +157,14 @@ export const ProcedureCard = z.object({
   bidsDeadline: PlatformInstant.optional(),
   auctionAt: PlatformInstant.optional(),
   deliveryDeadline: z.string().optional(),
+  /**
+   * Why a single-source purchase was allowed, verbatim from the card
+   * ("7. Признание процедуры государственной закупки несостоявшейся").
+   * Only single-source cards carry it.
+   */
+  singleSourceBasis: z.string().optional(),
+  /** Source number of the failed procedure this single-source purchase replaces. */
+  precedingProcedureNumber: z.string().optional(),
   lots: z.array(SourceLot).default([]),
   /** Raw platform fields kept verbatim for provenance and later re-parsing. */
   rawFields: z.record(z.string(), z.string()).default({}),
@@ -202,6 +212,8 @@ export const SearchHit = z.object({
   url: z.string().url(),
   title: z.string().min(1),
   pageFamily: PageFamily.optional(),
+  /** Procedure kind when the listing row exposed one. */
+  kind: ProcedureKind.optional(),
   /** Normalized status when the listing row exposed one. */
   status: ProcedureStatus.optional(),
   sourceStatus: z.string().optional(),

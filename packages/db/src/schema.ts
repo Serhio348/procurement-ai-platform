@@ -40,6 +40,7 @@ export const procedureStatus = pgEnum("procedure_status", [
   "under_review",
   "completed",
   "cancelled",
+  "failed",
   "unknown",
 ]);
 

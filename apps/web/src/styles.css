@@ -1355,25 +1355,49 @@ h3 {
 }
 
 .my-procurements-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   height: 100%;
-  padding: 16px;
+  padding: 18px 20px 16px 24px;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  background: #fff;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfd 100%);
   border: 1px solid #d5dae2;
-  border-radius: 10px;
-  box-shadow: 0 2px 6px rgb(30 36 48 / 6%);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgb(30 36 48 / 6%), 0 6px 18px rgb(30 36 48 / 5%);
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.my-procurements-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: 12px 0 0 12px;
+  background: #3a5d86;
+}
+
+.my-procurements-card.is-monitor::before {
+  background: #c9a25a;
+}
+
+.my-procurements-card.is-participate::before {
+  background: #2d5a3d;
 }
 
 .my-procurements-card:hover {
-  border-color: #3a5d86;
-  box-shadow: 0 4px 12px rgb(30 36 48 / 12%);
+  transform: translateY(-2px);
+  border-color: #b7c3d4;
+  box-shadow: 0 2px 4px rgb(30 36 48 / 8%), 0 14px 28px rgb(30 36 48 / 12%);
+}
+
+.my-procurements-card:hover .my-procurements-card-arrow {
+  transform: translateX(4px);
 }
 
 .my-procurements-card:focus-visible {
@@ -1383,21 +1407,26 @@ h3 {
 
 .my-procurements-card-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .my-procurements-card-id {
-  font-size: 12px;
-  color: #5c6778;
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #8a94a3;
   font-family: ui-monospace, monospace;
 }
 
 .my-procurements-card-triage {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
 }
 
 .my-procurements-card-triage.triage-monitor {
@@ -1410,40 +1439,95 @@ h3 {
   color: #1f5c2e;
 }
 
+.my-procurements-card-status {
+  font-size: 12px;
+  padding: 4px 9px;
+  color: #3a4658;
+  background: #eef1f5;
+  border-radius: 999px;
+}
+
 .my-procurements-card-title {
   margin: 0;
   font-size: 16px;
-  line-height: 1.35;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #1c2430;
   overflow-wrap: anywhere;
 }
 
-.my-procurements-card-meta {
+.my-procurements-card-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 13px;
-  color: #3a4658;
+  gap: 8px 24px;
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid #edf0f4;
+  border-bottom: 1px solid #edf0f4;
 }
 
-.my-procurements-card-status,
-.my-procurements-card-amount,
-.my-procurements-card-deadline {
-  padding: 3px 8px;
-  background: #f4f6f8;
-  border-radius: 4px;
+.my-procurements-card-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.my-procurements-card-facts dt {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8a94a3;
+}
+
+.my-procurements-card-facts dd {
+  margin: 0;
+  font-size: 14px;
+  color: #1c2430;
+}
+
+.my-procurements-card-amount {
+  font-size: 18px !important;
+  font-weight: 700;
+  color: #1e2430 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.my-procurements-card-buyer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .my-procurements-card-buyer {
   margin: 0;
   font-size: 13px;
-  color: #5c6778;
+  font-weight: 500;
+  color: #3a4658;
+  overflow-wrap: anywhere;
 }
 
 .my-procurements-card-contact {
   margin: 0;
   font-size: 13px;
-  color: #1c2430;
+  line-height: 1.45;
+  color: #5c6778;
   overflow-wrap: anywhere;
+}
+
+.my-procurements-card-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3a5d86;
+}
+
+.my-procurements-card-arrow {
+  display: inline-block;
+  transition: transform 140ms ease;
 }
 
 .procurement-detail-back {

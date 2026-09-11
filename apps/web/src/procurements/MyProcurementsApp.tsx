@@ -58,36 +58,49 @@ export function MyProcurementsApp({
               <li key={item.id}>
                 <button
                   type="button"
-                  className="my-procurements-card"
+                  className={`my-procurements-card is-${item.triage ?? "unknown"}`}
                   aria-label={`Открыть: ${item.title}`}
                   onClick={() => {
                     void navigate(`/my-procurements/${item.id}`);
                   }}
                 >
-                <div className="my-procurements-card-header">
-                  <span className="my-procurements-card-id">{shortId(item.id)}</span>
-                  <span className={`my-procurements-card-triage triage-${item.triage ?? ""}`}>
-                    {item.triage === "monitor" ? "Слежу" : "Участвую"}
-                  </span>
-                </div>
-                <h2 className="my-procurements-card-title">{item.title}</h2>
-                <div className="my-procurements-card-meta">
-                  <span className="my-procurements-card-status">{item.statusLabel}</span>
-                  {item.amountLabel ? (
-                    <span className="my-procurements-card-amount">{item.amountLabel}</span>
-                  ) : null}
-                  {item.watchSnapshot?.bidsDeadline ? (
-                    <span className="my-procurements-card-deadline">
-                      приём до {item.watchSnapshot.bidsDeadline}
+                  <div className="my-procurements-card-header">
+                    <span className={`my-procurements-card-triage triage-${item.triage ?? ""}`}>
+                      {item.triage === "monitor" ? "Слежу" : "Участвую"}
                     </span>
+                    <span className="my-procurements-card-status">{item.statusLabel}</span>
+                    <span className="my-procurements-card-id">{shortId(item.id)}</span>
+                  </div>
+                  <h2 className="my-procurements-card-title">{item.title}</h2>
+                  <dl className="my-procurements-card-facts">
+                    {item.amountLabel ? (
+                      <div>
+                        <dt>Стоимость</dt>
+                        <dd className="my-procurements-card-amount">{item.amountLabel}</dd>
+                      </div>
+                    ) : null}
+                    {item.watchSnapshot?.bidsDeadline ? (
+                      <div>
+                        <dt>Приём до</dt>
+                        <dd>{item.watchSnapshot.bidsDeadline}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  {item.buyerName || item.sourceCard?.buyer?.contact ? (
+                    <div className="my-procurements-card-buyer-block">
+                      {item.buyerName ? (
+                        <p className="my-procurements-card-buyer">{item.buyerName}</p>
+                      ) : null}
+                      {item.sourceCard?.buyer?.contact ? (
+                        <p className="my-procurements-card-contact">
+                          {item.sourceCard.buyer.contact}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
-                </div>
-                {item.buyerName ? (
-                  <p className="my-procurements-card-buyer">{item.buyerName}</p>
-                ) : null}
-                {item.sourceCard?.buyer?.contact ? (
-                  <p className="my-procurements-card-contact">{item.sourceCard.buyer.contact}</p>
-                ) : null}
+                  <span className="my-procurements-card-footer" aria-hidden="true">
+                    Открыть карточку <span className="my-procurements-card-arrow">→</span>
+                  </span>
                 </button>
               </li>
             ))}

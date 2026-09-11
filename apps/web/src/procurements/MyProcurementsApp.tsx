@@ -83,7 +83,7 @@ export function MyProcurementsApp({
                   type="button"
                   className="my-procurements-card-open"
                   onClick={() => {
-                    void navigate(`/procurements/${item.id}`);
+                    void navigate(`/my-procurements/${item.id}`);
                   }}
                 >
                   Открыть

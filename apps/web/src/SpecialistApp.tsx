@@ -219,11 +219,31 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           }
         />
         <Route
+          path="/procurements/:id"
+          element={
+            <ProcurementsApp
+              items={procurements}
+              profiles={profiles}
+              {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
+              {...(search === undefined ? {} : { search })}
+              {...(activateProfile === undefined
+                ? {}
+                : {
+                    selectProfile: async (id: string) => {
+                      remember(await activateProfile(id), true);
+                    },
+                  })}
+              {...(decide === undefined ? {} : { decide })}
+              {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
+            />
+          }
+        />
+        <Route
           path="/my-procurements"
           element={<MyProcurementsApp procurements={procurements} />}
         />
         <Route
-          path="/procurements/:id"
+          path="/my-procurements/:id"
           element={<ProcurementDetailApp procurements={procurements} />}
         />
         <Route path="/admin/:pane?" element={<AdminApp />} />

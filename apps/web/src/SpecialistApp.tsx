@@ -70,7 +70,11 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     if (refreshInbox === undefined) return undefined;
     const timer = setInterval(() => {
       void refreshInbox()
-        .then(setInbox)
+        // The poll returns a fresh array every tick; swapping it for an
+        // identical list re-renders the whole console for nothing.
+        .then((items) =>
+          setInbox((current) => (sameInboxItems(current, items) ? current : items)),
+        )
         .catch(() => undefined);
     }, 30_000);
     return () => clearInterval(timer);
@@ -424,6 +428,15 @@ export function writeStoredSearchIds(value: SearchIdsByProfile): void {
   } catch {
     // Quota or privacy mode: the in-memory state still works for this session.
   }
+}
+
+function sameInboxItems(
+  left: readonly SpecialistInboxEntry[],
+  right: readonly SpecialistInboxEntry[],
+): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => item.id === right[index]?.id);
 }
 
 /** Prefer the richer case (documents / source card) when the same id returns twice. */

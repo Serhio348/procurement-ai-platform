@@ -42,7 +42,9 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     if (user?.role !== "admin") return undefined;
     const timer = setInterval(() => {
       void fetchSession()
-        .then(setUser)
+        // A fresh-but-identical user object would re-render the whole console
+        // on every tick; a null user means the session is really gone.
+        .then((next) => setUser((current) => (sameSessionUser(current, next) ? current : next)))
         .catch(() => undefined);
     }, 30_000);
     return () => clearInterval(timer);
@@ -67,4 +69,10 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
 
 export function useAuthSession(): AuthSessionValue {
   return useContext(AuthSessionContext);
+}
+
+function sameSessionUser(left: AuthSessionUser | null, right: AuthSessionUser | null): boolean {
+  if (left === right) return true;
+  if (left === null || right === null) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
 }

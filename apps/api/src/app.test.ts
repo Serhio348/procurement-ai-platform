@@ -920,10 +920,7 @@ describe("specialist API", () => {
       },
       amount: { kind: "indicative", amount: 160651.42, currency: "BYN", raw: "160 651.42 BYN" },
     });
-    const ingest = vi.fn(async (card: typeof found) => {
-      expect(card.sourceCard?.buyer?.registrationNumber).toBe("200050653");
-      return card;
-    });
+    const ingest = vi.fn(async (card: typeof found) => card);
     const app = await buildSpecialistApi({
       catalog,
       documentIngest: { ingest },
@@ -938,12 +935,64 @@ describe("specialist API", () => {
     const items = JSON.parse(participated.body).items as Array<{
       amountLabel?: string;
       sourceCard?: { buyer?: { registrationNumber?: string } };
+      documents?: unknown[];
     }>;
 
     expect(participated.statusCode).toBe(200);
     expect(ingest).toHaveBeenCalledTimes(1);
     expect(items[0]?.amountLabel).toBe("160 651.42 BYN");
     expect(items[0]?.sourceCard?.buyer?.registrationNumber).toBe("200050653");
+
+    await app.close();
+  });
+
+  it("downloads documents even when reading the platform card fails", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    const ingest = vi.fn(async (card: typeof found) =>
+      SpecialistProcurementCard.parse({
+        ...card,
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/401",
+            hash: "a".repeat(64),
+            status: "hashed",
+          },
+        ],
+      }),
+    );
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest },
+      cardWatch: {
+        read: async () => {
+          throw new Error("source down");
+        },
+      },
+    });
+
+    const participated = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/decision`,
+      payload: { kind: "participate" },
+    });
+    const items = JSON.parse(participated.body).items as Array<{
+      documents: Array<{ name: string }>;
+    }>;
+
+    expect(participated.statusCode).toBe(200);
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(items[0]?.documents).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
 
     await app.close();
   });

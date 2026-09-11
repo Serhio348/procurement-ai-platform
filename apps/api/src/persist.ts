@@ -1,6 +1,7 @@
 import {
   createDatabase,
   createSpecialistStore,
+  postgresErrorMessage,
   type Database,
 } from "@procurement/db";
 import {
@@ -104,7 +105,7 @@ export async function openSpecialistPersistence(options: {
       await recordJournal(journal, {
         kind: "platform",
         level: "error",
-        message: "Не удалось записать карточку закупки в PostgreSQL.",
+        message: persistCaseErrorMessage(error),
       });
     }
   };
@@ -191,4 +192,11 @@ async function connectSpecialistDatabase(
     await created.pool.end();
     return undefined;
   }
+}
+
+function persistCaseErrorMessage(error: unknown): string {
+  const detail = postgresErrorMessage(error).replaceAll(/\s+/g, " ").trim();
+  const prefix = "Не удалось записать карточку закупки в PostgreSQL.";
+  if (detail.length === 0) return prefix;
+  return `${prefix} ${detail}`.slice(0, 2000);
 }

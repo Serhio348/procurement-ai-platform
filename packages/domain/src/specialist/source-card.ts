@@ -41,11 +41,15 @@ export function applySourceCard(
 ): SpecialistProcurementCardValue {
   const buyer = source.buyer?.name ?? card.buyerName;
   const amount = procedureAmountLabel(source) ?? card.amountLabel;
+  const printedStatus = source.sourceStatus?.trim();
   return SpecialistProcurementCard.parse({
     ...card,
     title: source.title,
     status: source.status,
-    statusLabel: source.sourceStatus ?? statusLabel(source.status),
+    statusLabel:
+      printedStatus !== undefined && printedStatus.length > 0
+        ? printedStatus
+        : statusLabel(source.status),
     ...(buyer === undefined ? {} : { buyerName: buyer }),
     ...(amount === undefined ? {} : { amountLabel: amount }),
     sourceCard: source,

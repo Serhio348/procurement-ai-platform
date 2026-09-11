@@ -71,6 +71,19 @@ describe("applySourceCard", () => {
     expect(next.watchSnapshot?.priceKey).toBe("160651.42");
     expect(next.documents).toHaveLength(1);
   });
+
+  it("does not store a blank source status as the specialist label", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Строка из поиска",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+    });
+    const next = applySourceCard(card, source({ sourceStatus: "" }), now);
+    expect(next.statusLabel).toBe("приём предложений");
+  });
 });
 
 describe("procedure display fields", () => {

@@ -178,9 +178,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     card: SpecialistProcurementCardValue,
   ): Promise<SpecialistProcurementCardValue> {
     if (cardWatch === undefined) return card;
-    const live = await cardWatch.read(card.sourceProcurementId);
-    if (live === undefined) return card;
-    return withTriage(applySourceCard(card, live, clock()), workspace);
+    try {
+      const live = await cardWatch.read(card.sourceProcurementId);
+      if (live === undefined) return card;
+      return withTriage(applySourceCard(card, live, clock()), workspace);
+    } catch (error) {
+      logger.error("Specialist source card hydrate failed", error, {
+        sourceProcurementId: card.sourceProcurementId,
+      });
+      return card;
+    }
   }
 
   // Review cases wait in the inbox; they enter the list only after a
@@ -389,7 +396,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       if (fresh === undefined) continue;
       monitoredCount += 1;
       const previous = card.watchSnapshot;
-      let next = applySourceCard(card, fresh, now);
+      let next: SpecialistProcurementCardValue;
+      try {
+        next = applySourceCard(card, fresh, now);
+      } catch (error) {
+        logger.error("Specialist watched case could not store the source card", error, {
+          sourceProcurementId: card.sourceProcurementId,
+        });
+        continue;
+      }
       if (previous === undefined) {
         catalog.upsertCase(next);
         continue;
@@ -890,26 +905,37 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     workspace.recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
     let next = withTriage(card, workspace);
-    if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
-      next = await hydrateSourceCard(next);
-    }
-    if (parsed.data.kind === "participate" && documentIngest !== undefined) {
-      ingestProgress.begin(card.id);
-      try {
-        next = withTriage(await documentIngest.ingest(next), workspace);
-        ingestProgress.done(card.id);
-      } catch (error) {
-        ingestProgress.fail(card.id);
-        logger.error("Specialist participate document ingest failed", error, {
-          sourceProcurementId: card.sourceProcurementId,
-        });
-        await recordJournal(journal, {
-          kind: "documents",
-          level: "error",
-          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
-          sourceProcurementId: card.sourceProcurementId,
-        });
-      }
+    const shouldHydrate = parsed.data.kind === "monitor" || parsed.data.kind === "participate";
+    const ingestPort =
+      parsed.data.kind === "participate" && documentIngest !== undefined ? documentIngest : undefined;
+    if (ingestPort !== undefined) ingestProgress.begin(card.id);
+    const hydrateTask = shouldHydrate ? hydrateSourceCard(next) : Promise.resolve(next);
+    const ingestTask =
+      ingestPort === undefined
+        ? Promise.resolve(next)
+        : ingestPort.ingest(next).then(
+            (ingested) => {
+              ingestProgress.done(card.id);
+              return ingested;
+            },
+            async (error: unknown) => {
+              ingestProgress.fail(card.id);
+              logger.error("Specialist participate document ingest failed", error, {
+                sourceProcurementId: card.sourceProcurementId,
+              });
+              await recordJournal(journal, {
+                kind: "documents",
+                level: "error",
+                message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
+                sourceProcurementId: card.sourceProcurementId,
+              });
+              return next;
+            },
+          );
+    const [hydrated, ingested] = await Promise.all([hydrateTask, ingestTask]);
+    next = withTriage(ingested, workspace);
+    if (hydrated.sourceCard !== undefined) {
+      next = withTriage(applySourceCard(next, hydrated.sourceCard, clock()), workspace);
     }
     catalog.upsertCase(next);
     catalog.dismissByProcurementId(next.id);

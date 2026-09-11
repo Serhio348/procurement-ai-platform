@@ -493,7 +493,13 @@ function findGiasId($: CheerioAPI): string | undefined {
 }
 
 function aggregateSourceStatus(lots: readonly SourceLot[]): string | undefined {
-  const statuses = [...new Set(lots.map((lot) => lot.status).filter((value) => value !== undefined))];
+  const statuses = [
+    ...new Set(
+      lots
+        .map((lot) => lot.status?.trim())
+        .filter((value): value is string => value !== undefined && value.length > 0),
+    ),
+  ];
   return statuses.length === 0 ? undefined : statuses.join("; ");
 }
 

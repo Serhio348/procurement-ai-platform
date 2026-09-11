@@ -55,16 +55,22 @@ export function MyProcurementsApp({
         ) : (
           <ul className="my-procurements-grid">
             {visible.map((item) => (
-              <li key={item.id} className="my-procurements-card">
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="my-procurements-card"
+                  aria-label={`Открыть: ${item.title}`}
+                  onClick={() => {
+                    void navigate(`/my-procurements/${item.id}`);
+                  }}
+                >
                 <div className="my-procurements-card-header">
                   <span className="my-procurements-card-id">{shortId(item.id)}</span>
                   <span className={`my-procurements-card-triage triage-${item.triage ?? ""}`}>
                     {item.triage === "monitor" ? "Слежу" : "Участвую"}
                   </span>
                 </div>
-                <h2 className="my-procurements-card-title" title={item.title}>
-                  {item.title}
-                </h2>
+                <h2 className="my-procurements-card-title">{item.title}</h2>
                 <div className="my-procurements-card-meta">
                   <span className="my-procurements-card-status">{item.statusLabel}</span>
                   {item.amountLabel ? (
@@ -79,14 +85,6 @@ export function MyProcurementsApp({
                 {item.buyerName ? (
                   <p className="my-procurements-card-buyer">{item.buyerName}</p>
                 ) : null}
-                <button
-                  type="button"
-                  className="my-procurements-card-open"
-                  onClick={() => {
-                    void navigate(`/my-procurements/${item.id}`);
-                  }}
-                >
-                  Открыть
                 </button>
               </li>
             ))}

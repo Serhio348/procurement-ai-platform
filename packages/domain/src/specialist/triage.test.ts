@@ -62,7 +62,6 @@ describe("specialist triage", () => {
       excludeKeywords: [],
       statuses: ["accepting_bids"],
       excludeSingleSource: false,
-      excludeSingleSourceAfterFailed: false,
       filters: {},
     });
     expect(workspace.profile().watchNewProcurements).toBe(false);

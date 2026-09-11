@@ -1307,6 +1307,81 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("archives a decided case out of monitoring and restores it with its triage", async () => {
+    const card = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/778",
+      url: "https://goszakupki.by/auction/view/auction-778",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+      amount: { kind: "limit", amount: null, raw: "1 000,00 BYN" },
+    });
+    const read = vi.fn().mockResolvedValue(card);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/778",
+            url: "https://goszakupki.by/auction/view/auction-778",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+
+    const archived = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/archive`,
+      payload: { archived: true },
+    });
+    const archivedItem = (JSON.parse(archived.body).items as Array<{ id: string; triage?: string; archived?: boolean }>)
+      .find((item) => item.id === cardId);
+    const second = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+
+    expect(archived.statusCode).toBe(200);
+    expect(archivedItem?.triage).toBe("monitor");
+    expect(archivedItem?.archived).toBe(true);
+    expect(JSON.parse(second.body).monitoredCount).toBe(0);
+
+    const restored = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/archive`,
+      payload: { archived: false },
+    });
+    const restoredItem = (JSON.parse(restored.body).items as Array<{ id: string; triage?: string; archived?: boolean }>)
+      .find((item) => item.id === cardId);
+    const third = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+
+    expect(restoredItem?.archived).toBe(false);
+    expect(restoredItem?.triage).toBe("monitor");
+    expect(JSON.parse(third.body).monitoredCount).toBe(1);
+
+    await app.close();
+  });
+
   it("maps a blocked live source to 503 without inventing search hits", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),

@@ -2,6 +2,7 @@ import {
   InboxFixtureItem,
   ProcedureCard,
   type SearchQuery,
+  SpecialistArchiveWrite,
   SpecialistDecisionWrite,
   SpecialistDiscoveryHealthResponse,
   SpecialistDiscoveryResponse,
@@ -76,7 +77,6 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 import type { SpecialistReviewPort } from "./search-review.js";
-import { createFailedSingleSourceFilter } from "./single-source-filter.js";
 
 export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /**
@@ -141,10 +141,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
   const searchReview = options.searchReview;
   const cardWatch = options.cardWatch;
-  const failedSingleSource = createFailedSingleSourceFilter({
-    ...(cardWatch === undefined ? {} : { cardWatch }),
-    logger,
-  });
   const watchLimit = options.watchLimit ?? DEFAULT_WATCH_LIMIT;
   const documentIngest = options.documentIngest;
   const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
@@ -410,7 +406,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     const followed = catalog
       .procurements()
-      .filter((item) => item.live && isWatchedTriage(withTriage(item, workspace)))
+      .map((item) => withTriage(item, workspace))
+      .filter((item) => item.live && !item.archived && isWatchedTriage(item))
       .sort((left, right) => watchOrder(left) - watchOrder(right))
       .slice(0, watchLimit);
     let monitoredCount = 0;
@@ -483,9 +480,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace.profile();
     const hits = await searchHits.search(buildSearchQuery(profile, limit, offset));
-    const filtered = await failedSingleSource.apply(hits, profile);
     const selected = selectRelevantSearchCards(
-      filtered.hits,
+      hits,
       {
         keywords: profile.keywords,
         excludeKeywords: profile.excludeKeywords,
@@ -508,7 +504,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     resultItems.push(...reviewed.matched);
     const relevantCount = resultItems.length;
     const discardedCount =
-      selected.discardedCount + filtered.droppedCount + skippedRejected + reviewed.discarded;
+      selected.discardedCount + skippedRejected + reviewed.discarded;
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
       relevantCount,
@@ -602,11 +598,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         succeeded.push(profile);
         const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
         skippedDecidedCount += partitioned.skippedDecidedCount;
-        const filtered = await failedSingleSource.apply(partitioned.undecided, profile, {
-          beforeRequest: () => discoveryController.beforeRequest(new Date()),
-        });
         const selected = selectRelevantSearchCards(
-          filtered.hits,
+          partitioned.undecided,
           {
             keywords: profile.keywords,
             excludeKeywords: profile.excludeKeywords,
@@ -972,6 +965,30 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return SpecialistProcurementListResponse.parse({ items: listed() });
   });
 
+  /**
+   * Archive is reversible and keeps the triage kind: a returned case goes back
+   * to "Слежу" or "Участвую", and monitoring resumes for it on the next pass.
+   */
+  app.post("/api/procurements/:id/archive", async (request, reply) => {
+    const params = request.params as { id: string };
+    const parsed = SpecialistArchiveWrite.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const card = listed().find((item) => item.id === params.id);
+    if (card === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    workspace.setArchived(card.sourceProcurementId, parsed.data.archived);
+    catalog.upsertCase(withTriage(card, workspace));
+    await persist();
+    logger.info("Specialist archive flag recorded", {
+      sourceProcurementId: card.sourceProcurementId,
+      archived: parsed.data.archived,
+    });
+    return SpecialistProcurementListResponse.parse({ items: listed() });
+  });
+
   app.get("/api/procurements/:id/ingest-progress", async (request, reply) => {
     const params = request.params as { id: string };
     const card = listed().find((item) => item.id === params.id);
@@ -1062,8 +1079,9 @@ function withTriage(
   workspace: SpecialistWorkspace,
 ): SpecialistProcurementCardValue {
   const triage = workspace.latestKind(card.sourceProcurementId);
-  if (triage === undefined) return SpecialistProcurementCard.parse(card);
-  return SpecialistProcurementCard.parse({ ...card, triage });
+  const archived = workspace.isArchived(card.sourceProcurementId);
+  if (triage === undefined) return SpecialistProcurementCard.parse({ ...card, archived });
+  return SpecialistProcurementCard.parse({ ...card, triage, archived });
 }
 
 /** Never-read cases go first, then the ones whose snapshot is oldest. */

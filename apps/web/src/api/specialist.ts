@@ -220,6 +220,25 @@ export async function decideProcurement(
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }
 
+export async function setProcurementArchived(
+  id: string,
+  archived: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<readonly SpecialistProcurementCardValue[]> {
+  const response = await fetcher(
+    `/api/procurements/${id}/archive`,
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }),
+  );
+  if (!response.ok) {
+    throw new Error("Не удалось обновить архив");
+  }
+  return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
 export async function searchFailureMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: unknown };

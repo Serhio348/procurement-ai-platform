@@ -1347,29 +1347,43 @@ h3 {
 
 .my-procurements-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 18px;
   list-style: none;
   padding: 0;
   margin: 0;
+}
+
+.my-procurements-grid > li {
+  display: flex;
 }
 
 .my-procurements-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  width: 100%;
-  padding: 9px 11px 8px 14px;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
+  flex: 1;
+  min-height: 250px;
   background: #fff;
   border: 1px solid #d5dae2;
   border-radius: 8px;
   box-shadow: 0 1px 2px rgb(30 36 48 / 5%);
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.my-procurements-card-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 7px;
+  width: 100%;
+  padding: 12px 15px 6px 18px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 
 .my-procurements-card::before {
@@ -1399,32 +1413,67 @@ h3 {
   transform: translateX(4px);
 }
 
-.my-procurements-card:focus-visible {
+.my-procurements-card-main:focus-visible {
   outline: 2px solid #3a5d86;
   outline-offset: 2px;
+  border-radius: 8px 8px 0 0;
+}
+
+.my-procurements-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 6px 15px 11px 18px;
+  border-top: 1px solid #edf0f4;
+}
+
+.my-procurements-card-action {
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: #3a5d86;
+  background: #f4f6f9;
+  border: 1px solid #d5dae2;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.my-procurements-card-action:hover {
+  background: #e8edf4;
+}
+
+.my-procurements-card-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.my-procurements-card-action-danger {
+  color: #8a1c1c;
+}
+
+.my-procurements-card-action-danger:hover {
+  background: #fde8e8;
 }
 
 .my-procurements-card-header {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .my-procurements-card-id {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 11.5px;
   letter-spacing: 0.03em;
   color: #8a94a3;
   font-family: ui-monospace, monospace;
 }
 
 .my-procurements-card-triage {
-  font-size: 9px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 999px;
 }
 
@@ -1439,8 +1488,8 @@ h3 {
 }
 
 .my-procurements-card-status {
-  font-size: 10px;
-  padding: 2px 6px;
+  font-size: 13px;
+  padding: 3px 8px;
   color: #3a4658;
   background: #eef1f5;
   border-radius: 999px;
@@ -1448,19 +1497,23 @@ h3 {
 
 .my-procurements-card-title {
   margin: 0;
-  font-size: 12px;
+  font-size: 15.5px;
   font-weight: 600;
   line-height: 1.35;
   color: #1c2430;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .my-procurements-card-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 5px 18px;
   margin: 0;
-  padding: 5px 0;
+  padding: 7px 0;
   border-top: 1px solid #edf0f4;
   border-bottom: 1px solid #edf0f4;
 }
@@ -1468,11 +1521,11 @@ h3 {
 .my-procurements-card-facts > div {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .my-procurements-card-facts dt {
-  font-size: 9px;
+  font-size: 11.5px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #8a94a3;
@@ -1480,12 +1533,12 @@ h3 {
 
 .my-procurements-card-facts dd {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 15px;
   color: #1c2430;
 }
 
 .my-procurements-card-amount {
-  font-size: 13.5px !important;
+  font-size: 17.5px !important;
   font-weight: 700;
   color: #1e2430 !important;
   font-variant-numeric: tabular-nums;
@@ -1494,31 +1547,40 @@ h3 {
 .my-procurements-card-buyer-block {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .my-procurements-card-buyer {
   margin: 0;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
   color: #3a4658;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .my-procurements-card-contact {
   margin: 0;
-  font-size: 10.5px;
+  font-size: 13.5px;
   line-height: 1.35;
   color: #5c6778;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .my-procurements-card-footer {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  margin-top: 0;
-  font-size: 11px;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 4px;
+  font-size: 14px;
   font-weight: 600;
   color: #3a5d86;
 }
@@ -1600,8 +1662,8 @@ h3 {
 
 .my-procurements-card-expired,
 .my-procurements-card-after-failed {
-  font-size: 10px;
-  padding: 2px 6px;
+  font-size: 13px;
+  padding: 3px 8px;
   border-radius: 999px;
 }
 

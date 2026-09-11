@@ -31,7 +31,6 @@ describe("openSpecialistPersistence", () => {
       excludeKeywords: [],
       statuses: ["accepting_bids"],
       excludeSingleSource: false,
-      excludeSingleSourceAfterFailed: false,
       filters: {},
     });
 

@@ -58,6 +58,7 @@ export class SpecialistWorkspace {
   readonly #decisions: SpecialistTriageDecision[] = [];
   #dismissedInboxIds: string[] = [];
   #reviewedIrrelevant: SpecialistReviewVerdict[] = [];
+  #archivedSourceIds = new Set<string>();
 
   constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
     const parsed = SpecialistWorkingProfile.parse(profile);
@@ -81,6 +82,7 @@ export class SpecialistWorkspace {
     }
     workspace.#dismissedInboxIds = [...state.dismissedInboxIds];
     workspace.#reviewedIrrelevant = [...state.reviewedIrrelevant];
+    workspace.#archivedSourceIds = new Set(state.archivedSourceIds);
     return workspace;
   }
 
@@ -91,6 +93,7 @@ export class SpecialistWorkspace {
       decisions: this.#decisions,
       dismissedInboxIds: this.#dismissedInboxIds,
       reviewedIrrelevant: this.#reviewedIrrelevant,
+      archivedSourceIds: [...this.#archivedSourceIds],
     });
   }
 
@@ -205,6 +208,27 @@ export class SpecialistWorkspace {
     return this.profileById(id);
   }
 
+  /**
+   * Archive is a shelf next to the triage decision, not a decision itself:
+   * a monitored case comes back as "monitor", a participated one as
+   * "participate", and an archived case stops being re-read by monitoring.
+   */
+  setArchived(sourceProcurementId: string, archived: boolean): void {
+    if (archived) {
+      this.#archivedSourceIds.add(sourceProcurementId);
+    } else {
+      this.#archivedSourceIds.delete(sourceProcurementId);
+    }
+  }
+
+  isArchived(sourceProcurementId: string): boolean {
+    return this.#archivedSourceIds.has(sourceProcurementId);
+  }
+
+  archivedSourceIds(): Set<string> {
+    return new Set(this.#archivedSourceIds);
+  }
+
   recordDecision(sourceProcurementId: string, kind: SpecialistTriageKind, madeAt: string): void {
     this.#decisions.push(
       SpecialistTriageDecision.parse({ sourceProcurementId, kind, madeAt }),
@@ -253,7 +277,6 @@ export class SpecialistWorkspace {
       excludeKeywords,
       statuses: input.statuses ?? current.statuses,
       excludeSingleSource: input.excludeSingleSource,
-      excludeSingleSourceAfterFailed: input.excludeSingleSourceAfterFailed,
       filters: input.filters ?? current.filters,
     });
     this.#profiles = this.#profiles.map((item) => (item.id === id ? next : item));
@@ -275,9 +298,11 @@ function migrateWorkspaceState(raw: unknown): unknown {
     decisions?: unknown;
     dismissedInboxIds?: unknown;
     reviewedIrrelevant?: unknown;
+    archivedSourceIds?: unknown;
   };
   const dismissedInboxIds = Array.isArray(record.dismissedInboxIds) ? record.dismissedInboxIds : [];
   const reviewedIrrelevant = Array.isArray(record.reviewedIrrelevant) ? record.reviewedIrrelevant : [];
+  const archivedSourceIds = Array.isArray(record.archivedSourceIds) ? record.archivedSourceIds : [];
   if (Array.isArray(record.profiles) && record.profiles.length > 0) {
     const profiles = record.profiles.map((item) => SpecialistWorkingProfile.parse(item));
     const active =
@@ -288,6 +313,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       decisions: record.decisions ?? [],
       dismissedInboxIds,
       reviewedIrrelevant,
+      archivedSourceIds,
     };
   }
   if (record.profile !== undefined) {
@@ -298,6 +324,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       decisions: record.decisions ?? [],
       dismissedInboxIds,
       reviewedIrrelevant,
+      archivedSourceIds,
     };
   }
   const created = emptySpecialistWorkingProfile();
@@ -307,6 +334,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
     decisions: record.decisions ?? [],
     dismissedInboxIds,
     reviewedIrrelevant,
+    archivedSourceIds,
   };
 }
 

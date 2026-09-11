@@ -36,6 +36,10 @@ export interface SpecialistAppProps {
     id: string,
     kind: SpecialistTriageKind,
   ) => Promise<readonly SpecialistProcurementCard[]>;
+  archive?: (
+    id: string,
+    archived: boolean,
+  ) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
   resolveInbox?: (
@@ -53,6 +57,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   );
   const searchProfile = props.search;
   const decideCase = props.decide;
+  const archiveCase = props.archive;
   const activateProfile = props.activateProfile;
   const createProfile = props.createProfile;
   const deleteProfile = props.deleteProfile;
@@ -127,6 +132,18 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           });
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
+          }
+          return updated === undefined ? items : [updated];
+        };
+
+  const archive =
+    archiveCase === undefined
+      ? undefined
+      : async (id: string, archived: boolean) => {
+          const items = await archiveCase(id, archived);
+          const updated = items.find((item) => item.id === id);
+          if (updated !== undefined) {
+            setProcurements((current) => mergeProcurementCards(current, [updated]));
           }
           return updated === undefined ? items : [updated];
         };
@@ -276,7 +293,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         />
         <Route
           path="/my-procurements"
-          element={<MyProcurementsApp procurements={procurements} />}
+          element={
+            <MyProcurementsApp
+              procurements={procurements}
+              {...(archive === undefined ? {} : { onArchive: archive })}
+              {...(decide === undefined
+                ? {}
+                : { onRemove: async (id: string) => void decide(id, "reject") })}
+            />
+          }
         />
         <Route
           path="/my-procurements/:id"

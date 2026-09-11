@@ -13,7 +13,6 @@ const write = {
   excludeKeywords: [],
   statuses: ["accepting_bids" as const],
   excludeSingleSource: false,
-  excludeSingleSourceAfterFailed: false,
   filters: {},
 };
 
@@ -75,6 +74,19 @@ describe("profile survives a restart", () => {
     const restored = SpecialistWorkspace.parse(workspace.snapshot());
 
     expect(restored.profile().keywords).toHaveLength(9);
+  });
+});
+
+describe("archive", () => {
+  it("remembers archived source ids across a snapshot round-trip and unarchives", () => {
+    const workspace = new SpecialistWorkspace();
+    workspace.setArchived("auction/1", true);
+    workspace.setArchived("auction/2", true);
+    workspace.setArchived("auction/2", false);
+
+    const restored = SpecialistWorkspace.parse(workspace.snapshot());
+    expect(restored.isArchived("auction/1")).toBe(true);
+    expect(restored.isArchived("auction/2")).toBe(false);
   });
 });
 

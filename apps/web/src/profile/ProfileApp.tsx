@@ -63,9 +63,6 @@ export function ProfileApp({
   const [excluded, setExcluded] = useState(initial.excludeKeywords.join("\n"));
   const [statuses, setStatuses] = useState<readonly ProcedureStatus[]>(initial.statuses);
   const [excludeSingleSource, setExcludeSingleSource] = useState(initial.excludeSingleSource);
-  const [excludeSingleSourceAfterFailed, setExcludeSingleSourceAfterFailed] = useState(
-    initial.excludeSingleSourceAfterFailed,
-  );
   const [filters, setFilters] = useState(initial.filters);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
@@ -127,7 +124,6 @@ export function ProfileApp({
       excludeKeywords: splitExcludeLines(excluded),
       statuses: [...statuses],
       excludeSingleSource,
-      excludeSingleSourceAfterFailed,
       filters,
     };
   }
@@ -331,18 +327,6 @@ export function ProfileApp({
                       }}
                     />
                     Не показывать закупки из одного источника
-                  </label>
-                  <label className="profile-status-option">
-                    <input
-                      type="checkbox"
-                      checked={excludeSingleSourceAfterFailed}
-                      disabled={excludeSingleSource}
-                      onChange={(event) => {
-                        setExcludeSingleSourceAfterFailed(event.target.checked);
-                      }}
-                    />
-                    Не показывать закупки из одного источника по итогам несостоявшейся процедуры
-                    (поиск медленнее: открывается карточка каждой такой закупки)
                   </label>
                 </fieldset>
               </section>
@@ -637,7 +621,6 @@ function sameWrite(
     list(write.excludeKeywords) === list(saved.excludeKeywords) &&
     [...write.statuses].sort().join(",") === [...saved.statuses].sort().join(",") &&
     write.excludeSingleSource === saved.excludeSingleSource &&
-    write.excludeSingleSourceAfterFailed === saved.excludeSingleSourceAfterFailed &&
     JSON.stringify(write.filters) === JSON.stringify(saved.filters)
   );
 }

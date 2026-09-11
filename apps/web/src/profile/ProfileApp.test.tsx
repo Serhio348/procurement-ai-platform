@@ -206,22 +206,19 @@ describe("ProfileApp", () => {
     );
   });
 
-  it("saves the single-source exclusions and can exclude failed procedures by status", async () => {
+  it("saves the single-source exclusion and can exclude failed procedures by status", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => profile());
 
     renderProfile(profile({ statuses: [] }), save);
 
-    await user.click(
-      screen.getByLabelText(/Не показывать закупки из одного источника по итогам несостоявшейся/),
-    );
+    await user.click(screen.getByLabelText("Не показывать закупки из одного источника"));
     await user.click(screen.getByLabelText("Не состоялась"));
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
 
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSingleSource: false,
-        excludeSingleSourceAfterFailed: true,
+        excludeSingleSource: true,
         statuses: ["failed"],
       }),
     );

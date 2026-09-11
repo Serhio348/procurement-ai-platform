@@ -13,6 +13,7 @@ import {
   resolveInbox,
   saveProfile,
   searchProcurements,
+  setProcurementArchived,
   setProfileWatch,
 } from "./api/specialist.js";
 import { AccessPendingPage } from "./auth/AccessPendingPage.js";
@@ -125,6 +126,7 @@ function LiveConsole() {
       saveProfile={saveProfile}
       setProfileWatch={setProfileWatch}
       decide={decideProcurement}
+      archive={setProcurementArchived}
       ingestProgress={fetchIngestProgress}
       refreshInbox={fetchInbox}
       resolveInbox={resolveInbox}

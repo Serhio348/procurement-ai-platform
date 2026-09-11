@@ -190,6 +190,12 @@ export const SpecialistProcurementCard = z.object({
    * and stays out of the list until a specialist opens or decides it.
    */
   foundAs: z.enum(["match", "review"]).optional(),
+  /**
+   * The specialist moved the case to the archive: done participating, kept for
+   * the record. Archived cases stay listed but leave "Мои закупки" and stop
+   * being re-read by monitoring.
+   */
+  archived: z.boolean().default(false),
   /** When a search last returned this case. Undecided cases not seen for a while are pruned. */
   lastSeenAt: IsoDateTime.optional(),
   /**
@@ -260,11 +266,6 @@ export const SpecialistWorkingProfile = z.object({
   statuses: z.array(ProcedureStatus).default(["accepting_bids"]),
   /** Drop every single-source purchase; the kind is visible in the listing row. */
   excludeSingleSource: z.boolean().default(false),
-  /**
-   * Drop single-source purchases whose basis is a failed procedure. The basis
-   * lives only on the card, so each single-source hit costs one card read.
-   */
-  excludeSingleSourceAfterFailed: z.boolean().default(false),
   /** Site-side filters sent with the search query. */
   filters: SpecialistSearchFilters.default({}),
   watchNewProcurements: z.boolean().default(false),
@@ -313,6 +314,12 @@ export const SpecialistDecisionWrite = z.object({
 });
 export type SpecialistDecisionWrite = z.infer<typeof SpecialistDecisionWrite>;
 
+/** Moves a decided case to or out of the archive without losing its triage. */
+export const SpecialistArchiveWrite = z.object({
+  archived: z.boolean(),
+});
+export type SpecialistArchiveWrite = z.infer<typeof SpecialistArchiveWrite>;
+
 export const SpecialistIngestFileState = z.enum([
   "pending",
   "downloading",
@@ -352,6 +359,8 @@ export const SpecialistWorkspaceState = z.object({
   decisions: z.array(SpecialistTriageDecision).default([]),
   dismissedInboxIds: z.array(z.string().uuid()).default([]),
   reviewedIrrelevant: z.array(SpecialistReviewVerdict).default([]),
+  /** Source ids of cases the specialist moved to the archive. */
+  archivedSourceIds: z.array(z.string().min(1)).default([]),
 });
 export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
 

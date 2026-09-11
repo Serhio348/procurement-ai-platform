@@ -155,7 +155,6 @@ integration("PostgreSQL migrations and invariants", () => {
           excludeKeywords: [],
           statuses: ["accepting_bids"],
           excludeSingleSource: false,
-          excludeSingleSourceAfterFailed: false,
           filters: {},
           watchNewProcurements: false,
         },
@@ -164,6 +163,7 @@ integration("PostgreSQL migrations and invariants", () => {
       decisions: [],
       dismissedInboxIds: [],
       reviewedIrrelevant: [],
+      archivedSourceIds: [],
     });
     await store.saveCases([card]);
     await store.saveInbox([

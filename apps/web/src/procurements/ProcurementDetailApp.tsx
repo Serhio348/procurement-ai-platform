@@ -37,14 +37,14 @@ export function ProcurementDetailApp({
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    if (id === undefined) return;
+    if (id === undefined || stored?.triage !== "monitor") return;
     setLoading(true);
     setError(undefined);
     fetchProcurementCard(id)
       .then((next) => setCard(next))
       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить карточку"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, stored?.triage]);
 
   if (stored === undefined) {
     return (
@@ -90,35 +90,60 @@ export function ProcurementDetailApp({
             Открыть на goszakupki.by
           </a>
           {loading ? <span className="procurement-detail-loading">Загрузка с площадки…</span> : null}
+          {!loading && stored.triage === "monitor" && live === undefined ? (
+            <button
+              type="button"
+              className="procurement-detail-retry"
+              onClick={() => {
+                if (id === undefined) return;
+                setLoading(true);
+                setError(undefined);
+                fetchProcurementCard(id)
+                  .then((next) => setCard(next))
+                  .catch((err) =>
+                    setError(err instanceof Error ? err.message : "Не удалось загрузить карточку"),
+                  )
+                  .finally(() => setLoading(false));
+              }}
+            >
+              Обновить
+            </button>
+          ) : null}
         </div>
+
+        {stored.triage === "monitor" && live === undefined ? (
+          <p className="procurement-detail-warning">
+            Живая карточка с площадки не загрузилась. Показаны ранее сохранённые данные.
+          </p>
+        ) : null}
 
         {error ? <p className="procurement-detail-error">{error}</p> : null}
 
         <section className="procurement-detail-section">
           <h2 className="procurement-detail-section-title">Заказчик</h2>
-          {buyer === undefined ? (
+          {buyer === undefined && stored.buyerName === undefined ? (
             <p>Нет данных о заказчике.</p>
           ) : (
             <dl className="procurement-detail-list">
-              {buyer.name ? (
+              {buyer?.name !== undefined || stored.buyerName !== undefined ? (
                 <>
                   <dt>Наименование</dt>
-                  <dd>{buyer.name}</dd>
+                  <dd>{buyer?.name ?? stored.buyerName}</dd>
                 </>
               ) : null}
-              {buyer.registrationNumber ? (
+              {buyer?.registrationNumber ? (
                 <>
                   <dt>УНП</dt>
                   <dd>{buyer.registrationNumber}</dd>
                 </>
               ) : null}
-              {buyer.address ? (
+              {buyer?.address ? (
                 <>
                   <dt>Адрес</dt>
                   <dd>{buyer.address}</dd>
                 </>
               ) : null}
-              {buyer.contact ? (
+              {buyer?.contact ? (
                 <>
                   <dt>Контакты</dt>
                   <dd>{buyer.contact}</dd>
@@ -149,13 +174,24 @@ export function ProcurementDetailApp({
                 <dd>{formatInstant(live.auctionAt)}</dd>
               </>
             ) : null}
-            {formatMoney(amount) ? (
+            {formatMoney(amount) ?? stored.amountLabel ? (
               <>
                 <dt>Общая предельная стоимость</dt>
-                <dd>{formatMoney(amount)}</dd>
+                <dd>{formatMoney(amount) ?? stored.amountLabel}</dd>
               </>
             ) : null}
           </dl>
+          {stored.termsDetail ? (
+            <details className="procurement-detail-raw" open>
+              <summary>Условия из документов</summary>
+              <pre className="procurement-detail-terms">{stored.termsDetail}</pre>
+            </details>
+          ) : null}
+          {stored.paymentQuote ? (
+            <p className="procurement-detail-quote">
+              <strong>Расчёт:</strong> {stored.paymentQuote}
+            </p>
+          ) : null}
           {live?.rawFields !== undefined && Object.keys(live.rawFields).length > 0 ? (
             <details className="procurement-detail-raw">
               <summary>Дополнительные сведения с площадки</summary>

@@ -1597,3 +1597,44 @@ h3 {
   color: #5c6778;
   font-size: 14px;
 }
+
+.procurement-detail-warning {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  background: #fff4d6;
+  border: 1px solid #f0d9a8;
+  border-radius: 8px;
+  color: #7a5200;
+  font-size: 14px;
+}
+
+.procurement-detail-retry {
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #d5dae2;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.procurement-detail-retry:hover {
+  background: #f4f6f8;
+}
+
+.procurement-detail-terms {
+  margin: 0;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.procurement-detail-quote {
+  margin: 12px 0 0;
+  padding: 12px;
+  background: #f4f6f8;
+  border-radius: 6px;
+  font-size: 14px;
+}

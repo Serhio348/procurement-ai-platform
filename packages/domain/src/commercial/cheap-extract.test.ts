@@ -188,7 +188,7 @@ describe("cheapExtractCommercialClaims", () => {
       cheapExtractCommercialNotes({
         text: "Работы выполнить в течение нескольких дней.",
       }),
-    ).toContain("Срок: в течение нескольких дней.");
+    ).toContain("Срок выполнения работ/услуг: в течение нескольких дней.");
     expect(
       cheapExtractCommercialClaims({
         hash,
@@ -224,6 +224,25 @@ describe("cheapExtractCommercialClaims", () => {
       }),
     ]);
     expect(cheapExtractCommercialNotes({ text }).some((note) => note.startsWith("Срок:"))).toBe(false);
+  });
+
+  it("labels works and bid-validity «в течение N дней» instead of a bare «Срок»", () => {
+    const text =
+      "Подрядчик выполняет работы в течение 5 рабочих дней.\n" +
+      "Предложение участника должно быть действительным в течение 3 рабочих дней.";
+    const notes = cheapExtractCommercialNotes({ text });
+    expect(notes).toContain("Срок выполнения работ/услуг: в течение 5 рабочих дней.");
+    expect(notes).toContain("Срок действия предложения: в течение 3 рабочих дней.");
+    expect(notes.some((note) => note.startsWith("Срок:"))).toBe(false);
+  });
+
+  it("keeps the governing clause in the label when the term kind is unknown", () => {
+    const notes = cheapExtractCommercialNotes({
+      text: "Победитель подписывает договор в течение 5 рабочих дней.",
+    });
+    expect(notes).toContain(
+      "Срок (Победитель подписывает договор): в течение 5 рабочих дней.",
+    );
   });
 
   it("reads «передан в течение N дней с даты заключения договора» as delivery", () => {

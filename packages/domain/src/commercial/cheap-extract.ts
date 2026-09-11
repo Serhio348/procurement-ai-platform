@@ -70,7 +70,7 @@ function dedupeClaimValues(claims: CommercialClaimValue[]): CommercialClaimValue
 }
 
 const commercialNoteSource =
-  "(?:срок поставки|условия оплаты|условия доставки|место поставки)\\s*:\\s*[^\\n;]{3,160}";
+  "(?:срок(?:и)?\\s+поставки|условия оплаты|условия доставки|место поставки|срок(?:и)?\\s+выполнения\\p{L}*|срок(?:и)?\\s+оказания\\p{L}*|срок\\s+действия\\s+(?:предложени|заявк)\\p{L}*)\\s*:\\s*[^\\n;]{3,160}";
 
 /** Labeled lines from TZ/request text. The match is the quote; no numbers invented. */
 export function cheapExtractCommercialNotes(page: { text: string }): string[] {
@@ -159,24 +159,21 @@ function extractWithinDuration(page: {
     const index = match.index ?? 0;
     const left = page.text.slice(Math.max(0, index - 280), index);
     const right = page.text.slice(index + phrase.length, index + phrase.length + 80);
-    const kind = classifyWithinDuration(left, right);
+    const nearLeft = lastClause(left);
+    const nearRight = firstClause(right);
+    const kind = classifyWithinDuration(nearLeft, nearRight, left);
     const several = match[1] !== undefined;
     const raw = match[2];
     if (several) {
-      const note =
-        kind === "payment"
-          ? `Срок оплаты: в течение нескольких${severalDayFlavor(phrase)} дней.`
-          : kind === "delivery"
-            ? `Срок поставки: в течение нескольких${severalDayFlavor(phrase)} дней.`
-            : `Срок: в течение нескольких${severalDayFlavor(phrase)} дней.`;
+      const note = `${withinNoteLabel(kind, nearLeft, nearRight)}: в течение нескольких${severalDayFlavor(phrase)} дней.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
     if (raw === undefined) continue;
     const value = days(raw);
     if (value === undefined) continue;
-    if (kind === "note") {
-      const note = `Срок: ${phrase}.`;
+    if (kind !== "payment" && kind !== "delivery") {
+      const note = `${withinNoteLabel(kind, nearLeft, nearRight)}: ${phrase}.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
@@ -218,18 +215,37 @@ function severalDayFlavor(phrase: string): string {
   return "";
 }
 
-function classifyWithinDuration(left: string, right = ""): "payment" | "delivery" | "note" {
-  const nearLeft = lastClause(left);
-  const nearRight = firstClause(right);
+type WithinKind = "payment" | "delivery" | "work" | "bidValidity" | "note";
+
+function classifyWithinDuration(nearLeft: string, nearRight: string, left: string): WithinKind {
   if (looksLikeBidDeadline(nearLeft) || looksLikeBidDeadline(nearRight)) return "note";
+  if (looksLikeBidValidity(nearLeft) || looksLikeBidValidity(nearRight)) return "bidValidity";
   if (looksLikePaymentDeadline(nearLeft) || looksLikePaymentDeadline(nearRight)) return "payment";
   if (looksLikeDeliveryPeriod(nearLeft) || looksLikeDeliveryPeriod(nearRight)) return "delivery";
+  if (looksLikeWorksPeriod(nearLeft) || looksLikeWorksPeriod(nearRight)) return "work";
   if (looksLikeContractStart(nearRight) && !looksLikePaymentDeadline(nearLeft)) return "delivery";
   const heading = lastDurationHeading(left);
   if (heading !== undefined) return heading;
   if (looksLikePaymentDeadline(left) && !looksLikeDeliveryPeriod(left)) return "payment";
   if (looksLikeDeliveryPeriod(left) && !looksLikePaymentDeadline(left)) return "delivery";
   return "note";
+}
+
+// The specialist sees a bare «Срок:» note as noise, so every unclassified
+// duration carries the governing clause it was found in.
+function withinNoteLabel(kind: WithinKind, nearLeft: string, nearRight: string): string {
+  if (kind === "payment") return "Срок оплаты";
+  if (kind === "delivery") return "Срок поставки";
+  if (kind === "work") return "Срок выполнения работ/услуг";
+  if (kind === "bidValidity") return "Срок действия предложения";
+  const context = noteContext(nearLeft) ?? noteContext(nearRight);
+  return context === undefined ? "Срок" : `Срок (${context})`;
+}
+
+function noteContext(clause: string): string | undefined {
+  const cleaned = clause.trim().replace(/[.:;,…\s]+$/u, "").replace(/\s+/gu, " ");
+  if (cleaned.length < 4) return undefined;
+  return cleaned.length > 60 ? `…${cleaned.slice(-60)}` : cleaned;
 }
 
 function lastClause(left: string): string {
@@ -262,14 +278,28 @@ function looksLikeContractStart(text: string): boolean {
   return /с\s+(?:даты|момента)\s+(?:заключен|подписания\s+договор)/iu.test(text);
 }
 
-function lastDurationHeading(left: string): "payment" | "delivery" | undefined {
+function looksLikeWorksPeriod(text: string): boolean {
+  return /выполнени|выполнить|оказани|оказать|работ|услуг|монтаж|пусконалад|ввод\s+в\s+эксплуатац/iu.test(
+    text,
+  );
+}
+
+function looksLikeBidValidity(text: string): boolean {
+  return /срок\s+действи|предложени\p{L}*\s+действ|заявк\p{L}*\s+действ|действител\p{L}*\s*$/iu.test(
+    text,
+  );
+}
+
+function lastDurationHeading(left: string): WithinKind | undefined {
   const matches = [
     ...left.matchAll(/срок(?:и)?\s+оплат|порядок\s+расч|условия\s+оплат/giu),
     ...left.matchAll(/срок(?:и)?\s+поставк|срок(?:и)?\s+изготовлен/giu),
+    ...left.matchAll(/срок(?:и)?\s+выполнени\p{L}*|срок(?:и)?\s+оказани\p{L}*/giu),
   ];
   const last = matches.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).at(-1)?.[0];
   if (last === undefined) return undefined;
-  return /оплат|расч/iu.test(last) ? "payment" : "delivery";
+  if (/оплат|расч/iu.test(last)) return "payment";
+  return /поставк|изготовлен/iu.test(last) ? "delivery" : "work";
 }
 
 interface CheapPattern {

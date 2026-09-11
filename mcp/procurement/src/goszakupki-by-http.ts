@@ -26,6 +26,7 @@ export interface GoszakupkiHttpClientOptions {
   timeoutMs?: number;
   requestsPerMinute?: number;
   maxResponseBytes?: number;
+  maxDownloadBytes?: number;
   userAgent?: string;
   circuitFailureThreshold?: number;
   circuitResetMs?: number;
@@ -43,6 +44,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
   readonly #timeoutMs: number;
   readonly #minimumIntervalMs: number;
   readonly #maxResponseBytes: number;
+  readonly #maxDownloadBytes: number;
   readonly #userAgent: string;
   readonly #circuitFailureThreshold: number;
   readonly #circuitResetMs: number;
@@ -68,6 +70,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     }
     this.#minimumIntervalMs = Math.ceil(60_000 / requestsPerMinute);
     this.#maxResponseBytes = options.maxResponseBytes ?? 5 * 1024 * 1024;
+    this.#maxDownloadBytes = options.maxDownloadBytes ?? 32 * 1024 * 1024;
     this.#userAgent =
       options.userAgent ?? "ProcurementAIPlatform/0.1 (read-only procurement adapter)";
     this.#circuitFailureThreshold = options.circuitFailureThreshold ?? 3;
@@ -232,14 +235,23 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     body?: string;
     contentType: string | undefined;
   }> {
+    // Tender documents (scanned TZ PDFs) are much bigger than listing pages,
+    // so binary downloads get their own cap.
+    const limit = mode === "binary" ? this.#maxDownloadBytes : this.#maxResponseBytes;
     const declaredLength = Number(response.headers.get("content-length"));
-    if (Number.isFinite(declaredLength) && declaredLength > this.#maxResponseBytes) {
-      throw new SourceAccessError("goszakupki_by", "response exceeds configured size limit");
+    if (Number.isFinite(declaredLength) && declaredLength > limit) {
+      throw new SourceAccessError(
+        "goszakupki_by",
+        `response exceeds configured size limit (${String(declaredLength)} bytes)`,
+      );
     }
 
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > this.#maxResponseBytes) {
-      throw new SourceAccessError("goszakupki_by", "response exceeds configured size limit");
+    if (bytes.byteLength > limit) {
+      throw new SourceAccessError(
+        "goszakupki_by",
+        `response exceeds configured size limit (${String(bytes.byteLength)} bytes)`,
+      );
     }
     const body = new TextDecoder("utf-8").decode(bytes);
     const finalUrl = response.url.length > 0 ? response.url : this.#baseUrl.href;

@@ -51,6 +51,11 @@ function liveSource(): GoszakupkiBySource {
         20_000,
         "GOSZAKUPKI_BY_TIMEOUT_MS",
       ),
+      maxDownloadBytes: positiveNumber(
+        process.env["GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES"],
+        32 * 1024 * 1024,
+        "GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES",
+      ),
       ...(process.env["GOSZAKUPKI_BY_USER_AGENT"] === undefined
         ? {}
         : { userAgent: process.env["GOSZAKUPKI_BY_USER_AGENT"] }),

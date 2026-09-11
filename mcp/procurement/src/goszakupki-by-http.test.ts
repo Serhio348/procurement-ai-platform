@@ -137,6 +137,53 @@ describe("GoszakupkiHttpClient", () => {
     expect([...file.bytes]).toEqual([37, 80, 68, 70]);
   });
 
+  it("downloads files larger than the page cap up to the download cap", async () => {
+    const fetchImplementation = vi.fn(async () => {
+      const headers = new Headers({
+        "content-type": "application/pdf",
+        "content-length": "100",
+      });
+      const value = new Response(new Uint8Array(100), { status: 200, headers });
+      Object.defineProperty(value, "url", {
+        value: "https://goszakupki.by/files/get?id=1",
+      });
+      return value;
+    }) as unknown as typeof fetch;
+    const client = new GoszakupkiHttpClient({
+      fetchImplementation,
+      requestsPerMinute: 60_000,
+      bootstrapSession: false,
+      maxResponseBytes: 10,
+      maxDownloadBytes: 1_000,
+    });
+
+    const file = await client.download("/files/get?id=1");
+    expect(file.bytes.byteLength).toBe(100);
+    await expect(client.get("/auction/view/1")).rejects.toThrow(/size limit/);
+  });
+
+  it("rejects downloads above the download cap and reports the size", async () => {
+    const fetchImplementation = vi.fn(async () => {
+      const headers = new Headers({
+        "content-type": "application/pdf",
+        "content-length": "2000",
+      });
+      const value = new Response(new Uint8Array(2000), { status: 200, headers });
+      Object.defineProperty(value, "url", {
+        value: "https://goszakupki.by/files/get?id=1",
+      });
+      return value;
+    }) as unknown as typeof fetch;
+    const client = new GoszakupkiHttpClient({
+      fetchImplementation,
+      requestsPerMinute: 60_000,
+      bootstrapSession: false,
+      maxDownloadBytes: 1_000,
+    });
+
+    await expect(client.download("/files/get?id=1")).rejects.toThrow(/size limit.*2000/);
+  });
+
   it("refuses to turn a source path into a cross-origin request", async () => {
     const client = new GoszakupkiHttpClient();
 

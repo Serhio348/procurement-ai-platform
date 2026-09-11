@@ -198,6 +198,12 @@ export const SpecialistProcurementCard = z.object({
    * compare against yet, so the next pass only records, never alerts.
    */
   watchSnapshot: SpecialistCardSnapshot.optional(),
+  /**
+   * Full platform card stored when the specialist takes the case. "Мои закупки"
+   * renders this instead of hitting the source again. Absent on listing-only
+   * cases and on records decided before this field existed.
+   */
+  sourceCard: ProcedureCard.optional(),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
 export type SpecialistFoundAs = NonNullable<SpecialistProcurementCard["foundAs"]>;

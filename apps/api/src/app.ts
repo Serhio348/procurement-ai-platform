@@ -25,8 +25,8 @@ import {
 } from "@procurement/contracts";
 import {
   applyInboxChangeToCard,
+  applySourceCard,
   attachProfileToCard,
-  cardSnapshot,
   diffCardSnapshots,
   discoveryPublishedFrom,
   inboxDocumentLinks,
@@ -40,7 +40,6 @@ import {
   shouldRunDiscovery,
   SpecialistCatalog,
   SpecialistWorkspace,
-  withWatchSnapshot,
   type ReviewOutcome,
 } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
@@ -174,6 +173,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     logger.info("Specialist stale cases pruned", { count: removed.length });
     if (options.removeCases !== undefined) await options.removeCases(removed);
   };
+
+  async function hydrateSourceCard(
+    card: SpecialistProcurementCardValue,
+  ): Promise<SpecialistProcurementCardValue> {
+    if (cardWatch === undefined) return card;
+    const live = await cardWatch.read(card.sourceProcurementId);
+    if (live === undefined) return card;
+    return withTriage(applySourceCard(card, live, clock()), workspace);
+  }
 
   // Review cases wait in the inbox; they enter the list only after a
   // specialist opens or decides them.
@@ -380,10 +388,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const fresh = await cardWatch.read(card.sourceProcurementId);
       if (fresh === undefined) continue;
       monitoredCount += 1;
-      const snapshot = cardSnapshot(fresh, now);
       const previous = card.watchSnapshot;
-      let next = withWatchSnapshot(card, snapshot);
+      let next = applySourceCard(card, fresh, now);
       if (previous === undefined) {
+        catalog.upsertCase(next);
+        continue;
+      }
+      const snapshot = next.watchSnapshot;
+      if (snapshot === undefined) {
         catalog.upsertCase(next);
         continue;
       }
@@ -396,7 +408,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       for (const change of changes) {
         const item = catalog.record(inboxItemFromWatchChange(next, change, now));
         next = withTriage(applyInboxChangeToCard(next, item.item.change), workspace);
-        next = withWatchSnapshot(next, snapshot);
+        next = applySourceCard(next, fresh, now);
       }
       catalog.upsertCase(next);
       logger.info("Specialist watched case changed", {
@@ -878,6 +890,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     workspace.recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
     let next = withTriage(card, workspace);
+    if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
+      next = await hydrateSourceCard(next);
+    }
     if (parsed.data.kind === "participate" && documentIngest !== undefined) {
       ingestProgress.begin(card.id);
       try {
@@ -939,6 +954,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (live === undefined) {
       return reply.code(404).send({ error: "card_unavailable" });
     }
+    catalog.upsertCase(withTriage(applySourceCard(card, live, clock()), workspace));
+    await persist();
     return ProcedureCard.parse(live);
   });
 

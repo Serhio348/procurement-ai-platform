@@ -120,13 +120,12 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
 
   const lots = parseLots($);
   const sourceStatus = aggregateSourceStatus(lots);
-  const amount = parsePlatformAmount(
-    firstField(fields, ["Общая предельная стоимость закупки"]),
-  );
+  const amount = parseCardAmount(fields);
   const buyer = parseBuyer(fields);
   const contact = firstField(fields, [
     "Фамилии, имена и отчества, номера телефонов работников заказчика",
     "Контактные данные",
+    "Контактные номера работников закупающей организации (организатора)",
   ]);
   const giasId = findGiasId($);
   const externalIds = [
@@ -236,16 +235,23 @@ function parseBuyer(fields: ReadonlyMap<string, string>) {
   const name = firstField(fields, [
     "Наименование организации",
     "Наименование заказчика(-ов) (ФИО - для ИП)",
+    "Наименование закупающей организации",
   ]);
   if (name === undefined) return undefined;
-  const registrationNumber = firstField(fields, ["УНП организации", "УНП заказчика(-ов)"]);
+  const registrationNumber = firstField(fields, [
+    "УНП организации",
+    "УНП заказчика(-ов)",
+    "УНП закупающей организации",
+  ]);
   const address = firstField(fields, [
     "Место нахождения организации",
     "Место нахождения (место жительства) заказчика(-ов)",
+    "Место нахождения закупающей организации",
   ]);
   const contact = firstField(fields, [
     "Фамилии, имена и отчества, номера телефонов работников заказчика",
     "Контактные данные",
+    "Контактные номера работников закупающей организации (организатора)",
   ]);
   return {
     name,
@@ -382,12 +388,23 @@ function parseCountAndPrice(raw: string): {
   };
 }
 
-function parsePlatformAmount(raw: string | undefined): PlatformAmount | undefined {
+function parseCardAmount(fields: ReadonlyMap<string, string>): PlatformAmount | undefined {
+  const limitRaw = firstField(fields, ["Общая предельная стоимость закупки"]);
+  if (limitRaw !== undefined) return parsePlatformAmount(limitRaw, "limit");
+  const indicativeRaw = firstField(fields, ["Общая ориентировочная стоимость закупки"]);
+  if (indicativeRaw !== undefined) return parsePlatformAmount(indicativeRaw, "indicative");
+  return undefined;
+}
+
+function parsePlatformAmount(
+  raw: string | undefined,
+  kind: PlatformAmount["kind"] = "limit",
+): PlatformAmount | undefined {
   if (raw === undefined) return undefined;
   const match = raw.match(/([\d][\d\s.,]*)\s+([A-Z]{3})/);
   const amount = parseLocalizedNumber(match?.[1]) ?? null;
   return {
-    kind: "limit",
+    kind,
     amount,
     ...(match?.[2] === undefined ? {} : { currency: match[2] }),
     raw,

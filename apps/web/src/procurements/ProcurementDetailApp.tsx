@@ -1,27 +1,16 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { Money, PlatformAmount, PlatformInstant, ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
+import type { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
+import {
+  procedureBuyerFields,
+  procedureDetailFields,
+  procedurePublicId,
+} from "@procurement/domain";
 import { fetchProcurementCard } from "../api/specialist.js";
 import { Shell } from "../shell/Shell.js";
 
 function shortId(id: string): string {
   return `${id.slice(0, 8)}…`;
-}
-
-function formatInstant(value: PlatformInstant | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  const raw = value.precision === "date" ? value.date : value.at;
-  const parsed = Date.parse(raw);
-  if (!Number.isFinite(parsed)) return raw;
-  return new Date(parsed).toLocaleDateString("ru-BY");
-}
-
-function formatMoney(amount: PlatformAmount | Money | undefined): string | undefined {
-  if (amount === undefined) return undefined;
-  if (("raw" in amount) && amount.raw.length > 0) return amount.raw;
-  if (amount.amount === null || amount.amount === undefined) return undefined;
-  const currency = "currency" in amount ? amount.currency : "BYN";
-  return `${String(amount.amount)} ${currency}`;
 }
 
 export function ProcurementDetailApp({
@@ -32,19 +21,30 @@ export function ProcurementDetailApp({
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const stored = procurements.find((item) => item.id === id);
-  const [card, setCard] = useState<ProcedureCard | undefined>(undefined);
+  const [live, setLive] = useState<ProcedureCard | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    if (id === undefined || stored?.triage !== "monitor") return;
+    setLive(undefined);
+    setError(undefined);
+    if (id === undefined || stored === undefined) return;
+    if (stored.sourceCard !== undefined) return;
+    if (stored.triage !== "monitor" && stored.triage !== "participate") return;
+    void loadCard(id);
+  }, [id, stored?.id, stored?.sourceCard, stored?.triage]);
+
+  async function loadCard(procurementId: string): Promise<void> {
     setLoading(true);
     setError(undefined);
-    fetchProcurementCard(id)
-      .then((next) => setCard(next))
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить карточку"))
-      .finally(() => setLoading(false));
-  }, [id, stored?.triage]);
+    try {
+      setLive(await fetchProcurementCard(procurementId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось загрузить карточку");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   if (stored === undefined) {
     return (
@@ -56,9 +56,11 @@ export function ProcurementDetailApp({
     );
   }
 
-  const live = card;
-  const buyer = live?.buyer;
-  const amount = live?.amount ?? live?.startingPrice;
+  const source = live ?? stored.sourceCard;
+  const buyerRows = source === undefined ? [] : procedureBuyerFields(source);
+  const detailRows = source === undefined ? [] : procedureDetailFields(source);
+  const publicId = source === undefined ? undefined : procedurePublicId(source);
+  const lots = source?.lots ?? [];
 
   return (
     <Shell>
@@ -70,7 +72,7 @@ export function ProcurementDetailApp({
         </p>
         <header className="procurement-detail-header">
           <h1 className="procurement-detail-title">
-            {shortId(stored.id)} — {stored.title}
+            {publicId ?? shortId(stored.id)} — {stored.title}
           </h1>
           <div className="procurement-detail-badges">
             <span className={`procurement-detail-triage triage-${stored.triage ?? ""}`}>
@@ -90,20 +92,12 @@ export function ProcurementDetailApp({
             Открыть на goszakupki.by
           </a>
           {loading ? <span className="procurement-detail-loading">Загрузка с площадки…</span> : null}
-          {!loading && stored.triage === "monitor" && live === undefined ? (
+          {!loading ? (
             <button
               type="button"
               className="procurement-detail-retry"
               onClick={() => {
-                if (id === undefined) return;
-                setLoading(true);
-                setError(undefined);
-                fetchProcurementCard(id)
-                  .then((next) => setCard(next))
-                  .catch((err) =>
-                    setError(err instanceof Error ? err.message : "Не удалось загрузить карточку"),
-                  )
-                  .finally(() => setLoading(false));
+                if (id !== undefined) void loadCard(id);
               }}
             >
               Обновить
@@ -111,9 +105,10 @@ export function ProcurementDetailApp({
           ) : null}
         </div>
 
-        {stored.triage === "monitor" && live === undefined ? (
+        {source === undefined ? (
           <p className="procurement-detail-warning">
-            Живая карточка с площадки не загрузилась. Показаны ранее сохранённые данные.
+            Карточка площадки ещё не сохранена. Показаны данные из поиска. Нажмите «Обновить», чтобы
+            загрузить страницу источника.
           </p>
         ) : null}
 
@@ -121,66 +116,48 @@ export function ProcurementDetailApp({
 
         <section className="procurement-detail-section">
           <h2 className="procurement-detail-section-title">Заказчик</h2>
-          {buyer === undefined && stored.buyerName === undefined ? (
+          {buyerRows.length === 0 && stored.buyerName === undefined ? (
             <p>Нет данных о заказчике.</p>
           ) : (
             <dl className="procurement-detail-list">
-              {buyer?.name !== undefined || stored.buyerName !== undefined ? (
+              {buyerRows.length === 0 ? (
                 <>
                   <dt>Наименование</dt>
-                  <dd>{buyer?.name ?? stored.buyerName}</dd>
+                  <dd>{stored.buyerName}</dd>
                 </>
-              ) : null}
-              {buyer?.registrationNumber ? (
-                <>
-                  <dt>УНП</dt>
-                  <dd>{buyer.registrationNumber}</dd>
-                </>
-              ) : null}
-              {buyer?.address ? (
-                <>
-                  <dt>Адрес</dt>
-                  <dd>{buyer.address}</dd>
-                </>
-              ) : null}
-              {buyer?.contact ? (
-                <>
-                  <dt>Контакты</dt>
-                  <dd>{buyer.contact}</dd>
-                </>
-              ) : null}
+              ) : (
+                buyerRows.map((row) => (
+                  <div key={row.label} className="procurement-detail-row">
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))
+              )}
             </dl>
           )}
         </section>
 
         <section className="procurement-detail-section">
           <h2 className="procurement-detail-section-title">Основная информация</h2>
-          <dl className="procurement-detail-list">
-            {live?.publishedAt ? (
-              <>
-                <dt>Дата размещения</dt>
-                <dd>{formatInstant(live.publishedAt)}</dd>
-              </>
-            ) : null}
-            {live?.bidsDeadline ? (
-              <>
-                <dt>Дата окончания приёма</dt>
-                <dd>{formatInstant(live.bidsDeadline)}</dd>
-              </>
-            ) : null}
-            {live?.auctionAt ? (
-              <>
-                <dt>Дата торгов</dt>
-                <dd>{formatInstant(live.auctionAt)}</dd>
-              </>
-            ) : null}
-            {formatMoney(amount) ?? stored.amountLabel ? (
-              <>
-                <dt>Общая предельная стоимость</dt>
-                <dd>{formatMoney(amount) ?? stored.amountLabel}</dd>
-              </>
-            ) : null}
-          </dl>
+          {detailRows.length === 0 && stored.amountLabel === undefined ? (
+            <p>Нет данных с карточки площадки.</p>
+          ) : (
+            <dl className="procurement-detail-list">
+              {detailRows.length === 0 ? (
+                <>
+                  <dt>Общая стоимость</dt>
+                  <dd>{stored.amountLabel}</dd>
+                </>
+              ) : (
+                detailRows.map((row) => (
+                  <div key={row.label} className="procurement-detail-row">
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))
+              )}
+            </dl>
+          )}
           {stored.termsDetail ? (
             <details className="procurement-detail-raw" open>
               <summary>Условия из документов</summary>
@@ -191,19 +168,6 @@ export function ProcurementDetailApp({
             <p className="procurement-detail-quote">
               <strong>Расчёт:</strong> {stored.paymentQuote}
             </p>
-          ) : null}
-          {live?.rawFields !== undefined && Object.keys(live.rawFields).length > 0 ? (
-            <details className="procurement-detail-raw">
-              <summary>Дополнительные сведения с площадки</summary>
-              <dl className="procurement-detail-list">
-                {Object.entries(live.rawFields).map(([key, value]) => (
-                  <div key={key}>
-                    <dt>{key}</dt>
-                    <dd>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </details>
           ) : null}
         </section>
 
@@ -229,12 +193,12 @@ export function ProcurementDetailApp({
         </details>
 
         <details className="procurement-detail-collapse">
-          <summary>Лоты ({live?.lots.length ?? 0})</summary>
-          {live === undefined || live.lots.length === 0 ? (
+          <summary>Лоты ({lots.length})</summary>
+          {lots.length === 0 ? (
             <p className="procurement-detail-empty">Нет данных о лотах.</p>
           ) : (
             <ul className="procurement-detail-lots">
-              {live.lots.map((lot) => (
+              {lots.map((lot) => (
                 <li key={lot.number} className="procurement-detail-lot">
                   <p className="procurement-detail-lot-title">
                     Лот {lot.number}: {lot.title}
@@ -243,9 +207,6 @@ export function ProcurementDetailApp({
                     <p className="procurement-detail-lot-quantity">
                       {lot.quantity} {lot.unit ?? ""}
                     </p>
-                  ) : null}
-                  {formatMoney(lot.startingPrice) ? (
-                    <p className="procurement-detail-lot-price">{formatMoney(lot.startingPrice)}</p>
                   ) : null}
                 </li>
               ))}

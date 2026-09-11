@@ -1527,9 +1527,13 @@ h3 {
 
 .procurement-detail-list {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: minmax(12rem, 36%) 1fr;
   gap: 8px 16px;
   font-size: 14px;
+}
+
+.procurement-detail-row {
+  display: contents;
 }
 
 .procurement-detail-list dt {

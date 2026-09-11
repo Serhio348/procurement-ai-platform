@@ -132,6 +132,37 @@ describe("parseGoszakupkiCard", () => {
     expect(parsed.history[0]?.sourceUrl).toBe("https://goszakupki.by/questions/9001");
   });
 
+  it("maps buying-organisation labels and an indicative amount", async () => {
+    const html = await readFile(
+      fileURLToPath(new URL("request-buying-org.html", fixtureDirectory)),
+      "utf8",
+    );
+    const parsed = parseGoszakupkiCard({
+      html,
+      url: "https://goszakupki.by/request/view/3545600",
+      fetchedAt,
+    });
+
+    expect(parsed.card.buyer).toMatchObject({
+      name: 'Брестское республиканское унитарное предприятие электроэнергетики "Брестэнерго"',
+      registrationNumber: "200050653",
+      address: "Республика Беларусь, Брестская область, 224030, г. Брест, ул. Воровского, 13/1",
+      contact: "Головко Роман Геннадьевич, +375333869267",
+    });
+    expect(parsed.card.amount).toMatchObject({
+      kind: "indicative",
+      amount: 160651.42,
+      currency: "BYN",
+      raw: "160 651.42 BYN",
+    });
+    expect(parsed.card.rawFields["Иные сведения"]).toBe("Согласно заданию на закупку");
+    expect(
+      parsed.card.rawFields[
+        "Дата и время окончания приема запросов о разъяснении документации о закупке"
+      ],
+    ).toContain("08.09.2026 16:00");
+  });
+
   it("rejects a page whose card identity is absent", () => {
     expect(() =>
       parseGoszakupkiCard({

@@ -892,6 +892,62 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("stores the platform card on participate before documents are ingested", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Строка из поиска",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      live: true,
+      amountLabel: "105 292.65 BYN",
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    const live = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "request/3545600",
+      url: "https://goszakupki.by/request/view/3545600",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      fetchedAt: "2026-09-11T00:00:00.000Z",
+      status: "accepting_bids",
+      buyer: {
+        name: "Брестэнерго",
+        registrationNumber: "200050653",
+        address: "г. Брест, ул. Воровского, 13/1",
+        contact: "Головко Р. Г., +375333869267",
+      },
+      amount: { kind: "indicative", amount: 160651.42, currency: "BYN", raw: "160 651.42 BYN" },
+    });
+    const ingest = vi.fn(async (card: typeof found) => {
+      expect(card.sourceCard?.buyer?.registrationNumber).toBe("200050653");
+      return card;
+    });
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest },
+      cardWatch: { read: async () => live },
+    });
+
+    const participated = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/decision`,
+      payload: { kind: "participate" },
+    });
+    const items = JSON.parse(participated.body).items as Array<{
+      amountLabel?: string;
+      sourceCard?: { buyer?: { registrationNumber?: string } };
+    }>;
+
+    expect(participated.statusCode).toBe(200);
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(items[0]?.amountLabel).toBe("160 651.42 BYN");
+    expect(items[0]?.sourceCard?.buyer?.registrationNumber).toBe("200050653");
+
+    await app.close();
+  });
+
   it("exposes ingest progress while participate is still running", async () => {
     const found = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000401",
@@ -1104,30 +1160,29 @@ describe("specialist API", () => {
 
   it("monitors a decided case and reports a real change once", async () => {
     const journal = createMemoryAdminJournal();
+    const accepting = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/777",
+      url: "https://goszakupki.by/auction/view/auction-777",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+      amount: { kind: "limit", amount: null, raw: "1 000,00 BYN" },
+    });
+    const cancelled = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/777",
+      url: "https://goszakupki.by/auction/view/auction-777",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-11T00:00:00.000Z",
+      status: "cancelled",
+      amount: { kind: "limit", amount: null, raw: "1 000.00 BYN" },
+    });
     const read = vi
       .fn()
-      .mockResolvedValueOnce(
-        ProcedureCard.parse({
-          sourceId: "goszakupki_by",
-          sourceProcurementId: "auction/777",
-          url: "https://goszakupki.by/auction/view/auction-777",
-          title: "Поставка кабеля",
-          fetchedAt: "2026-09-10T00:00:00.000Z",
-          status: "accepting_bids",
-          amount: { kind: "limit", amount: null, raw: "1 000,00 BYN" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        ProcedureCard.parse({
-          sourceId: "goszakupki_by",
-          sourceProcurementId: "auction/777",
-          url: "https://goszakupki.by/auction/view/auction-777",
-          title: "Поставка кабеля",
-          fetchedAt: "2026-09-11T00:00:00.000Z",
-          status: "cancelled",
-          amount: { kind: "limit", amount: null, raw: "1 000.00 BYN" },
-        }),
-      );
+      .mockResolvedValueOnce(accepting)
+      .mockResolvedValueOnce(accepting)
+      .mockResolvedValueOnce(cancelled);
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
       journal,
@@ -1180,7 +1235,7 @@ describe("specialist API", () => {
     expect(third.statusCode).toBe(200);
     expect(JSON.parse(third.body).monitoredCount).toBe(1);
     expect(JSON.parse(third.body).changedCount).toBe(1);
-    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(3);
     expect(rows.some((item) => item.topic === "card_update")).toBe(true);
     expect(rows.some((item) => item.summary.includes("Статус"))).toBe(true);
     const log = await journal.list();

@@ -85,16 +85,27 @@ function redact(value: unknown, keys: ReadonlySet<string>, depth = 0): unknown {
   return result;
 }
 
+// Driver errors (drizzle, pg) embed the full query with parameters in the
+// message; a JSONB case with extracted document text runs to hundreds of KB
+// and floods journald, hiding the actual failure reason kept in `cause`.
+const MAX_ERROR_TEXT = 2_000;
+
+function clip(text: string): string {
+  return text.length > MAX_ERROR_TEXT
+    ? `${text.slice(0, MAX_ERROR_TEXT)}… [${String(text.length - MAX_ERROR_TEXT)} more chars]`
+    : text;
+}
+
 /** Errors are flattened so the log stays valid JSON. */
 function serialiseError(error: unknown): LogFields {
   if (error instanceof Error) {
-    const serialised: LogFields = { name: error.name, message: error.message };
-    if (error.stack !== undefined) serialised["stack"] = error.stack;
-    if (error.cause !== undefined) serialised["cause"] = String(error.cause);
+    const serialised: LogFields = { name: error.name, message: clip(error.message) };
+    if (error.stack !== undefined) serialised["stack"] = clip(error.stack);
+    if (error.cause !== undefined) serialised["cause"] = clip(String(error.cause));
     return { err: serialised };
   }
   if (error === undefined) return {};
-  return { err: { message: String(error) } };
+  return { err: { message: clip(String(error)) } };
 }
 
 export function createLogger(options: LoggerOptions = {}): Logger {

@@ -81,8 +81,8 @@ describe("applySourceCard", () => {
       url: "https://goszakupki.by/request/view/3545600",
       sourceProcurementId: "request/3545600",
     });
-    const next = applySourceCard(card, source({ sourceStatus: "" }), now);
-    expect(next.statusLabel).toBe("приём предложений");
+    const next = applySourceCard(card, source({ status: "unknown", sourceStatus: "" }), now);
+    expect(next.statusLabel).toBe("приём заявок");
   });
 });
 

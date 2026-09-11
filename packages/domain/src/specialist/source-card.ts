@@ -42,14 +42,20 @@ export function applySourceCard(
   const buyer = source.buyer?.name ?? card.buyerName;
   const amount = procedureAmountLabel(source) ?? card.amountLabel;
   const printedStatus = source.sourceStatus?.trim();
+  // Lot badges are often empty on marketing/request pages. Do not wipe the
+  // listing status ("Рассмотрение предложений") with a blank "неизвестен".
+  const nextStatus = source.status !== "unknown" ? source.status : card.status;
+  const nextStatusLabel =
+    printedStatus !== undefined && printedStatus.length > 0
+      ? printedStatus
+      : source.status !== "unknown"
+        ? statusLabel(source.status)
+        : card.statusLabel;
   return SpecialistProcurementCard.parse({
     ...card,
     title: source.title,
-    status: source.status,
-    statusLabel:
-      printedStatus !== undefined && printedStatus.length > 0
-        ? printedStatus
-        : statusLabel(source.status),
+    status: nextStatus,
+    statusLabel: nextStatusLabel,
     ...(buyer === undefined ? {} : { buyerName: buyer }),
     ...(amount === undefined ? {} : { amountLabel: amount }),
     sourceCard: source,

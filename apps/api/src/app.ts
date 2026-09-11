@@ -905,37 +905,28 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     workspace.recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
     let next = withTriage(card, workspace);
-    const shouldHydrate = parsed.data.kind === "monitor" || parsed.data.kind === "participate";
-    const ingestPort =
-      parsed.data.kind === "participate" && documentIngest !== undefined ? documentIngest : undefined;
-    if (ingestPort !== undefined) ingestProgress.begin(card.id);
-    const hydrateTask = shouldHydrate ? hydrateSourceCard(next) : Promise.resolve(next);
-    const ingestTask =
-      ingestPort === undefined
-        ? Promise.resolve(next)
-        : ingestPort.ingest(next).then(
-            (ingested) => {
-              ingestProgress.done(card.id);
-              return ingested;
-            },
-            async (error: unknown) => {
-              ingestProgress.fail(card.id);
-              logger.error("Specialist participate document ingest failed", error, {
-                sourceProcurementId: card.sourceProcurementId,
-              });
-              await recordJournal(journal, {
-                kind: "documents",
-                level: "error",
-                message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
-                sourceProcurementId: card.sourceProcurementId,
-              });
-              return next;
-            },
-          );
-    const [hydrated, ingested] = await Promise.all([hydrateTask, ingestTask]);
-    next = withTriage(ingested, workspace);
-    if (hydrated.sourceCard !== undefined) {
-      next = withTriage(applySourceCard(next, hydrated.sourceCard, clock()), workspace);
+    // One stdio MCP process cannot run get + get_documents at once: the
+    // responses cross and the platform card is lost while files still arrive.
+    if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
+      next = await hydrateSourceCard(next);
+    }
+    if (parsed.data.kind === "participate" && documentIngest !== undefined) {
+      ingestProgress.begin(card.id);
+      try {
+        next = withTriage(await documentIngest.ingest(next), workspace);
+        ingestProgress.done(card.id);
+      } catch (error) {
+        ingestProgress.fail(card.id);
+        logger.error("Specialist participate document ingest failed", error, {
+          sourceProcurementId: card.sourceProcurementId,
+        });
+        await recordJournal(journal, {
+          kind: "documents",
+          level: "error",
+          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
+          sourceProcurementId: card.sourceProcurementId,
+        });
+      }
     }
     catalog.upsertCase(next);
     catalog.dismissByProcurementId(next.id);

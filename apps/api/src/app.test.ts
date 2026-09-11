@@ -920,7 +920,20 @@ describe("specialist API", () => {
       },
       amount: { kind: "indicative", amount: 160651.42, currency: "BYN", raw: "160 651.42 BYN" },
     });
-    const ingest = vi.fn(async (card: typeof found) => card);
+    const ingest = vi.fn(async (card: typeof found) => {
+      expect(card.sourceCard?.buyer?.registrationNumber).toBe("200050653");
+      return SpecialistProcurementCard.parse({
+        ...card,
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/1",
+            hash: "a".repeat(64),
+            status: "hashed",
+          },
+        ],
+      });
+    });
     const app = await buildSpecialistApi({
       catalog,
       documentIngest: { ingest },
@@ -935,13 +948,14 @@ describe("specialist API", () => {
     const items = JSON.parse(participated.body).items as Array<{
       amountLabel?: string;
       sourceCard?: { buyer?: { registrationNumber?: string } };
-      documents?: unknown[];
+      documents?: Array<{ name: string }>;
     }>;
 
     expect(participated.statusCode).toBe(200);
     expect(ingest).toHaveBeenCalledTimes(1);
     expect(items[0]?.amountLabel).toBe("160 651.42 BYN");
     expect(items[0]?.sourceCard?.buyer?.registrationNumber).toBe("200050653");
+    expect(items[0]?.documents).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
 
     await app.close();
   });

@@ -211,10 +211,17 @@ export function ProcurementsApp({
   }, [searching]);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const ingestGeneration = useRef(0);
+  const showingSearch = useRef(false);
   const catalogRef = useRef(catalog);
   if (catalogRef.current !== catalog) {
     catalogRef.current = catalog;
-    setCatalogItems(catalog);
+    // Parent refreshed a card (decide / inbox). Update rows already on screen
+    // without swapping a search hit list for the whole database catalog.
+    setCatalogItems((current) => {
+      if (!showingSearch.current) return [...catalog];
+      const byId = new Map(catalog.map((item) => [item.id, item] as const));
+      return current.map((item) => byId.get(item.id) ?? item);
+    });
   }
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
   const items = procurementsForProfile(catalogItems, chosenProfile);
@@ -239,6 +246,7 @@ export function ProcurementsApp({
         await selectProfile(chosenProfileId);
       }
       const result = await search(offset);
+      showingSearch.current = true;
       setCatalogItems(result.items);
       setHasMore(result.hasMore);
       setNextOffset(offset + 100);
@@ -276,21 +284,27 @@ export function ProcurementsApp({
     if (kind === "participate") pullProgress();
     try {
       const next = await decide(selected.id, kind);
-      setCatalogItems(next);
+      const updated = next.find((item) => item.id === selected.id);
       if (kind === "reject") {
+        const without = catalogItems.filter((item) => item.id !== selected.id);
+        setCatalogItems(without);
         setNotice("Закупка скрыта и больше не будет предлагаться.");
-        const remaining = procurementsForProfile(next, chosenProfile)[0];
+        const remaining = procurementsForProfile(without, chosenProfile)[0];
         await navigate(remaining === undefined ? "/procurements" : `/procurements/${remaining.id}`);
-      } else if (kind === "participate") {
-        const current = next.find((item) => item.id === selected.id);
-        const hashed = current?.documents.filter((item) => item.status === "hashed").length ?? 0;
-        const failed = current?.documents.filter((item) => item.status === "download_failed").length ?? 0;
-        const read = current?.documents.filter((item) => specialistDocumentWasRead(item)).length ?? 0;
-        setNotice(
-          failed > 0
-            ? `Участвуем. Прочитано агентом: ${String(read)}, скачано: ${String(hashed)}, не скачалось: ${String(failed)}.`
-            : `Участвуем. Прочитано агентом: ${String(read)} из ${String(hashed)}.`,
+      } else if (updated !== undefined) {
+        setCatalogItems((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
         );
+        if (kind === "participate") {
+          const hashed = updated.documents.filter((item) => item.status === "hashed").length;
+          const failed = updated.documents.filter((item) => item.status === "download_failed").length;
+          const read = updated.documents.filter((item) => specialistDocumentWasRead(item)).length;
+          setNotice(
+            failed > 0
+              ? `Участвуем. Прочитано агентом: ${String(read)}, скачано: ${String(hashed)}, не скачалось: ${String(failed)}.`
+              : `Участвуем. Прочитано агентом: ${String(read)} из ${String(hashed)}.`,
+          );
+        }
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Не удалось сохранить решение.");

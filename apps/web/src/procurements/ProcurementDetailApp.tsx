@@ -15,8 +15,10 @@ function shortId(id: string): string {
 
 export function ProcurementDetailApp({
   procurements,
+  onCardLoaded,
 }: {
   procurements: readonly SpecialistProcurementCard[];
+  onCardLoaded?: (card: SpecialistProcurementCard) => void;
 }): ReactElement {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -38,7 +40,11 @@ export function ProcurementDetailApp({
     setLoading(true);
     setError(undefined);
     try {
-      setLive(await fetchProcurementCard(procurementId));
+      const next = await fetchProcurementCard(procurementId);
+      setLive(next);
+      if (stored !== undefined && onCardLoaded !== undefined) {
+        onCardLoaded({ ...stored, sourceCard: next });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить карточку");
     } finally {

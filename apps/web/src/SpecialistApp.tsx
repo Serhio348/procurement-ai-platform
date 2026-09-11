@@ -76,7 +76,9 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       ? undefined
       : async (offset?: number) => {
           const result = await searchProfile(offset);
-          setProcurements(result.items);
+          // Keep decided / watched cases in memory so "Мои закупки" does not
+          // empty when the search pane shows only the latest hit list.
+          setProcurements((current) => mergeProcurementCards(current, result.items));
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
@@ -88,11 +90,18 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       ? undefined
       : async (id: string, kind: SpecialistTriageKind) => {
           const items = await decideCase(id, kind);
-          setProcurements(items);
+          const updated = items.find((item) => item.id === id);
+          setProcurements((current) => {
+            if (kind === "reject") {
+              return current.filter((item) => item.id !== id);
+            }
+            if (updated === undefined) return current;
+            return mergeProcurementCards(current, [updated]);
+          });
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
-          return items;
+          return updated === undefined ? items : [updated];
         };
 
   function rememberCard(card: SpecialistProcurementCard): void {
@@ -244,7 +253,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         />
         <Route
           path="/my-procurements/:id"
-          element={<ProcurementDetailApp procurements={procurements} />}
+          element={
+            <ProcurementDetailApp
+              procurements={procurements}
+              onCardLoaded={rememberCard}
+            />
+          }
         />
         <Route path="/admin/:pane?" element={<AdminApp />} />
       </Routes>
@@ -327,4 +341,36 @@ function ProfileEditorRoute({
       setWatch={setWatch}
     />
   );
+}
+
+/** Prefer the richer case (documents / source card) when the same id returns twice. */
+export function mergeProcurementCards(
+  current: readonly SpecialistProcurementCard[],
+  updates: readonly SpecialistProcurementCard[],
+): SpecialistProcurementCard[] {
+  const byId = new Map(current.map((item) => [item.id, item] as const));
+  for (const update of updates) {
+    const previous = byId.get(update.id);
+    if (previous === undefined) {
+      byId.set(update.id, update);
+      continue;
+    }
+    byId.set(update.id, {
+      ...previous,
+      ...update,
+      documents: update.documents.length > 0 ? update.documents : previous.documents,
+      sourceCard: update.sourceCard ?? previous.sourceCard,
+      termsDetail: update.termsDetail ?? previous.termsDetail,
+      paymentQuote: update.paymentQuote ?? previous.paymentQuote,
+      watchSnapshot: update.watchSnapshot ?? previous.watchSnapshot,
+      actions: update.actions.length > 0 ? update.actions : previous.actions,
+    });
+  }
+  const order = [...current.map((item) => item.id)];
+  for (const update of updates) {
+    if (!order.includes(update.id)) order.push(update.id);
+  }
+  return order
+    .map((id) => byId.get(id))
+    .filter((item): item is SpecialistProcurementCard => item !== undefined);
 }

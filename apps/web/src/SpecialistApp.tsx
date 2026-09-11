@@ -71,10 +71,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     return () => clearInterval(timer);
   }, [refreshInbox]);
 
-  // Ids of the last profile search, in source order. The search pane is
-  // unmounted on every tab switch; without this it would come back showing
-  // the whole catalog (old completed cases) instead of what was just found.
-  const [searchIds, setSearchIds] = useState<readonly string[] | undefined>(undefined);
+  // Ids of the last profile search per profile, in source order. The search
+  // pane is unmounted on every tab switch and the whole app on reload; without
+  // this it would come back showing the whole catalog (old completed cases)
+  // instead of what was just found. Kept in localStorage so a refresh keeps it.
+  const [searchIdsByProfile, setSearchIdsByProfile] = useState(readStoredSearchIds);
+  const searchIds = searchIdsByProfile[activeProfileId];
 
   const search =
     searchProfile === undefined
@@ -85,11 +87,18 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           // empty when the search pane shows only the latest hit list.
           setProcurements((current) => mergeProcurementCards(current, result.items));
           const ids = result.items.map((item) => item.id);
-          setSearchIds((current) =>
-            offset === undefined || offset === 0 || current === undefined
-              ? ids
-              : [...current, ...ids.filter((id) => !current.includes(id))],
-          );
+          setSearchIdsByProfile((current) => {
+            const previous = current[activeProfileId];
+            const next = {
+              ...current,
+              [activeProfileId]:
+                offset === undefined || offset === 0 || previous === undefined
+                  ? ids
+                  : [...previous, ...ids.filter((id) => !previous.includes(id))],
+            };
+            writeStoredSearchIds(next);
+            return next;
+          });
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
@@ -359,6 +368,37 @@ function ProfileEditorRoute({
       setWatch={setWatch}
     />
   );
+}
+
+export const SEARCH_IDS_STORAGE_KEY = "procurement.searchIdsByProfile";
+
+type SearchIdsByProfile = Readonly<Record<string, readonly string[]>>;
+
+/** Storage is best-effort: a missing or corrupt entry just means "no search yet". */
+export function readStoredSearchIds(): SearchIdsByProfile {
+  try {
+    const raw = globalThis.localStorage?.getItem(SEARCH_IDS_STORAGE_KEY);
+    if (raw === null || raw === undefined) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const result: Record<string, readonly string[]> = {};
+    for (const [profileId, ids] of Object.entries(parsed)) {
+      if (Array.isArray(ids) && ids.every((id) => typeof id === "string")) {
+        result[profileId] = ids;
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export function writeStoredSearchIds(value: SearchIdsByProfile): void {
+  try {
+    globalThis.localStorage?.setItem(SEARCH_IDS_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Quota or privacy mode: the in-memory state still works for this session.
+  }
 }
 
 /** Prefer the richer case (documents / source card) when the same id returns twice. */

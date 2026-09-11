@@ -281,4 +281,30 @@ describe("specialist auth API", () => {
     );
     await app.close();
   });
+
+  it("keeps the first session alive when the same account signs in elsewhere", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const app = await buildSpecialistApi({ authDirectory: directory });
+
+    const firstIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const secondIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const stillFirst = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { cookie: cookieHeader(firstIn) },
+    });
+
+    expect(secondIn.statusCode).toBe(200);
+    expect(JSON.parse(stillFirst.body).user?.email).toBe("admin@example.com");
+    await app.close();
+  });
 });

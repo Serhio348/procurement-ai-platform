@@ -159,10 +159,9 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     if (user === undefined) {
       return reply.code(401).send({ error: "invalid_credentials" });
     }
-    const previous = await directory.closeSessionsForUser(user.id);
-    for (const closed of previous) {
-      await recordPresence(journal, user, closed, "закрыл предыдущую сессию");
-    }
+    // Signing in elsewhere must not kick this session: the console is opened
+    // on a desktop and a phone alike, and closing the older session here made
+    // two clients log each other out in a loop.
     await setSession(reply, user);
     await recordJournal(journal, {
       kind: "access",

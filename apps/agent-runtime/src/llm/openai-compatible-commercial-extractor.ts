@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CommercialExtractorInput } from "@procurement/contracts";
+import { COMMERCIAL_READER_SYSTEM_PROMPT } from "@procurement/domain";
 import type { CommercialExtractorPort } from "../agents/commercial-terms/model-port.js";
 
 const ChatCompletionResponse = z.object({
@@ -53,7 +54,7 @@ export class OpenAiCompatibleCommercialExtractor implements CommercialExtractorP
       body: JSON.stringify({
         model: this.#model,
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: COMMERCIAL_READER_SYSTEM_PROMPT },
           { role: "user", content: JSON.stringify(input) },
         ],
         response_format: { type: "json_object" },
@@ -89,13 +90,3 @@ function completionEndpoint(baseUrl: string): URL {
   return endpoint;
 }
 
-const systemPrompt = [
-  "Ты извлекаешь коммерческие условия CommercialTermsAgent.",
-  "Верни только один JSON-объект без markdown: { \"claims\": [...] }.",
-  "Каждый claim: key, value, unit при необходимости, confidence (0..1), hash, page, quote.",
-  "key только из: commercial.advance_percent, commercial.advance_percent_cap, commercial.payment_kind, commercial.final_payment_percent, commercial.payment_deadline_days, commercial.delivery_period_days, commercial.warranty_months, commercial.price, commercial.bid_security, commercial.contract_security, commercial.penalties.",
-  "«предоплата до N%» — это commercial.advance_percent_cap, не advance_percent.",
-  "quote — дословный фрагмент со страницы, не пересказ.",
-  "Не выдумывай условия, которых нет в тексте.",
-  "Не ставь оценку от 0 до 100 и не вычисляй score.",
-].join("\n");

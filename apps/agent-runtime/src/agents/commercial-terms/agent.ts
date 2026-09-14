@@ -27,6 +27,7 @@ import {
   assembleCommercialTerms,
   cheapExtractCommercialClaims,
   keepQuotedClaims,
+  keepTrustedClaims,
   pageKey,
 } from "@procurement/domain";
 import {
@@ -137,7 +138,15 @@ export class CommercialTermsAgent {
     if (claims.length === 0 && pages.length > 0) {
       try {
         const raw = await this.#model.extract(CommercialExtractorInput.parse({ pages }));
-        claims = keepQuotedClaims(CommercialExtractorOutput.parse(raw).claims, pageText);
+        // The model is the untrusted source here: a real quote with an invented
+        // figure passes the provenance check, so model claims get the full gate.
+        const trusted = keepTrustedClaims(CommercialExtractorOutput.parse(raw).claims, pages);
+        if (trusted.rejected.length > 0) {
+          logger.warn("Commercial terms claims dropped without proof on the page", {
+            rejected: trusted.rejected.map((item) => `${item.claim.key}:${item.reason}`),
+          });
+        }
+        claims = trusted.kept;
       } catch (error) {
         logger.error("Commercial terms model call failed", error);
         return failedRun(input, error);

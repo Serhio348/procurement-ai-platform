@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CommercialFactKey } from "./commercial-terms.js";
 import { IsoDate, IsoDateTime, Sha256 } from "./common.js";
 import { ExtractedPage, ExtractionStatus } from "./documents.js";
 import { ProcurementId } from "./ids.js";
@@ -140,6 +141,23 @@ export const SpecialistCaseDocument = z.object({
 });
 export type SpecialistCaseDocument = z.infer<typeof SpecialistCaseDocument>;
 
+/**
+ * One commercial condition the specialist can check: the wording as printed,
+ * the file it came from and the page. Written only for claims that passed the
+ * provenance gate, so a line without a quote cannot reach the console.
+ */
+export const SpecialistTermsEvidence = z.object({
+  key: CommercialFactKey,
+  label: z.string().min(1),
+  value: z.string().min(1),
+  quote: z.string().min(1).max(600),
+  documentName: z.string().min(1),
+  page: z.number().int().positive(),
+  /** "rule": regex over the page text. "model": the model proposed it, code verified the quote. */
+  foundBy: z.enum(["rule", "model"]),
+});
+export type SpecialistTermsEvidence = z.infer<typeof SpecialistTermsEvidence>;
+
 /** Specialist choice on a found procedure. Not a 0–100 score. */
 export const SpecialistTriageKind = z.enum(["monitor", "participate", "reject"]);
 export type SpecialistTriageKind = z.infer<typeof SpecialistTriageKind>;
@@ -180,6 +198,7 @@ export const SpecialistProcurementCard = z.object({
   documents: z.array(SpecialistCaseDocument).default([]),
   actions: z.array(SpecialistPipelineAction).default([]),
   termsDetail: z.string().optional(),
+  termsEvidence: z.array(SpecialistTermsEvidence).default([]),
   paymentQuote: z.string().optional(),
   reportMarkdown: z.string().optional(),
   missing: z.array(z.string()).default([]),

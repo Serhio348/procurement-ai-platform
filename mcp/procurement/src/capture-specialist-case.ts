@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   const nativeExtractor = new RoutingDocumentExtractor();
   const scanExtractor = new RoutingDocumentExtractor({
     ocr: scan.ocr,
-    maxOcrPages: Number.parseInt(process.env["DOCUMENT_OCR_MAX_PAGES"] ?? "20", 10),
+    maxOcrPages: Number.parseInt(process.env["DOCUMENT_OCR_MAX_PAGES"] ?? "50", 10),
   });
   try {
     for (const document of listed.documents) {

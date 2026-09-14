@@ -15,6 +15,7 @@ import { assembleCommercialTerms } from "../commercial/assemble.js";
 import { cheapExtractCommercialClaims } from "../commercial/cheap-extract.js";
 import { formatDayCount, paymentKindLabel } from "../commercial/detail.js";
 import { keepQuotedClaims, pageKey } from "../commercial/provenance.js";
+import { termsEvidenceFromClaims } from "../commercial/reading.js";
 import { pageSafeForCommercialFacts } from "../documents/text-quality.js";
 import { compileProcurementReport } from "../report/compile.js";
 import { cheapClassifyHit } from "../search/cheap-classify.js";
@@ -42,6 +43,13 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     }
   }
   const claims = keepQuotedClaims(rawClaims, pageMap);
+  // The platform card is quotable too: its text carries the payment wording
+  // when the tender pack has none.
+  const termsEvidence = termsEvidenceFromClaims(
+    claims,
+    [{ hash: run.cardTextHash, name: "Карточка площадки" }, ...run.documents],
+    () => "rule",
+  );
   const extractedAt = run.capturedAt;
   const facts = claims.map((claim, index) => {
     const evidenceId = uuidFromHex(`${run.cardTextHash}${String(index)}e`) as EvidenceId;
@@ -119,6 +127,7 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     documents: run.documents,
     actions,
     ...(facts.length === 0 ? {} : { termsDetail: termLines(assembled.terms, facts).join("\n") }),
+    termsEvidence,
     ...(paymentQuote(run.card) === undefined ? {} : { paymentQuote: paymentQuote(run.card) }),
     reportMarkdown: report.markdown,
     missing: report.missing,

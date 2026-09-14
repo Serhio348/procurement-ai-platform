@@ -70,7 +70,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     }
     this.#minimumIntervalMs = Math.ceil(60_000 / requestsPerMinute);
     this.#maxResponseBytes = options.maxResponseBytes ?? 5 * 1024 * 1024;
-    this.#maxDownloadBytes = options.maxDownloadBytes ?? 32 * 1024 * 1024;
+    this.#maxDownloadBytes = options.maxDownloadBytes ?? 100 * 1024 * 1024;
     this.#userAgent =
       options.userAgent ?? "ProcurementAIPlatform/0.1 (read-only procurement adapter)";
     this.#circuitFailureThreshold = options.circuitFailureThreshold ?? 3;

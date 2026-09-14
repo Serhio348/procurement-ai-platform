@@ -107,6 +107,7 @@ export function slimListedCard(card: SpecialistProcurementCard): SpecialistProcu
     actions: [],
     missing: [],
     extractNotes: [],
+    termsEvidence: [],
   };
   delete listed.extractPreview;
   delete listed.reportMarkdown;

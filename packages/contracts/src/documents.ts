@@ -69,7 +69,8 @@ export type FilesExistsResponse = z.infer<typeof FilesExistsResponse>;
 export const DocumentsDownloadRequest = z
   .object({
     sourceUrl: z.string().url(),
-    maxBytes: z.number().int().positive().max(20_000_000).default(5_000_000),
+    /** Scanned ТЗ packs run into tens of megabytes; the ceiling is the site's own file size. */
+    maxBytes: z.number().int().positive().max(100_000_000).default(5_000_000),
   })
   .strict();
 export type DocumentsDownloadRequest = z.infer<typeof DocumentsDownloadRequest>;

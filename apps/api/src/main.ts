@@ -8,6 +8,7 @@ import { resolveBlobDirectory } from "./blobs.js";
 import { startDiscoveryRepeat } from "./discovery-queue.js";
 import { discoveryTransport } from "./discovery-transport.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
+import { createCommercialReaderFromEnv } from "./commercial-reader.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadDotEnv } from "./load-env.js";
 import { createBlobStoreFromEnv, objectStoreKind } from "./object-store.js";
@@ -65,8 +66,10 @@ async function main(): Promise<void> {
           ...(classifier === undefined ? {} : { classifier }),
           logger,
         });
+  const commercialReader = createCommercialReaderFromEnv(process.env);
   if (mcp !== undefined) {
     logger.info("Search review configured", { model: classifier !== undefined });
+    logger.info("Commercial reader configured", { model: commercialReader !== undefined });
   }
   const bootstrapEmail = process.env["AUTH_BOOTSTRAP_EMAIL"]?.trim() ?? "";
   const bootstrapPassword = process.env["AUTH_BOOTSTRAP_PASSWORD"] ?? "";
@@ -127,6 +130,7 @@ async function main(): Promise<void> {
             blobStore,
             logger,
             progress: ingestProgress,
+            ...(commercialReader === undefined ? {} : { commercialReader }),
           }),
         }),
     ...(mode === "live" ? { liveProcurementsOnly: true } : {}),

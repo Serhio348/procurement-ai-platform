@@ -923,6 +923,49 @@ h3 {
   cursor: not-allowed;
 }
 
+.terms-evidence {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.terms-evidence > li {
+  padding: 8px 10px;
+  background: #f4f6f8;
+  border: 1px solid #d5dae2;
+  border-radius: 4px;
+}
+
+.terms-evidence-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.terms-evidence-mark {
+  font-size: 12px;
+  color: #5c6778;
+}
+
+.terms-evidence-quote {
+  margin: 4px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid #b7c4d4;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.terms-evidence-source {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #5c6778;
+}
+
 .profile-chips {
   display: flex;
   flex-wrap: wrap;

@@ -19,6 +19,7 @@ import {
 } from "@procurement/domain";
 import { ConfirmToast, TRASH_MOVE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
+import { TermsEvidenceList } from "./TermsEvidenceList.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
   return document.hash === undefined
@@ -627,6 +628,7 @@ export function ProcurementsApp({
                         {selected.termsDetail ??
                           "В разобранном тексте нет аванса, срока в днях и гарантии. Смотрите цитаты в тексте документа."}
                       </pre>
+                      <TermsEvidenceList items={selected.termsEvidence} />
                       {selected.paymentQuote === undefined ? null : (
                         <>
                           <h3>Оплата на площадке</h3>

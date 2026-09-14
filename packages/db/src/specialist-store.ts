@@ -760,7 +760,7 @@ type WorkspaceCaseRow = Pick<
  * reads the row in full.
  */
 function tileCardExpression() {
-  return sql<unknown>`${workspaceProcurements.card} #- '{documents}'::text[] #- '{actions}'::text[] #- '{missing}'::text[] #- '{extractNotes}'::text[] #- '{extractPreview}'::text[] #- '{reportMarkdown}'::text[] #- '{termsDetail}'::text[] #- '{paymentQuote}'::text[] #- '{sourceCard,parties}'::text[] #- '{sourceCard,lots}'::text[] #- '{sourceCard,rawFields}'::text[] #- '{sourceCard,externalIds}'::text[]`.as(
+  return sql<unknown>`${workspaceProcurements.card} #- '{documents}'::text[] #- '{actions}'::text[] #- '{missing}'::text[] #- '{extractNotes}'::text[] #- '{extractPreview}'::text[] #- '{reportMarkdown}'::text[] #- '{termsDetail}'::text[] #- '{termsEvidence}'::text[] #- '{paymentQuote}'::text[] #- '{sourceCard,parties}'::text[] #- '{sourceCard,lots}'::text[] #- '{sourceCard,rawFields}'::text[] #- '{sourceCard,externalIds}'::text[]`.as(
     "card",
   );
 }

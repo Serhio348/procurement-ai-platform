@@ -17,6 +17,7 @@ import { fetchProcurementCard } from "../api/specialist.js";
 import { ConfirmToast, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { DocumentNameLink, ingestProgressCaption, officeDownloadFrame, triageActionClass } from "./ProcurementsApp.js";
+import { TermsEvidenceList } from "./TermsEvidenceList.js";
 
 function shortId(id: string): string {
   return `${id.slice(0, 8)}…`;
@@ -374,6 +375,7 @@ export function ProcurementDetailApp({
             <details className="procurement-detail-raw" open>
               <summary>Условия из документов</summary>
               <pre className="procurement-detail-terms">{stored.termsDetail}</pre>
+              <TermsEvidenceList items={stored.termsEvidence} />
             </details>
           ) : null}
           {stored.paymentQuote ? (

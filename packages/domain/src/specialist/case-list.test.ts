@@ -1,6 +1,6 @@
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { countCabinetCases, isConsoleListedCase, pageListedCases } from "./case-list.js";
+import { countCabinetCases, isConsoleListedCase, pageListedCases, slimListedCard } from "./case-list.js";
 
 function card(input: {
   id: string;
@@ -93,6 +93,26 @@ describe("pageListedCases", () => {
         (item) => item.id,
       ),
     ).toEqual([trashed.id]);
+  });
+
+  it("strips extracts and files from a list row so trash cannot pull the whole case", () => {
+    const fat = SpecialistProcurementCard.parse({
+      ...watching,
+      extractPreview: "полный текст ТЗ ".repeat(80),
+      reportMarkdown: "# отчёт",
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/tz.pdf",
+          status: "hashed",
+        },
+      ],
+    });
+    const slim = slimListedCard(fat);
+    expect(slim.documents).toEqual([]);
+    expect(slim.extractPreview).toBeUndefined();
+    expect(slim.reportMarkdown).toBeUndefined();
+    expect(slim.title).toBe(watching.title);
   });
 
   it("counts mine, archive and trash without mixing tabs", () => {

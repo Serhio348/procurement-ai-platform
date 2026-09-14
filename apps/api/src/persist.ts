@@ -159,6 +159,9 @@ export async function openSpecialistPersistence(options: {
         });
         throw error;
       }
+      // Postgres is the system of record. Rewriting the leftover cases dump
+      // would read every card on each trash delete.
+      return;
     }
     const wanted = new Set(ids);
     const cards = await readJson<SpecialistProcurementCardValue[]>(

@@ -361,6 +361,36 @@ describe("MyProcurementsApp", () => {
     finish();
   });
 
+  it("does not refetch the trash page after a purge", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const load = vi.fn(async () => [trashed]);
+    const onPurge = vi.fn(async () => undefined);
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[]}
+          load={load}
+          onPurge={onPurge}
+          now={() => new Date("2026-09-11T10:00:00.000Z")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    load.mockClear();
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(onPurge).toHaveBeenCalledWith(trashed.id);
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+  });
+
   it("empties the trash after confirmation", async () => {
     const user = userEvent.setup();
     const first = SpecialistProcurementCard.parse({ ...card, triage: "reject" });

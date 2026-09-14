@@ -91,7 +91,35 @@ export function pageListedCases(
     return isConsoleListedCase(card, query) && caseMatchesListTab(card, tab);
   });
   return {
-    items: visible.slice(offset, offset + limit),
+    items: visible.slice(offset, offset + limit).map(slimListedCard),
     total: visible.length,
   };
+}
+
+/**
+ * Tile lists do not need extracts, files or the raw platform dump. The detail
+ * route loads the full row by id.
+ */
+export function slimListedCard(card: SpecialistProcurementCard): SpecialistProcurementCard {
+  const listed: SpecialistProcurementCard = {
+    ...card,
+    documents: [],
+    actions: [],
+    missing: [],
+    extractNotes: [],
+  };
+  delete listed.extractPreview;
+  delete listed.reportMarkdown;
+  delete listed.termsDetail;
+  delete listed.paymentQuote;
+  if (listed.sourceCard !== undefined) {
+    listed.sourceCard = {
+      ...listed.sourceCard,
+      parties: [],
+      lots: [],
+      rawFields: {},
+      externalIds: [],
+    };
+  }
+  return listed;
 }

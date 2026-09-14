@@ -133,8 +133,12 @@ export function MyProcurementsApp({
     }
     try {
       await action();
-      if (load !== undefined) {
-        setRemote(await load(activeTab));
+      if (!dropFromList && hasLoad) {
+        setRemote((current) =>
+          (current ?? source).map((card) =>
+            card.id === item.id ? { ...card, archived: item.archived !== true } : card,
+          ),
+        );
       }
     } catch {
       if (dropFromList) setRemote(previous);
@@ -150,9 +154,6 @@ export function MyProcurementsApp({
     setRemote([]);
     try {
       await onEmptyTrash();
-      if (load !== undefined) {
-        setRemote(await load("trash"));
-      }
     } catch {
       setRemote(previous);
     } finally {
@@ -308,7 +309,7 @@ export function MyProcurementsApp({
                           className="my-procurements-card-action"
                           disabled={pendingId === item.id}
                           onClick={() => {
-                            void runCardAction(item, () => onRestore(item.id));
+                            void runCardAction(item, () => onRestore(item.id), true);
                           }}
                         >
                           Вернуть

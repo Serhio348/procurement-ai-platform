@@ -31,6 +31,7 @@ import {
   applySourceCard,
   attachProfileToCard,
   caseMatchesListTab,
+  slimListedCard,
   diffCardSnapshots,
   discoveryPublishedFrom,
   inboxDocumentLinks,
@@ -269,7 +270,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             }) && caseMatchesListTab(item, tab),
       );
     return SpecialistProcurementListResponse.parse({
-      items,
+      items: items.map(slimListedCard),
       total: page.total,
       tab,
       hasMore: offset + page.items.length < page.total,

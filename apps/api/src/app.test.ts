@@ -1636,6 +1636,41 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("omits files and extracts from the trash list while the card still has them", async () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000321",
+      title: "Кабель без выгрузки ТЗ",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/slim-trash",
+      sourceProcurementId: "auction/slim-trash",
+      triage: "reject",
+      extractPreview: "полный текст технического задания",
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/tz.pdf",
+          status: "hashed",
+        },
+      ],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(card);
+    const app = await buildSpecialistApi({ catalog });
+    const trash = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    const listed = JSON.parse(trash.body).items[0] as {
+      documents?: unknown[];
+      extractPreview?: string;
+    };
+    expect(listed.documents).toEqual([]);
+    expect(listed.extractPreview).toBeUndefined();
+    const detail = await app.inject({ method: "GET", url: `/api/procurements/${card.id}` });
+    expect(JSON.parse(detail.body).documents).toEqual([
+      expect.objectContaining({ name: "ТЗ.pdf" }),
+    ]);
+    await app.close();
+  });
+
   it("purges a trash case without rewriting inbox or other cases", async () => {
     const persistCases = vi.fn(async () => undefined);
     const persistInbox = vi.fn(async () => undefined);

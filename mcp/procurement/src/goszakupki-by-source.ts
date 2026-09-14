@@ -27,11 +27,11 @@ import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.
 export const GOSZAKUPKI_LISTING_PAGE_SIZE = 20;
 /**
  * Console `limit` is "how many relevant hits to keep after scoring", not
- * "walk this many listing rows". Four pages (80 rows) per phrase keeps
- * more of what is posted now; discovery repeats with a watermark. Six
- * pages at 20 req/min was a minute of waiting before the scorer ran.
+ * "walk this many listing rows". Two pages per object is enough for what is
+ * posted now; discovery repeats with a watermark. Six pages at 20 req/min
+ * was a minute of waiting before the scorer ran.
  */
-export const GOSZAKUPKI_MAX_LISTING_PAGES_PER_TERM = 4;
+export const GOSZAKUPKI_MAX_LISTING_PAGES_PER_TERM = 2;
 
 export interface GoszakupkiBySourceOptions {
   client: GoszakupkiPageClient;
@@ -87,7 +87,9 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
           rows.set(row.hit.sourceProcurementId, row);
         }
         if (!parsed.hasNextPage) break;
+        if (rows.size >= query.offset + query.limit) break;
       }
+      if (rows.size >= query.offset + query.limit) break;
     }
 
     const hits = [...rows.values()]

@@ -213,14 +213,14 @@ describe("GoszakupkiBySource", () => {
       }),
     );
 
-    expect(get).toHaveBeenCalledTimes(4);
-    expect(decodeURIComponent(String(get.mock.calls[3]?.[0]))).toContain("page=4");
-    expect(get.mock.calls.some((call) => decodeURIComponent(String(call[0])).includes("page=5"))).toBe(
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(decodeURIComponent(String(get.mock.calls[1]?.[0]))).toContain("page=2");
+    expect(get.mock.calls.some((call) => decodeURIComponent(String(call[0])).includes("page=3"))).toBe(
       false,
     );
   });
 
-  it("queries every profile keyword even after the requested limit is filled", async () => {
+  it("does not query the next profile keyword after the requested limit is filled", async () => {
     const get = vi.fn(async (path: string) => ({
       status: 200,
       url: `https://goszakupki.by${path}`,
@@ -237,9 +237,8 @@ describe("GoszakupkiBySource", () => {
     );
 
     expect(result.hits).toHaveLength(1);
-    expect(get).toHaveBeenCalledTimes(2);
-    const queried = get.mock.calls.map((call) => decodeURIComponent(String(call[0])));
-    expect(queried.some((path) => path.includes("трансформатор"))).toBe(true);
-    expect(queried.some((path) => path.includes("кабель"))).toBe(true);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).toContain("трансформатор");
+    expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).not.toContain("кабель");
   });
 });

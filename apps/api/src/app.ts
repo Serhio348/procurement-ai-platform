@@ -39,12 +39,12 @@ import {
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inboxTopic,
+  CONSOLE_PLATFORM_SEARCH_TERM_LIMIT,
   inferSearchIntentPlan,
   isConsoleListedCase,
   partitionHitsByDecision,
   platformSearchTerms,
   profileDisplayName,
-  reconcileSearchIntentPlan,
   selectRelevantSearchCards,
   shouldRunDiscovery,
   SpecialistCatalog,
@@ -448,14 +448,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
     if (searchIntent === undefined) return inferred;
     try {
-      return await reconcileSearchIntentPlan(
-        inferred,
-        await searchIntent.plan({
-          name: profileDisplayName(profile),
-          keywords: profile.keywords,
-          excludeKeywords: profile.excludeKeywords,
-        }),
-      );
+      return await searchIntent.plan({
+        name: profileDisplayName(profile),
+        keywords: profile.keywords,
+        excludeKeywords: profile.excludeKeywords,
+      });
     } catch (error) {
       logger.warn("Search intent parser failed; using the cheap plan", {
         profileName: profileDisplayName(profile),
@@ -700,7 +697,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       keywords: profile.keywords,
       excludeKeywords: profile.excludeKeywords,
     });
-    const listingTerms = platformSearchTerms(inferred, profile.keywords);
+    const listingTerms = platformSearchTerms(
+      inferred,
+      profile.keywords,
+      CONSOLE_PLATFORM_SEARCH_TERM_LIMIT,
+    );
     let planMs = 0;
     let listingMs = 0;
     const startedAt = Date.now();
@@ -827,7 +828,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               limit,
               0,
               discoveryPublishedFrom(profile),
-              platformSearchTerms(plan, profile.keywords),
+              platformSearchTerms(plan, profile.keywords, CONSOLE_PLATFORM_SEARCH_TERM_LIMIT),
             ),
           );
         } catch (error) {

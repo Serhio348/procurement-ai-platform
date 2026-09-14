@@ -55,6 +55,14 @@ describe("stored search ids", () => {
     writeStoredSearchIds({ [profile.id]: [found.id] });
     expect(readStoredSearchIds()).toEqual({ [profile.id]: [found.id] });
   });
+
+  it("keeps last-search ids in a per-user namespace", () => {
+    writeStoredSearchIds({ [profile.id]: [found.id] }, "user-a");
+    writeStoredSearchIds({ [profile.id]: [stale.id] }, "user-b");
+    expect(readStoredSearchIds("user-a")).toEqual({ [profile.id]: [found.id] });
+    expect(readStoredSearchIds("user-b")).toEqual({ [profile.id]: [stale.id] });
+    expect(readStoredSearchIds()).toEqual({});
+  });
 });
 
 describe("SpecialistApp search persistence", () => {

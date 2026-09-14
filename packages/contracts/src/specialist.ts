@@ -162,6 +162,11 @@ export type SpecialistCardSnapshot = z.infer<typeof SpecialistCardSnapshot>;
 
 export const SpecialistProcurementCard = z.object({
   id: ProcurementId,
+  /**
+   * Shared public procedure row. Absent on records created before personal
+   * workspaces: then `id` was also the canonical procurement id.
+   */
+  canonicalProcurementId: ProcurementId.optional(),
   title: z.string().min(1),
   status: ProcedureStatus,
   statusLabel: z.string().min(1),

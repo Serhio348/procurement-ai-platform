@@ -1,10 +1,12 @@
 import {
   InboxFixtureItem,
   SpecialistProcurementCard,
+  SpecialistWorkingProfile,
   SpecialistWorkspaceState,
   type InboxFixtureItem as InboxFixtureItemValue,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistTriageKind,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
 import { and, eq, inArray } from "drizzle-orm";
@@ -13,12 +15,20 @@ import {
   documentVersions,
   documents,
   procurements,
-  specialistCases,
-  specialistInbox,
-  specialistWorkspaces,
+  workspaceDecisions,
+  workspaceInbox,
+  workspaceMembers,
+  workspaceProcurementProfiles,
+  workspaceProcurements,
+  workspaceProfiles,
+  workspaceReviewVerdicts,
+  workspaceSettings,
+  workspaces,
 } from "./schema.js";
+import { withRlsBypass, withUser, withWorkspace } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
+export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
 
 /** Object-store key for bytes. The sha256 itself lives on document_versions.hash. */
 export function blobStorageKey(hash: string): string {
@@ -27,48 +37,316 @@ export function blobStorageKey(hash: string): string {
 
 export function createSpecialistStore(db: Database) {
   return {
-    async loadWorkspace(
-      id = DEFAULT_SPECIALIST_WORKSPACE_ID,
-    ): Promise<SpecialistWorkspaceStateValue | undefined> {
-      const rows = await db
-        .select()
-        .from(specialistWorkspaces)
-        .where(eq(specialistWorkspaces.id, id))
-        .limit(1);
-      const snapshot = rows[0]?.snapshot;
-      if (snapshot === undefined) return undefined;
-      return SpecialistWorkspaceState.parse(snapshot);
+    async personalWorkspaceId(userId: string): Promise<string | undefined> {
+      return withUser(db, userId, async (tx) => {
+        const rows = await tx
+          .select({ id: workspaces.id })
+          .from(workspaceMembers)
+          .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+          .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.kind, "personal")))
+          .limit(1);
+        return rows[0]?.id;
+      });
+    },
+
+    async ensurePersonalWorkspace(userId: string, name = "Личный кабинет"): Promise<string> {
+      const existing = await this.personalWorkspaceId(userId);
+      if (existing !== undefined) return existing;
+      const workspaceId = globalThis.crypto.randomUUID();
+      const profileId = globalThis.crypto.randomUUID();
+      const now = new Date().toISOString();
+      await withWorkspace(db, workspaceId, async (tx) => {
+        await tx.insert(workspaces).values({
+          id: workspaceId,
+          kind: "personal",
+          name,
+          createdBy: userId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await tx.insert(workspaceMembers).values({
+          workspaceId,
+          userId,
+          role: "owner",
+          createdAt: now,
+        });
+        await tx.insert(workspaceProfiles).values({
+          id: profileId,
+          workspaceId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await tx.insert(workspaceSettings).values({
+          workspaceId,
+          activeProfileId: profileId,
+          updatedAt: now,
+        });
+      }, userId);
+      return workspaceId;
+    },
+
+    async listWorkspaceIds(): Promise<string[]> {
+      return withRlsBypass(db, async (tx) => {
+        const rows = await tx.select({ id: workspaces.id }).from(workspaces);
+        return rows.map((row) => row.id);
+      });
+    },
+
+    async listWatchingWorkspaceIds(): Promise<string[]> {
+      return withRlsBypass(db, async (tx) => {
+        const rows = await tx
+          .selectDistinct({ workspaceId: workspaceProfiles.workspaceId })
+          .from(workspaceProfiles)
+          .where(eq(workspaceProfiles.watchNewProcurements, true));
+        return rows.map((row) => row.workspaceId);
+      });
+    },
+
+    async loadWorkspace(workspaceId: string): Promise<SpecialistWorkspaceStateValue | undefined> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const settingRows = await tx
+          .select()
+          .from(workspaceSettings)
+          .where(eq(workspaceSettings.workspaceId, workspaceId))
+          .limit(1);
+        const profileRows = await tx
+          .select()
+          .from(workspaceProfiles)
+          .where(eq(workspaceProfiles.workspaceId, workspaceId));
+        if (profileRows.length === 0) return undefined;
+        const decisionRows = await tx
+          .select()
+          .from(workspaceDecisions)
+          .where(eq(workspaceDecisions.workspaceId, workspaceId));
+        const verdictRows = await tx
+          .select()
+          .from(workspaceReviewVerdicts)
+          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+        const inboxRows = await tx
+          .select()
+          .from(workspaceInbox)
+          .where(eq(workspaceInbox.workspaceId, workspaceId));
+        const caseRows = await tx
+          .select({
+            sourceProcurementId: workspaceProcurements.sourceProcurementId,
+            archived: workspaceProcurements.archived,
+          })
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        const profiles = profileRows.map((row) =>
+          SpecialistWorkingProfile.parse({
+            id: row.id,
+            name: row.name,
+            purpose: row.purpose,
+            description: row.description,
+            keywords: row.keywords,
+            excludeKeywords: row.excludeKeywords,
+            statuses: row.statuses,
+            excludeSingleSource: row.excludeSingleSource,
+            filters: row.filters,
+            watchNewProcurements: row.watchNewProcurements,
+            ...(row.lastDiscoveryAt === null ? {} : { lastDiscoveryAt: row.lastDiscoveryAt }),
+          }),
+        );
+        const active =
+          profiles.find((item) => item.id === settingRows[0]?.activeProfileId) ?? profiles[0];
+        if (active === undefined) return undefined;
+        return SpecialistWorkspaceState.parse({
+          profiles,
+          activeProfileId: active.id,
+          decisions: decisionRows.map((row) => ({
+            sourceProcurementId: row.sourceProcurementId,
+            kind: row.kind,
+            madeAt: row.madeAt,
+          })),
+          dismissedInboxIds: inboxRows
+            .filter((row) => row.state !== "open")
+            .map((row) => {
+              const parsed = InboxFixtureItem.safeParse(row.item);
+              return parsed.success ? parsed.data.change.id : row.eventKey;
+            }),
+          reviewedIrrelevant: verdictRows.map((row) => ({
+            profileId: row.profileId,
+            sourceProcurementId: row.sourceProcurementId,
+            decidedAt: row.decidedAt,
+          })),
+          archivedSourceIds: caseRows
+            .filter((row) => row.archived)
+            .map((row) => row.sourceProcurementId),
+        });
+      });
     },
 
     async saveWorkspace(
       snapshot: SpecialistWorkspaceStateValue,
-      id = DEFAULT_SPECIALIST_WORKSPACE_ID,
+      workspaceId: string,
     ): Promise<void> {
+      const state = SpecialistWorkspaceState.parse(snapshot);
       const now = new Date().toISOString();
-      await db
-        .insert(specialistWorkspaces)
-        .values({ id, snapshot, updatedAt: now })
-        .onConflictDoUpdate({
-          target: specialistWorkspaces.id,
-          set: { snapshot, updatedAt: now },
-        });
+      await withWorkspace(db, workspaceId, async (tx) => {
+        const existingProfiles = await tx
+          .select({ id: workspaceProfiles.id })
+          .from(workspaceProfiles)
+          .where(eq(workspaceProfiles.workspaceId, workspaceId));
+        const nextIds = new Set(state.profiles.map((item) => item.id));
+        const removed = existingProfiles
+          .map((row) => row.id)
+          .filter((id) => !nextIds.has(id));
+        if (removed.length > 0) {
+          await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
+        }
+        for (const profile of state.profiles) {
+          await tx
+            .insert(workspaceProfiles)
+            .values({
+              id: profile.id,
+              workspaceId,
+              name: profile.name,
+              purpose: profile.purpose,
+              description: profile.description,
+              keywords: profile.keywords,
+              excludeKeywords: profile.excludeKeywords,
+              statuses: profile.statuses,
+              excludeSingleSource: profile.excludeSingleSource,
+              filters: profile.filters,
+              watchNewProcurements: profile.watchNewProcurements,
+              lastDiscoveryAt: profile.lastDiscoveryAt,
+              updatedAt: now,
+            })
+            .onConflictDoUpdate({
+              target: workspaceProfiles.id,
+              set: {
+                name: profile.name,
+                purpose: profile.purpose,
+                description: profile.description,
+                keywords: profile.keywords,
+                excludeKeywords: profile.excludeKeywords,
+                statuses: profile.statuses,
+                excludeSingleSource: profile.excludeSingleSource,
+                filters: profile.filters,
+                watchNewProcurements: profile.watchNewProcurements,
+                lastDiscoveryAt: profile.lastDiscoveryAt,
+                updatedAt: now,
+              },
+            });
+        }
+        await tx
+          .insert(workspaceSettings)
+          .values({
+            workspaceId,
+            activeProfileId: state.activeProfileId,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: workspaceSettings.workspaceId,
+            set: { activeProfileId: state.activeProfileId, updatedAt: now },
+          });
+
+        await tx
+          .delete(workspaceReviewVerdicts)
+          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+        for (const verdict of state.reviewedIrrelevant) {
+          await tx.insert(workspaceReviewVerdicts).values({
+            workspaceId,
+            profileId: verdict.profileId,
+            sourceProcurementId: verdict.sourceProcurementId,
+            decidedAt: verdict.decidedAt,
+          });
+        }
+
+        const existingDecisions = await tx
+          .select()
+          .from(workspaceDecisions)
+          .where(eq(workspaceDecisions.workspaceId, workspaceId));
+        const seen = new Set(
+          existingDecisions.map(
+            (row) => `${row.sourceProcurementId}:${row.kind}:${row.madeAt}`,
+          ),
+        );
+        for (const decision of state.decisions) {
+          const key = `${decision.sourceProcurementId}:${decision.kind}:${decision.madeAt}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          await tx.insert(workspaceDecisions).values({
+            workspaceId,
+            sourceProcurementId: decision.sourceProcurementId,
+            kind: decision.kind,
+            madeAt: decision.madeAt,
+          });
+        }
+
+        const archived = new Set(state.archivedSourceIds);
+        const caseRows = await tx
+          .select({
+            id: workspaceProcurements.id,
+            sourceProcurementId: workspaceProcurements.sourceProcurementId,
+          })
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        for (const row of caseRows) {
+          await tx
+            .update(workspaceProcurements)
+            .set({ archived: archived.has(row.sourceProcurementId), updatedAt: now })
+            .where(eq(workspaceProcurements.id, row.id));
+        }
+
+        const dismissed = new Set(state.dismissedInboxIds);
+        const inboxRows = await tx
+          .select({ id: workspaceInbox.id, eventKey: workspaceInbox.eventKey, item: workspaceInbox.item })
+          .from(workspaceInbox)
+          .where(eq(workspaceInbox.workspaceId, workspaceId));
+        for (const row of inboxRows) {
+          const parsed = InboxFixtureItem.safeParse(row.item);
+          const changeId = parsed.success ? parsed.data.change.id : row.eventKey;
+          const closed = dismissed.has(changeId);
+          await tx
+            .update(workspaceInbox)
+            .set({
+              state: closed ? "dismissed" : "open",
+              resolvedAt: closed ? now : null,
+              updatedAt: now,
+            })
+            .where(eq(workspaceInbox.id, row.id));
+        }
+      });
     },
 
-    async loadCases(): Promise<SpecialistProcurementCardValue[]> {
-      const rows = await db.select().from(specialistCases);
-      const cards: SpecialistProcurementCardValue[] = [];
-      for (const row of rows) {
-        const parsed = SpecialistProcurementCard.safeParse(row.card);
-        if (parsed.success) cards.push(parsed.data);
-      }
-      return cards;
+    async loadCases(workspaceId: string): Promise<SpecialistProcurementCardValue[]> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        const cards: SpecialistProcurementCardValue[] = [];
+        for (const row of rows) {
+          const parsed = SpecialistProcurementCard.safeParse(row.card);
+          if (!parsed.success) continue;
+          cards.push(
+            SpecialistProcurementCard.parse({
+              ...parsed.data,
+              id: row.id,
+              canonicalProcurementId: row.procurementId,
+              archived: row.archived,
+              ...(row.triage === null ? {} : { triage: row.triage }),
+              ...(row.foundAs === null ? {} : { foundAs: row.foundAs }),
+              ...(row.lastSeenAt === null ? {} : { lastSeenAt: row.lastSeenAt }),
+            }),
+          );
+        }
+        return cards;
+      });
     },
 
-    async saveCases(cards: readonly SpecialistProcurementCardValue[]): Promise<void> {
+    async saveCases(
+      cards: readonly SpecialistProcurementCardValue[],
+      workspaceId: string,
+    ): Promise<void> {
       const failures: string[] = [];
       for (const card of uniqueBySource(cards)) {
         try {
-          await saveSpecialistCase(db, card);
+          await withWorkspace(db, workspaceId, async (tx) => {
+            await saveWorkspaceCase(tx, workspaceId, card);
+          });
         } catch (error) {
           failures.push(`${card.sourceProcurementId}: ${postgresErrorMessage(error)}`);
         }
@@ -78,42 +356,102 @@ export function createSpecialistStore(db: Database) {
       }
     },
 
-    /**
-     * Removes console cards and their inbox rows; the normalized procurements
-     * row stays as history.
-     */
-    async removeCases(ids: readonly string[]): Promise<void> {
+    async removeCases(ids: readonly string[], workspaceId: string): Promise<void> {
       if (ids.length === 0) return;
-      await db.delete(specialistInbox).where(inArray(specialistInbox.procurementId, [...ids]));
-      await db.delete(specialistCases).where(inArray(specialistCases.id, [...ids]));
+      await withWorkspace(db, workspaceId, async (tx) => {
+        await tx
+          .delete(workspaceInbox)
+          .where(
+            and(
+              eq(workspaceInbox.workspaceId, workspaceId),
+              inArray(workspaceInbox.workspaceProcurementId, [...ids]),
+            ),
+          );
+        await tx
+          .delete(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              inArray(workspaceProcurements.id, [...ids]),
+            ),
+          );
+      });
     },
 
-    async loadInbox(): Promise<InboxFixtureItemValue[]> {
-      const rows = await db
-        .select()
-        .from(specialistInbox)
-        .orderBy(specialistInbox.detectedAt, specialistInbox.id);
-      return rows.map((row) => InboxFixtureItem.parse(row.item));
+    async loadInbox(workspaceId: string): Promise<InboxFixtureItemValue[]> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceInbox)
+          .where(eq(workspaceInbox.workspaceId, workspaceId));
+        return rows
+          .sort((left, right) =>
+            left.detectedAt === right.detectedAt
+              ? left.id.localeCompare(right.id)
+              : left.detectedAt.localeCompare(right.detectedAt),
+          )
+          .map((row) => InboxFixtureItem.parse(row.item));
+      });
     },
 
-    async saveInbox(items: readonly InboxFixtureItemValue[]): Promise<void> {
+    async saveInbox(
+      items: readonly InboxFixtureItemValue[],
+      workspaceId: string,
+    ): Promise<void> {
       const now = new Date().toISOString();
-      for (const raw of items) {
-        const item = InboxFixtureItem.parse(raw);
-        await db
-          .insert(specialistInbox)
-          .values({
-            id: item.change.id,
-            procurementId: item.change.procurementId,
-            item,
-            detectedAt: item.change.detectedAt,
-            updatedAt: now,
+      await withWorkspace(db, workspaceId, async (tx) => {
+        const cases = await tx
+          .select({
+            id: workspaceProcurements.id,
+            sourceProcurementId: workspaceProcurements.sourceProcurementId,
           })
-          .onConflictDoUpdate({
-            target: specialistInbox.id,
-            set: { procurementId: item.change.procurementId, item, updatedAt: now },
-          });
-      }
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        const bySource = new Map(cases.map((row) => [row.sourceProcurementId, row.id]));
+        const byId = new Set(cases.map((row) => row.id));
+        for (const raw of items) {
+          const item = InboxFixtureItem.parse(jsonbSafe(raw));
+          const workspaceProcurementId =
+            byId.has(item.change.procurementId)
+              ? item.change.procurementId
+              : bySource.get(item.procurement.sourceProcurementId);
+          await tx
+            .insert(workspaceInbox)
+            .values({
+              id: globalThis.crypto.randomUUID(),
+              workspaceId,
+              workspaceProcurementId,
+              eventKey: item.change.id,
+              item,
+              state: "open",
+              detectedAt: item.change.detectedAt,
+              updatedAt: now,
+            })
+            .onConflictDoUpdate({
+              target: [workspaceInbox.workspaceId, workspaceInbox.eventKey],
+              set: {
+                workspaceProcurementId,
+                item,
+                updatedAt: now,
+              },
+            });
+        }
+      });
+    },
+
+    async hasDocumentHash(workspaceId: string, hash: string): Promise<boolean> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select({ hash: documentVersions.hash })
+          .from(workspaceProcurements)
+          .innerJoin(documents, eq(documents.procurementId, workspaceProcurements.procurementId))
+          .innerJoin(documentVersions, eq(documentVersions.documentId, documents.id))
+          .where(
+            and(eq(workspaceProcurements.workspaceId, workspaceId), eq(documentVersions.hash, hash)),
+          )
+          .limit(1);
+        return rows.length > 0;
+      });
     },
   };
 }
@@ -180,71 +518,83 @@ export function postgresErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function postgresConstraint(error: unknown): string | undefined {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth += 1) {
-    if (typeof current === "object") {
-      const record = current as { constraint?: unknown; cause?: unknown };
-      if (typeof record.constraint === "string") return record.constraint;
-      current = record.cause;
-      continue;
-    }
-    break;
-  }
-  return undefined;
-}
+type StoreTx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
-async function saveSpecialistCase(db: Database, card: SpecialistProcurementCardValue): Promise<void> {
+async function saveWorkspaceCase(
+  tx: StoreTx,
+  workspaceId: string,
+  card: SpecialistProcurementCardValue,
+): Promise<void> {
   const parsed = SpecialistProcurementCard.parse(jsonbSafe(card));
   const now = new Date().toISOString();
-  try {
-    await db
-      .insert(specialistCases)
-      .values({
-        id: parsed.id,
-        sourceProcurementId: parsed.sourceProcurementId,
-        card: parsed,
+  const canonicalId = await upsertCanonicalProcurement(tx, parsed, now);
+  const caseId = parsed.id;
+  const stored = SpecialistProcurementCard.parse({
+    ...parsed,
+    canonicalProcurementId: canonicalId,
+  });
+  await tx
+    .insert(workspaceProcurements)
+    .values({
+      id: caseId,
+      workspaceId,
+      procurementId: canonicalId,
+      sourceProcurementId: stored.sourceProcurementId,
+      triage: stored.triage,
+      foundAs: stored.foundAs,
+      archived: stored.archived,
+      lastSeenAt: stored.lastSeenAt,
+      watchSnapshot: stored.watchSnapshot,
+      card: stored,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [workspaceProcurements.workspaceId, workspaceProcurements.sourceProcurementId],
+      set: {
+        procurementId: canonicalId,
+        triage: stored.triage,
+        foundAs: stored.foundAs,
+        archived: stored.archived,
+        lastSeenAt: stored.lastSeenAt,
+        watchSnapshot: stored.watchSnapshot,
+        card: stored,
         updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: specialistCases.id,
-        set: {
-          sourceProcurementId: parsed.sourceProcurementId,
-          card: parsed,
-          updatedAt: now,
-        },
-      });
-  } catch (error) {
-    if (postgresConstraint(error) !== "specialist_cases_source_uq") throw error;
-    await db
-      .update(specialistCases)
-      .set({ card: parsed, updatedAt: now })
-      .where(eq(specialistCases.sourceProcurementId, parsed.sourceProcurementId));
+      },
+    });
+  await tx
+    .delete(workspaceProcurementProfiles)
+    .where(eq(workspaceProcurementProfiles.workspaceProcurementId, caseId));
+  for (const profileId of stored.profileIds) {
+    await tx
+      .insert(workspaceProcurementProfiles)
+      .values({ workspaceProcurementId: caseId, domainProfileId: profileId })
+      .onConflictDoNothing();
   }
   try {
-    await upsertProcurementHashes(db, parsed, now);
+    await upsertDocumentHashes(tx, canonicalId, stored, now);
   } catch {
     // Hash tables are derived; a check/enum failure there must not drop the console card.
   }
 }
 
-async function upsertProcurementHashes(
-  db: Database,
+async function upsertCanonicalProcurement(
+  tx: StoreTx,
   card: SpecialistProcurementCardValue,
   now: string,
-): Promise<void> {
+): Promise<string> {
   const sourceId = card.live ? "goszakupki_by" : "fixture";
   const hashed = card.documents.some((item) => item.hash !== undefined);
-  const procurementRows = await db
+  const status = card.status;
+  const rows = await tx
     .insert(procurements)
     .values({
-      id: card.id,
+      ...(card.canonicalProcurementId === undefined ? {} : { id: card.canonicalProcurementId }),
       sourceId,
       sourceRecordId: card.sourceProcurementId,
       canonicalUrl: card.url,
       title: card.title,
       kind: "other",
-      status: card.status,
+      status,
       sourceStatus: card.statusLabel,
       stage: hashed ? "documents_downloaded" : "discovered",
       lastSeenAt: now,
@@ -255,7 +605,7 @@ async function upsertProcurementHashes(
       set: {
         canonicalUrl: card.url,
         title: card.title,
-        status: card.status,
+        status,
         sourceStatus: card.statusLabel,
         stage: hashed ? "documents_downloaded" : "discovered",
         lastSeenAt: now,
@@ -263,11 +613,19 @@ async function upsertProcurementHashes(
       },
     })
     .returning({ id: procurements.id });
-  const procurementId = procurementRows[0]?.id;
-  if (procurementId === undefined) return;
+  const id = rows[0]?.id;
+  if (id === undefined) throw new Error("canonical procurement upsert returned no row");
+  return id;
+}
 
+async function upsertDocumentHashes(
+  tx: StoreTx,
+  procurementId: string,
+  card: SpecialistProcurementCardValue,
+  now: string,
+): Promise<void> {
   for (const document of card.documents) {
-    await upsertDocumentHash(db, procurementId, document, now);
+    await upsertDocumentHash(tx, procurementId, document, now);
   }
 }
 
@@ -277,21 +635,21 @@ function documentMimeType(document: SpecialistCaseDocument): string {
 }
 
 async function upsertDocumentHash(
-  db: Database,
+  tx: StoreTx,
   procurementId: string,
   document: SpecialistCaseDocument,
   now: string,
 ): Promise<void> {
   const hash = document.hash;
   if (hash === undefined) return;
-  const existing = await db
+  const existing = await tx
     .select({ id: documents.id })
     .from(documents)
     .where(and(eq(documents.procurementId, procurementId), eq(documents.sourceUrl, document.sourceUrl)))
     .limit(1);
   let documentId = existing[0]?.id;
   if (documentId === undefined) {
-    const inserted = await db
+    const inserted = await tx
       .insert(documents)
       .values({
         procurementId,
@@ -308,12 +666,12 @@ async function upsertDocumentHash(
   }
   if (documentId === undefined) return;
 
-  const versions = await db
+  const versions = await tx
     .select({ version: documentVersions.version, hash: documentVersions.hash })
     .from(documentVersions)
     .where(eq(documentVersions.documentId, documentId));
   if (versions.some((row) => row.hash === hash)) {
-    await db
+    await tx
       .update(documents)
       .set({
         name: document.name,
@@ -327,7 +685,7 @@ async function upsertDocumentHash(
   }
 
   const nextVersion = versions.reduce((max, row) => Math.max(max, row.version), 0) + 1;
-  const inserted = await db
+  const inserted = await tx
     .insert(documentVersions)
     .values({
       documentId,
@@ -342,7 +700,7 @@ async function upsertDocumentHash(
     })
     .returning({ id: documentVersions.id });
   const versionId = inserted[0]?.id;
-  await db
+  await tx
     .update(documents)
     .set({
       name: document.name,
@@ -358,4 +716,15 @@ async function upsertDocumentHash(
 function pgInt(value: number | undefined): number | undefined {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   return Math.min(Math.max(Math.trunc(value), 0), 2_147_483_647);
+}
+
+export function latestTriage(
+  decisions: readonly { sourceProcurementId: string; kind: SpecialistTriageKind }[],
+  sourceProcurementId: string,
+): SpecialistTriageKind | undefined {
+  for (let index = decisions.length - 1; index >= 0; index -= 1) {
+    const decision = decisions[index];
+    if (decision?.sourceProcurementId === sourceProcurementId) return decision.kind;
+  }
+  return undefined;
 }

@@ -1,7 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SourceId } from "@procurement/contracts";
-import { SpecialistCatalog } from "@procurement/domain";
 import { createLogger } from "@procurement/observability";
 import { buildSpecialistApi } from "./app.js";
 import { createSmtpMailPort } from "./auth/mail.js";
@@ -11,7 +10,6 @@ import { discoveryTransport } from "./discovery-transport.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadDotEnv } from "./load-env.js";
-import { loadFixtureCatalog } from "./load-fixture.js";
 import { createBlobStoreFromEnv, objectStoreKind } from "./object-store.js";
 import { recordJournal } from "./admin/journal.js";
 import { openSpecialistPersistence } from "./persist.js";
@@ -30,7 +28,6 @@ async function main(): Promise<void> {
     sink: (record) => process.stderr.write(`${JSON.stringify(record)}\n`),
   });
   const mode = process.env["PROCUREMENT_SOURCE_MODE"] === "live" ? "live" : "fixture";
-  const catalog = mode === "live" ? new SpecialistCatalog() : await loadFixtureCatalog();
   const blobDirectory = resolveBlobDirectory(process.env["DOCUMENT_BLOB_DIR"]);
   const blobStore = createBlobStoreFromEnv(process.env, blobDirectory);
   const ingestProgress = createIngestProgressHub();
@@ -39,8 +36,6 @@ async function main(): Promise<void> {
     databaseUrl: process.env["DATABASE_URL"],
     logger,
   });
-  await persistence.hydrateCatalog(catalog);
-  const workspace = persistence.workspace;
   const mcp =
     mode === "live"
       ? await connectProcurementMcp({ mode: "live", logger, blobDirectory })
@@ -76,11 +71,14 @@ async function main(): Promise<void> {
   const bootstrapEmail = process.env["AUTH_BOOTSTRAP_EMAIL"]?.trim() ?? "";
   const bootstrapPassword = process.env["AUTH_BOOTSTRAP_PASSWORD"] ?? "";
   if (bootstrapEmail.length > 0 && bootstrapPassword.length >= 8) {
-    await persistence.authDirectory.bootstrapAdmin(
+    const admin = await persistence.authDirectory.bootstrapAdmin(
       bootstrapEmail,
       bootstrapPassword,
       "Администратор",
     );
+    if (admin !== undefined) {
+      await persistence.cabinets.ensurePersonalWorkspace(admin.id, admin.name);
+    }
   }
   const authMail = createSmtpMailPort(process.env);
   const watchLimitRaw = process.env["SPECIALIST_WATCH_LIMIT"];
@@ -101,15 +99,10 @@ async function main(): Promise<void> {
     ),
   });
   const app = await buildSpecialistApi({
-    catalog,
-    workspace,
     logger,
     blobDirectory,
     blobStore,
-    persistWorkspace: persistence.persistWorkspace,
-    persistCases: persistence.persistCases,
-    persistInbox: persistence.persistInbox,
-    removeCases: persistence.removeCases,
+    cabinets: persistence.cabinets,
     journal: persistence.journal,
     ingestProgress,
     discoveryController,
@@ -147,7 +140,7 @@ async function main(): Promise<void> {
     postgres: persistence.postgres,
     objectStore: objectStoreKind(process.env),
     discovery: transport.kind,
-    watchingCount: workspace.profiles().filter((item) => item.watchNewProcurements).length,
+    watchingCount: (await persistence.cabinets.listIds()).length,
   });
 
   let redisRepeat: Awaited<ReturnType<typeof startDiscoveryRepeat>> | undefined;

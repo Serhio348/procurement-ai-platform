@@ -221,6 +221,7 @@ describe("specialist API", () => {
       expect.arrayContaining([
         expect.objectContaining({ sourceProcurementId: "auction/persist-1" }),
       ]),
+      expect.any(String),
     );
 
     await app.close();

@@ -76,6 +76,7 @@ function ConsoleRoot() {
 }
 
 function LiveConsole() {
+  const { user } = useAuthSession();
   const [data, setData] = useState<
     | {
         inbox: readonly SpecialistInboxEntry[];
@@ -115,6 +116,8 @@ function LiveConsole() {
 
   return (
     <SpecialistApp
+      key={user?.id ?? "anon"}
+      {...(user?.id === undefined ? {} : { storageScope: user.id })}
       inbox={data.inbox}
       procurements={data.procurements}
       profiles={data.profiles}

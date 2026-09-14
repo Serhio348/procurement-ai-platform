@@ -124,6 +124,13 @@ integration("PostgreSQL migrations and invariants", () => {
   it("stores specialist cases and document hashes without file bytes", async () => {
     const store = createSpecialistStore(db);
     const hash = "b".repeat(64);
+    const userId = "00000000-0000-4000-8000-000000000910";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values (${userId}, 'persist@test.local', 'Persist', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceId = await store.ensurePersonalWorkspace(userId, "Persist");
     const card = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000901",
       title: "Кабель для persist",
@@ -164,8 +171,8 @@ integration("PostgreSQL migrations and invariants", () => {
       dismissedInboxIds: [],
       reviewedIrrelevant: [],
       archivedSourceIds: [],
-    });
-    await store.saveCases([card]);
+    }, workspaceId);
+    await store.saveCases([card], workspaceId);
     await store.saveInbox([
       InboxFixtureItem.parse({
         procurement: {
@@ -184,13 +191,13 @@ integration("PostgreSQL migrations and invariants", () => {
           urgent: true,
         },
       }),
-    ]);
+    ], workspaceId);
 
-    const loadedWorkspace = await store.loadWorkspace();
-    const loadedCases = await store.loadCases();
-    const loadedInbox = await store.loadInbox();
-    await store.removeCases([card.id]);
-    const inboxAfterRemove = await store.loadInbox();
+    const loadedWorkspace = await store.loadWorkspace(workspaceId);
+    const loadedCases = await store.loadCases(workspaceId);
+    const loadedInbox = await store.loadInbox(workspaceId);
+    await store.removeCases([card.id], workspaceId);
+    const inboxAfterRemove = await store.loadInbox(workspaceId);
     const versions = await db
       .select()
       .from(documentVersions)
@@ -206,6 +213,53 @@ integration("PostgreSQL migrations and invariants", () => {
     // Removing the case takes its inbox row with it: the inbox never points
     // at a card that no longer exists.
     expect(inboxAfterRemove.some((item) => item.change.procurementId === card.id)).toBe(false);
+  });
+
+  it("keeps two users' cases isolated while sharing one canonical procurement", async () => {
+    const store = createSpecialistStore(db);
+    const userA = "00000000-0000-4000-8000-000000000911";
+    const userB = "00000000-0000-4000-8000-000000000912";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values
+        (${userA}, 'a-iso@test.local', 'A', 'x', 'specialist', 'active'),
+        (${userB}, 'b-iso@test.local', 'B', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceA = await store.ensurePersonalWorkspace(userA, "A");
+    const workspaceB = await store.ensurePersonalWorkspace(userB, "B");
+    const source = "auction/iso-shared";
+    const cardA = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000921",
+      title: "Общая закупка",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/iso",
+      sourceProcurementId: source,
+      live: true,
+      triage: "monitor",
+    });
+    const cardB = SpecialistProcurementCard.parse({
+      ...cardA,
+      id: "00000000-0000-4000-8000-000000000922",
+      triage: "participate",
+    });
+    await store.saveCases([cardA], workspaceA);
+    await store.saveCases([cardB], workspaceB);
+    const loadedA = await store.loadCases(workspaceA);
+    const loadedB = await store.loadCases(workspaceB);
+    const canonical = await db
+      .select({ id: procurements.id })
+      .from(procurements)
+      .where(sql`${procurements.sourceRecordId} = ${source}`);
+
+    expect(canonical).toHaveLength(1);
+    expect(loadedA[0]?.triage).toBe("monitor");
+    expect(loadedB[0]?.triage).toBe("participate");
+    expect(loadedA[0]?.id).not.toBe(loadedB[0]?.id);
+    expect(loadedA[0]?.canonicalProcurementId).toBe(canonical[0]?.id);
+    expect(loadedB[0]?.canonicalProcurementId).toBe(canonical[0]?.id);
+    expect(await store.hasDocumentHash(workspaceB, "c".repeat(64))).toBe(false);
   });
 
   it("rejects a fact that is committed without evidence", async () => {

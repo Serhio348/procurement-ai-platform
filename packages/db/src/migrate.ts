@@ -12,13 +12,15 @@ export async function migrateDatabase(connectionString: string): Promise<void> {
       select tablename
       from pg_tables
       where schemaname = 'public'
-        and tablename in ('specialist_workspaces', 'specialist_cases')
+        and tablename in ('specialist_workspaces', 'specialist_cases', 'workspaces')
     `);
-    if (tables.rows.length < 2) {
+    if (tables.rows.length < 3) {
       throw new Error(
-        "specialist_workspaces/specialist_cases missing after migrate; journal timestamps may have skipped 0001",
+        "workspaces or specialist console tables missing after migrate; journal timestamps may have skipped a file",
       );
     }
+    const { applyPersonalWorkspaceBackfill } = await import("./workspace-backfill.js");
+    await applyPersonalWorkspaceBackfill(db);
   } finally {
     await pool.end();
   }

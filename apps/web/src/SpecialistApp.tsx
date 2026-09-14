@@ -46,6 +46,8 @@ export interface SpecialistAppProps {
     id: string,
     action: SpecialistInboxAction,
   ) => Promise<SpecialistInboxResolveResponse>;
+  /** Namespaces last-search ids so two users on one browser do not share them. */
+  storageScope?: string;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -84,7 +86,9 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   // pane is unmounted on every tab switch and the whole app on reload; without
   // this it would come back showing the whole catalog (old completed cases)
   // instead of what was just found. Kept in localStorage so a refresh keeps it.
-  const [searchIdsByProfile, setSearchIdsByProfile] = useState(readStoredSearchIds);
+  const [searchIdsByProfile, setSearchIdsByProfile] = useState(() =>
+    readStoredSearchIds(props.storageScope),
+  );
   const searchIds = searchIdsByProfile[activeProfileId];
 
   const search =
@@ -105,7 +109,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                   ? ids
                   : [...previous, ...ids.filter((id) => !previous.includes(id))],
             };
-            writeStoredSearchIds(next);
+            writeStoredSearchIds(next, props.storageScope);
             return next;
           });
           if (refreshInbox !== undefined) {
@@ -401,12 +405,18 @@ function ProfileEditorRoute({
 
 export const SEARCH_IDS_STORAGE_KEY = "procurement.searchIdsByProfile";
 
+export function searchIdsStorageKey(scope?: string): string {
+  return scope === undefined || scope.length === 0
+    ? SEARCH_IDS_STORAGE_KEY
+    : `${SEARCH_IDS_STORAGE_KEY}.${scope}`;
+}
+
 type SearchIdsByProfile = Readonly<Record<string, readonly string[]>>;
 
 /** Storage is best-effort: a missing or corrupt entry just means "no search yet". */
-export function readStoredSearchIds(): SearchIdsByProfile {
+export function readStoredSearchIds(scope?: string): SearchIdsByProfile {
   try {
-    const raw = globalThis.localStorage?.getItem(SEARCH_IDS_STORAGE_KEY);
+    const raw = globalThis.localStorage?.getItem(searchIdsStorageKey(scope));
     if (raw === null || raw === undefined) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
@@ -422,9 +432,9 @@ export function readStoredSearchIds(): SearchIdsByProfile {
   }
 }
 
-export function writeStoredSearchIds(value: SearchIdsByProfile): void {
+export function writeStoredSearchIds(value: SearchIdsByProfile, scope?: string): void {
   try {
-    globalThis.localStorage?.setItem(SEARCH_IDS_STORAGE_KEY, JSON.stringify(value));
+    globalThis.localStorage?.setItem(searchIdsStorageKey(scope), JSON.stringify(value));
   } catch {
     // Quota or privacy mode: the in-memory state still works for this session.
   }

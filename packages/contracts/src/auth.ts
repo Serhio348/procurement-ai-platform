@@ -100,3 +100,21 @@ export const AdminJournalListResponse = z.object({
   errorCount: z.number().int().nonnegative(),
 });
 export type AdminJournalListResponse = z.infer<typeof AdminJournalListResponse>;
+
+export const WorkspaceKind = z.enum(["personal", "team"]);
+export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
+
+export const WorkspaceMemberRole = z.enum(["owner", "member", "viewer"]);
+export type WorkspaceMemberRole = z.infer<typeof WorkspaceMemberRole>;
+
+/**
+ * Resolved after the session cookie. `workspaceId` is never taken from the
+ * client in personal mode — only from membership.
+ */
+export const RequestPrincipal = z.object({
+  userId: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  role: SpecialistRole.nullable(),
+  accessStatus: AccessStatus,
+});
+export type RequestPrincipal = z.infer<typeof RequestPrincipal>;

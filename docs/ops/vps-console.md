@@ -348,6 +348,11 @@ npm run db:migrate
 systemctl restart procurement-api
 ```
 
+Этап 42 (`0007_personal_workspaces`) клонирует прежний общий кабинет
+каждому активному пользователю. Перед `db:migrate` сделайте
+`pg_dump`. Blob в MinIO не копируется. Новые регистрации получают
+пустой личный кабинет.
+
 Статику nginx подхватит из `apps/web/dist` сразу после `build` web.
 Если страница «старая» — жёсткое обновление в браузере (Ctrl+F5).
 

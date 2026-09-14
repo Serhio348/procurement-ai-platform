@@ -123,11 +123,15 @@ export const domainProfiles = pgTable(
     archived: boolean("archived").notNull().default(false),
     priority: integer("priority").notNull().default(50),
     createdBy: uuid("created_by"),
+    workspaceId: uuid("workspace_id"),
+    searchConfig: jsonb("search_config").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("domain_profiles_company_slug_uq").on(table.companyId, table.slug),
+    index("domain_profiles_workspace_idx").on(table.workspaceId),
+    uniqueIndex("domain_profiles_workspace_slug_uq").on(table.workspaceId, table.slug),
     index("domain_profiles_active_idx").on(table.companyId, table.enabled, table.archived),
     check("domain_profiles_priority_range", sql`${table.priority} between 0 and 100`),
     check("domain_profiles_min_relevance_range", sql`${table.minRelevance} between 0 and 1`),
@@ -403,9 +407,11 @@ export const facts = pgTable(
     confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
     extractedBy: varchar("extracted_by", { length: 128 }).notNull(),
     extractedAt: timestamptz("extracted_at").notNull(),
+    workspaceId: uuid("workspace_id"),
   },
   (table) => [
     index("facts_procurement_key_idx").on(table.procurementId, table.key),
+    index("facts_workspace_idx").on(table.workspaceId),
     check("facts_confidence_range", sql`${table.confidence} between 0 and 1`),
   ],
 );
@@ -423,18 +429,23 @@ export const factEvidence = pgTable(
   (table) => [primaryKey({ columns: [table.factId, table.evidenceId] })],
 );
 
-export const risks = pgTable("risks", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  procurementId: uuid("procurement_id")
-    .notNull()
-    .references(() => procurements.id, { onDelete: "cascade" }),
-  type: varchar("type", { length: 128 }).notNull(),
-  severity: varchar("severity", { length: 16 }).notNull(),
-  description: text("description").notNull(),
-  confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
-  detectedBy: varchar("detected_by", { length: 128 }).notNull(),
-  detectedAt: timestamptz("detected_at").notNull(),
-});
+export const risks = pgTable(
+  "risks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    procurementId: uuid("procurement_id")
+      .notNull()
+      .references(() => procurements.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 128 }).notNull(),
+    severity: varchar("severity", { length: 16 }).notNull(),
+    description: text("description").notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
+    detectedBy: varchar("detected_by", { length: 128 }).notNull(),
+    detectedAt: timestamptz("detected_at").notNull(),
+    workspaceId: uuid("workspace_id"),
+  },
+  (table) => [index("risks_workspace_idx").on(table.workspaceId)],
+);
 
 export const riskFacts = pgTable(
   "risk_facts",
@@ -487,8 +498,12 @@ export const scoreSnapshots = pgTable(
     confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
     explanation: jsonb("explanation").$type<string[]>().notNull().default([]),
     computedAt: timestamptz("computed_at").notNull(),
+    workspaceId: uuid("workspace_id"),
   },
-  (table) => [index("score_snapshots_procurement_computed_idx").on(table.procurementId, table.computedAt)],
+  (table) => [
+    index("score_snapshots_procurement_computed_idx").on(table.procurementId, table.computedAt),
+    index("score_snapshots_workspace_idx").on(table.workspaceId),
+  ],
 );
 
 export const monitoringRules = pgTable(
@@ -507,9 +522,11 @@ export const monitoringRules = pgTable(
     urgent: boolean("urgent").notNull().default(false),
     active: boolean("active").notNull().default(true),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
+    workspaceId: uuid("workspace_id"),
   },
   (table) => [
     index("monitoring_rules_active_idx").on(table.active),
+    index("monitoring_rules_workspace_idx").on(table.workspaceId),
     check(
       "monitoring_rules_owner_present",
       sql`${table.domainProfileId} is not null or ${table.procurementId} is not null`,
@@ -548,10 +565,12 @@ export const tasks = pgTable(
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
     lastRunAt: timestamptz("last_run_at"),
     nextRunAt: timestamptz("next_run_at"),
+    workspaceId: uuid("workspace_id"),
   },
   (table) => [
     index("tasks_status_type_idx").on(table.status, table.type),
     index("tasks_next_run_idx").on(table.nextRunAt),
+    index("tasks_workspace_idx").on(table.workspaceId),
     check("tasks_priority_range", sql`${table.priority} between 0 and 100`),
   ],
 );
@@ -624,10 +643,12 @@ export const jobRuns = pgTable(
     finishedAt: timestamptz("finished_at"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+    workspaceId: uuid("workspace_id"),
   },
   (table) => [
     uniqueIndex("job_runs_idempotency_key_uq").on(table.idempotencyKey),
     index("job_runs_recovery_idx").on(table.status, table.updatedAt),
+    index("job_runs_workspace_idx").on(table.workspaceId),
     check("job_runs_attempt_nonnegative", sql`${table.attempt} >= 0`),
   ],
 );
@@ -649,8 +670,12 @@ export const agentRuns = pgTable(
     startedAt: timestamptz("started_at").notNull(),
     finishedAt: timestamptz("finished_at"),
     durationMs: integer("duration_ms"),
+    workspaceId: uuid("workspace_id"),
   },
-  (table) => [index("agent_runs_request_idx").on(table.requestId)],
+  (table) => [
+    index("agent_runs_request_idx").on(table.requestId),
+    index("agent_runs_workspace_idx").on(table.workspaceId),
+  ],
 );
 
 export const agentToolCalls = pgTable("agent_tool_calls", {
@@ -682,10 +707,12 @@ export const notificationOutbox = pgTable(
     lastError: text("last_error"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+    workspaceId: uuid("workspace_id"),
   },
   (table) => [
     uniqueIndex("notification_outbox_dedupe_uq").on(table.dedupeKey),
     index("notification_outbox_dispatch_idx").on(table.status, table.availableAt),
+    index("notification_outbox_workspace_idx").on(table.workspaceId),
   ],
 );
 
@@ -813,3 +840,189 @@ export const authPasswordResets = pgTable(
   },
   (table) => [uniqueIndex("auth_password_resets_token_uq").on(table.tokenHash)],
 );
+
+export const workspaceKind = pgEnum("workspace_kind", ["personal", "team"]);
+export const workspaceMemberRole = pgEnum("workspace_member_role", ["owner", "member", "viewer"]);
+export const workspaceInboxState = pgEnum("workspace_inbox_state", ["open", "resolved", "dismissed"]);
+export const workspaceTriageKind = pgEnum("workspace_triage_kind", ["monitor", "participate", "reject"]);
+export const workspaceFoundAs = pgEnum("workspace_found_as", ["match", "review"]);
+
+export const workspaces = pgTable(
+  "workspaces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: workspaceKind("kind").notNull().default("personal"),
+    name: varchar("name", { length: 200 }).notNull(),
+    createdBy: uuid("created_by").references(() => authUsers.id, { onDelete: "set null" }),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("workspaces_created_by_idx").on(table.createdBy)],
+);
+
+export const workspaceMembers = pgTable(
+  "workspace_members",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    role: workspaceMemberRole("role").notNull().default("owner"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.userId] }),
+    index("workspace_members_user_idx").on(table.userId),
+  ],
+);
+
+export const workspaceProfiles = pgTable(
+  "workspace_profiles",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull().default(""),
+    purpose: text("purpose").notNull().default(""),
+    description: text("description").notNull().default(""),
+    keywords: jsonb("keywords").$type<string[]>().notNull().default([]),
+    excludeKeywords: jsonb("exclude_keywords").$type<string[]>().notNull().default([]),
+    statuses: jsonb("statuses").$type<string[]>().notNull().default(["accepting_bids"]),
+    excludeSingleSource: boolean("exclude_single_source").notNull().default(false),
+    filters: jsonb("filters").$type<Record<string, unknown>>().notNull().default({}),
+    watchNewProcurements: boolean("watch_new_procurements").notNull().default(false),
+    lastDiscoveryAt: timestamptz("last_discovery_at"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("workspace_profiles_workspace_idx").on(table.workspaceId)],
+);
+
+export const workspaceSettings = pgTable("workspace_settings", {
+  workspaceId: uuid("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  activeProfileId: uuid("active_profile_id").references(() => workspaceProfiles.id, {
+    onDelete: "set null",
+  }),
+  settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+});
+
+export const workspaceProcurements = pgTable(
+  "workspace_procurements",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    procurementId: uuid("procurement_id")
+      .notNull()
+      .references(() => procurements.id, { onDelete: "restrict" }),
+    sourceProcurementId: varchar("source_procurement_id", { length: 256 }).notNull(),
+    triage: workspaceTriageKind("triage"),
+    foundAs: workspaceFoundAs("found_as"),
+    archived: boolean("archived").notNull().default(false),
+    lastSeenAt: timestamptz("last_seen_at"),
+    watchSnapshot: jsonb("watch_snapshot"),
+    card: jsonb("card").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_procurements_workspace_proc_uq").on(
+      table.workspaceId,
+      table.procurementId,
+    ),
+    uniqueIndex("workspace_procurements_workspace_source_uq").on(
+      table.workspaceId,
+      table.sourceProcurementId,
+    ),
+    index("workspace_procurements_triage_idx").on(table.workspaceId, table.triage, table.archived),
+    index("workspace_procurements_seen_idx").on(table.workspaceId, table.lastSeenAt),
+  ],
+);
+
+export const workspaceProcurementProfiles = pgTable(
+  "workspace_procurement_profiles",
+  {
+    workspaceProcurementId: uuid("workspace_procurement_id")
+      .notNull()
+      .references(() => workspaceProcurements.id, { onDelete: "cascade" }),
+    domainProfileId: uuid("domain_profile_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceProcurementId, table.domainProfileId] })],
+);
+
+export const workspaceReviewVerdicts = pgTable(
+  "workspace_review_verdicts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").notNull(),
+    sourceProcurementId: varchar("source_procurement_id", { length: 256 }).notNull(),
+    decidedAt: timestamptz("decided_at").notNull(),
+    expiresAt: timestamptz("expires_at"),
+  },
+  (table) => [
+    uniqueIndex("workspace_review_verdicts_uq").on(
+      table.workspaceId,
+      table.profileId,
+      table.sourceProcurementId,
+    ),
+  ],
+);
+
+export const workspaceInbox = pgTable(
+  "workspace_inbox",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    workspaceProcurementId: uuid("workspace_procurement_id").references(
+      () => workspaceProcurements.id,
+      { onDelete: "cascade" },
+    ),
+    eventKey: varchar("event_key", { length: 255 }).notNull(),
+    item: jsonb("item").notNull(),
+    state: workspaceInboxState("state").notNull().default("open"),
+    detectedAt: timestamptz("detected_at").notNull(),
+    resolvedAt: timestamptz("resolved_at"),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_inbox_event_uq").on(table.workspaceId, table.eventKey),
+    index("workspace_inbox_case_idx").on(table.workspaceProcurementId),
+  ],
+);
+
+export const workspaceDecisions = pgTable(
+  "workspace_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    workspaceProcurementId: uuid("workspace_procurement_id").references(
+      () => workspaceProcurements.id,
+      { onDelete: "set null" },
+    ),
+    sourceProcurementId: varchar("source_procurement_id", { length: 256 }).notNull(),
+    madeBy: uuid("made_by").references(() => authUsers.id, { onDelete: "set null" }),
+    kind: workspaceTriageKind("kind").notNull(),
+    comment: text("comment"),
+    madeAt: timestamptz("made_at").notNull(),
+  },
+  (table) => [index("workspace_decisions_workspace_idx").on(table.workspaceId, table.madeAt)],
+);
+
+export const workspaceBackfillRuns = pgTable("workspace_backfill_runs", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  appliedAt: timestamptz("applied_at").notNull().defaultNow(),
+});

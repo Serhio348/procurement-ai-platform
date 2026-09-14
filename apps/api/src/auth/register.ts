@@ -8,8 +8,10 @@ import {
   AuthSessionResponse,
   AuthSignUpWrite,
   type AuthSessionUser,
+  type RequestPrincipal,
   type SpecialistRole,
 } from "@procurement/contracts";
+import { TEST_WORKSPACE_ID, type SpecialistCabinet } from "../cabinets.js";
 import { listedJournal, recordJournal, type AdminJournalPort } from "../admin/journal.js";
 import { formatPresenceDuration } from "../admin/presence.js";
 import type { ClosedAuthSession } from "./directory.js";
@@ -42,6 +44,15 @@ export interface RegisterAuthOptions {
   publicUrl?: string;
   internalApiToken?: string;
   journal?: AdminJournalPort;
+  provisionWorkspace?: (user: AuthRecord) => Promise<string>;
+  workspaceIdFor?: (userId: string) => Promise<string | undefined>;
+}
+
+declare module "fastify" {
+  interface FastifyRequest {
+    principal?: RequestPrincipal;
+    cabinet?: SpecialistCabinet;
+  }
 }
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -98,12 +109,21 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
       if (headerValue(request.headers["x-internal-token"]) !== internalToken) {
         return reply.code(401).send({ error: "unauthorized" });
       }
+      const workspaceId =
+        headerValue(request.headers["x-workspace-id"]) ?? TEST_WORKSPACE_ID;
+      request.principal = {
+        userId: TEST_SPECIALIST_SESSION.id,
+        workspaceId,
+        role: "specialist",
+        accessStatus: "active",
+      };
       return;
     }
     const user = await resolveUser(request);
     if (user === undefined) {
       return reply.code(401).send({ error: "unauthorized" });
     }
+    request.principal = await toPrincipal(user, options, directory === undefined);
     const capability = consoleCapability(user);
     if (path.startsWith("/api/admin")) {
       if (!mayAdministerUsers(capability)) {
@@ -135,6 +155,9 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     }
     try {
       const user = await directory.signUp(parsed.data);
+      if (options.provisionWorkspace !== undefined) {
+        await options.provisionWorkspace(user);
+      }
       await setSession(reply, user);
       await recordJournal(journal, {
         kind: "access",
@@ -368,6 +391,43 @@ function mapAuthError(reply: FastifyReply, error: unknown) {
     return reply.code(409).send({ error: "last_admin" });
   }
   throw error;
+}
+
+async function toPrincipal(
+  user: AuthRecord,
+  options: RegisterAuthOptions,
+  testSession: boolean,
+): Promise<RequestPrincipal> {
+  if (testSession) {
+    return {
+      userId: user.id,
+      workspaceId: TEST_WORKSPACE_ID,
+      role: user.role,
+      accessStatus: user.accessStatus,
+    };
+  }
+  const workspaceId =
+    options.workspaceIdFor === undefined
+      ? undefined
+      : await options.workspaceIdFor(user.id);
+  if (workspaceId !== undefined) {
+    return {
+      userId: user.id,
+      workspaceId,
+      role: user.role,
+      accessStatus: user.accessStatus,
+    };
+  }
+  const created =
+    options.provisionWorkspace === undefined
+      ? TEST_WORKSPACE_ID
+      : await options.provisionWorkspace(user);
+  return {
+    userId: user.id,
+    workspaceId: created,
+    role: user.role,
+    accessStatus: user.accessStatus,
+  };
 }
 
 function requestPath(url: string): string {

@@ -12,6 +12,12 @@ export type CompanyId = z.infer<typeof CompanyId>;
 export const UserId = z.string().uuid().brand<"UserId">();
 export type UserId = z.infer<typeof UserId>;
 
+export const WorkspaceId = z.string().uuid().brand<"WorkspaceId">();
+export type WorkspaceId = z.infer<typeof WorkspaceId>;
+
+export const WorkspaceProcurementId = z.string().uuid().brand<"WorkspaceProcurementId">();
+export type WorkspaceProcurementId = z.infer<typeof WorkspaceProcurementId>;
+
 export const DomainProfileId = z.string().uuid().brand<"DomainProfileId">();
 export type DomainProfileId = z.infer<typeof DomainProfileId>;
 

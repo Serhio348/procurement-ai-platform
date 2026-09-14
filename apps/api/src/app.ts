@@ -77,6 +77,13 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 import type { SpecialistReviewPort } from "./search-review.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  createMemoryCabinetRegistry,
+  TEST_WORKSPACE_ID,
+  type CabinetRegistry,
+  type SpecialistCabinet,
+} from "./cabinets.js";
 
 export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /**
@@ -114,10 +121,14 @@ export interface BuildApiOptions {
   watchLimit?: number;
   documentIngest?: SpecialistDocumentIngestPort;
   liveProcurementsOnly?: boolean;
-  persistWorkspace?: (state: SpecialistWorkspaceState) => Promise<void>;
-  persistCases?: (cards: readonly SpecialistProcurementCardValue[]) => Promise<void>;
-  persistInbox?: (items: readonly InboxFixtureItemValue[]) => Promise<void>;
-  removeCases?: (ids: readonly string[]) => Promise<void>;
+  persistWorkspace?: (state: SpecialistWorkspaceState, workspaceId?: string) => Promise<void>;
+  persistCases?: (
+    cards: readonly SpecialistProcurementCardValue[],
+    workspaceId?: string,
+  ) => Promise<void>;
+  persistInbox?: (items: readonly InboxFixtureItemValue[], workspaceId?: string) => Promise<void>;
+  removeCases?: (ids: readonly string[], workspaceId?: string) => Promise<void>;
+  cabinets?: CabinetRegistry;
   /** How long an undecided live case survives without a search returning it. */
   caseMaxAgeMs?: number;
   blobStore?: BlobStore;
@@ -133,9 +144,23 @@ export interface BuildApiOptions {
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
-  const catalog = options.catalog ?? new SpecialistCatalog();
-  const workspace = options.workspace ?? new SpecialistWorkspace();
-  catalog.dismissMany(workspace.dismissedInboxIds());
+  const defaultCabinet: SpecialistCabinet = {
+    workspaceId: TEST_WORKSPACE_ID,
+    catalog: options.catalog ?? new SpecialistCatalog(),
+    workspace: options.workspace ?? new SpecialistWorkspace(),
+  };
+  defaultCabinet.catalog.dismissMany(defaultCabinet.workspace.dismissedInboxIds());
+  const singleton = options.cabinets === undefined && options.authDirectory === undefined;
+  const cabinets =
+    options.cabinets ??
+    createMemoryCabinetRegistry({
+      defaultCabinet,
+      singleton: singleton || options.catalog !== undefined || options.workspace !== undefined,
+    });
+  const cabinetAls = new AsyncLocalStorage<SpecialistCabinet>();
+  const currentCabinet = (): SpecialistCabinet => cabinetAls.getStore() ?? defaultCabinet;
+  const catalog = (): SpecialistCatalog => currentCabinet().catalog;
+  const workspace = (): SpecialistWorkspace => currentCabinet().workspace;
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
@@ -150,29 +175,34 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const caseMaxAgeMs = options.caseMaxAgeMs ?? DEFAULT_CASE_MAX_AGE_MS;
   const discoveryController = options.discoveryController ?? createDiscoveryController();
   const persist = async (): Promise<void> => {
+    const cabinet = currentCabinet();
+    await cabinets.persist(cabinet);
     if (options.persistWorkspace !== undefined) {
-      await options.persistWorkspace(workspace.snapshot());
+      await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
     }
     if (options.persistCases !== undefined) {
-      await options.persistCases(catalog.procurements());
+      await options.persistCases(cabinet.catalog.procurements(), cabinet.workspaceId);
     }
     if (options.persistInbox !== undefined) {
-      await options.persistInbox(catalog.inboxItems());
+      await options.persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
     }
   };
 
   // Cases the specialist never touched do not pile up: once a search stops
   // returning them for caseMaxAgeMs they leave the catalog and the database.
   const pruneStaleCases = async (): Promise<void> => {
-    const removed = catalog.prune({
+    const removed = catalog().prune({
       now: clock(),
       maxAgeMs: caseMaxAgeMs,
-      keepSourceIds: workspace.decidedSourceIds(),
+      keepSourceIds: workspace().decidedSourceIds(),
     });
     if (removed.length === 0) return;
-    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
     logger.info("Specialist stale cases pruned", { count: removed.length });
-    if (options.removeCases !== undefined) await options.removeCases(removed);
+    if (options.removeCases !== undefined) {
+      await options.removeCases(removed, currentCabinet().workspaceId);
+    }
+    await cabinets.removeCases(currentCabinet().workspaceId, removed);
   };
 
   async function hydrateSourceCard(
@@ -182,7 +212,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     try {
       const live = await cardWatch.read(card.sourceProcurementId);
       if (live === undefined) return card;
-      return withTriage(applySourceCard(card, live, clock()), workspace);
+      return withTriage(applySourceCard(card, live, clock()), workspace());
     } catch (error) {
       logger.error("Specialist source card hydrate failed", error, {
         sourceProcurementId: card.sourceProcurementId,
@@ -194,12 +224,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   // Review cases wait in the inbox; they enter the list only after a
   // specialist opens or decides them.
   const listed = (): SpecialistProcurementCardValue[] => {
-    const rejected = workspace.rejectedSourceIds();
-    return catalog
+    const rejected = workspace().rejectedSourceIds();
+    return catalog()
       .procurements()
       .filter((item) => !rejected.has(item.sourceProcurementId))
       .filter((item) => !liveProcurementsOnly || item.live)
-      .map((item) => withTriage(item, workspace))
+      .map((item) => withTriage(item, workspace()))
       .filter((item) => item.foundAs !== "review" || item.triage !== undefined);
   };
 
@@ -231,6 +261,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     ...(options.authPublicUrl === undefined ? {} : { publicUrl: options.authPublicUrl }),
     ...(options.internalApiToken === undefined ? {} : { internalApiToken: options.internalApiToken }),
     journal,
+    provisionWorkspace: (user) => cabinets.ensurePersonalWorkspace(user.id, user.name),
+    workspaceIdFor: (userId) => cabinets.workspaceIdFor(userId),
+  });
+  app.addHook("onRequest", async (request) => {
+    const workspaceId = request.principal?.workspaceId ?? TEST_WORKSPACE_ID;
+    request.cabinet = await cabinets.open(workspaceId);
+  });
+  app.addHook("preHandler", (request, _reply, done) => {
+    cabinetAls.run(request.cabinet ?? defaultCabinet, () => {
+      done();
+    });
   });
 
   /**
@@ -282,7 +323,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     profileId: string,
     now: string,
   ): { card: SpecialistProcurementCardValue; isNew: boolean } {
-    const existing = catalog
+    const existing = catalog()
       .procurements()
       .find((item) => item.sourceProcurementId === card.sourceProcurementId);
     const foundAs = card.foundAs === "match" || existing?.foundAs === "match" ? "match" : card.foundAs;
@@ -298,8 +339,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             ...(foundAs === undefined ? {} : { foundAs }),
             lastSeenAt: now,
           };
-    const owned = withTriage(attachProfileToCard(merged, profileId), workspace);
-    catalog.upsertCase(owned);
+    const owned = withTriage(attachProfileToCard(merged, profileId), workspace());
+    catalog().upsertCase(owned);
     return { card: owned, isNew: existing === undefined };
   }
 
@@ -314,13 +355,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    */
   async function reviewAmbiguous(
     selected: ReturnType<typeof selectRelevantSearchCards>,
-    profile: ReturnType<typeof workspace.profile>,
+    profile: SpecialistWorkingProfile,
     now: string,
     options: { inboxForMatches: boolean },
   ): Promise<{ matched: SpecialistProcurementCardValue[]; discarded: number; ambiguousCount: number }> {
-    const rejected = workspace.rejectedSourceIds();
+    const rejected = workspace().rejectedSourceIds();
     const known = new Map(
-      catalog.procurements().map((item) => [item.sourceProcurementId, item] as const),
+      catalog().procurements().map((item) => [item.sourceProcurementId, item] as const),
     );
     let discarded = 0;
     let ambiguousCount = 0;
@@ -328,7 +369,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     selected.ambiguousCards.forEach((card, index) => {
       const hit = selected.ambiguousHits[index];
       if (hit === undefined || rejected.has(card.sourceProcurementId)) return;
-      if (workspace.isReviewedIrrelevant(profile.id, card.sourceProcurementId)) {
+      if (workspace().isReviewedIrrelevant(profile.id, card.sourceProcurementId)) {
         discarded += 1;
         return;
       }
@@ -357,7 +398,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const outcome = outcomes?.[index];
       if (outcome?.verdict === "irrelevant") {
         discarded += 1;
-        workspace.rememberIrrelevant(profile.id, card.sourceProcurementId, now);
+        workspace().rememberIrrelevant(profile.id, card.sourceProcurementId, now);
         return;
       }
       const reviewedCard: SpecialistProcurementCardValue =
@@ -380,12 +421,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       if (outcome?.verdict === "relevant") {
         matched.push(remembered.card);
         if (options.inboxForMatches && remembered.isNew) {
-          catalog.record(inboxItemFromFoundCard(remembered.card, now));
+          catalog().record(inboxItemFromFoundCard(remembered.card, now));
         }
         return;
       }
       ambiguousCount += 1;
-      if (remembered.isNew) catalog.record(inboxItemFromFoundCard(remembered.card, now));
+      if (remembered.isNew) catalog().record(inboxItemFromFoundCard(remembered.card, now));
     });
     return { matched, discarded, ambiguousCount };
   }
@@ -404,9 +445,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (cardWatch === undefined || watchLimit <= 0) {
       return { monitoredCount: 0, changedCount: 0 };
     }
-    const followed = catalog
+    const followed = catalog()
       .procurements()
-      .map((item) => withTriage(item, workspace))
+      .map((item) => withTriage(item, workspace()))
       .filter((item) => item.live && !item.archived && isWatchedTriage(item))
       .sort((left, right) => watchOrder(left) - watchOrder(right))
       .slice(0, watchLimit);
@@ -428,26 +469,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         continue;
       }
       if (previous === undefined) {
-        catalog.upsertCase(next);
+        catalog().upsertCase(next);
         continue;
       }
       const snapshot = next.watchSnapshot;
       if (snapshot === undefined) {
-        catalog.upsertCase(next);
+        catalog().upsertCase(next);
         continue;
       }
       const changes = diffCardSnapshots(previous, snapshot);
       if (changes.length === 0) {
-        catalog.upsertCase(next);
+        catalog().upsertCase(next);
         continue;
       }
       changedCount += 1;
       for (const change of changes) {
-        const item = catalog.record(inboxItemFromWatchChange(next, change, now));
-        next = withTriage(applyInboxChangeToCard(next, item.item.change), workspace);
+        const item = catalog().record(inboxItemFromWatchChange(next, change, now));
+        next = withTriage(applyInboxChangeToCard(next, item.item.change), workspace());
         next = applySourceCard(next, fresh, now);
       }
-      catalog.upsertCase(next);
+      catalog().upsertCase(next);
       logger.info("Specialist watched case changed", {
         sourceProcurementId: card.sourceProcurementId,
         kinds: changes.map((item) => item.kind),
@@ -478,7 +519,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     limit: number,
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
-    const profile = workspace.profile();
+    const profile = workspace().profile();
     const hits = await searchHits.search(buildSearchQuery(profile, limit, offset));
     const selected = selectRelevantSearchCards(
       hits,
@@ -494,7 +535,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     let skippedRejected = 0;
     const resultItems: SpecialistProcurementCardValue[] = [];
     for (const card of selected.cards) {
-      if (workspace.rejectedSourceIds().has(card.sourceProcurementId)) {
+      if (workspace().rejectedSourceIds().has(card.sourceProcurementId)) {
         skippedRejected += 1;
         continue;
       }
@@ -523,23 +564,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   }
 
-  async function runDiscovery(limit = DEFAULT_DISCOVERY_LIMIT) {
-    const start = discoveryController.tryStart(new Date());
-    if (start.kind !== "started") {
-      return SpecialistDiscoveryResponse.parse({
-        ran: false,
-        reason: start.kind === "busy" ? "already_running" : "cooldown",
-        addedCount: 0,
-        skippedDecidedCount: 0,
-        items: listed(),
-      });
-    }
-    try {
+  async function discoveryPass(limit: number) {
       // Following a decided case is not the same promise as looking for new
       // ones: a specialist who turned "watch new" off still expects to hear
       // that the procedure he entered was cancelled.
       const monitored = await monitorDecidedCases(clock());
-      const watched = workspace.profiles().filter((item) =>
+      const watched = workspace().profiles().filter((item) =>
         shouldRunDiscovery(item.watchNewProcurements),
       );
       if (watched.length === 0) {
@@ -550,7 +580,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           skippedDecidedCount: 0,
         };
         await finishMonitoringOnly(monitored);
-        discoveryController.finish(result, new Date());
         return SpecialistDiscoveryResponse.parse({
           ...result,
           ...monitored,
@@ -566,7 +595,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           skippedDecidedCount: 0,
         };
         await finishMonitoringOnly(monitored);
-        discoveryController.finish(result, new Date());
         return SpecialistDiscoveryResponse.parse({
           ...result,
           ...monitored,
@@ -575,7 +603,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       let addedCount = 0;
       let skippedDecidedCount = 0;
-      const known = new Set(catalog.procurements().map((item) => item.sourceProcurementId));
+      const known = new Set(catalog().procurements().map((item) => item.sourceProcurementId));
       const failed: Array<{ profile: SpecialistWorkingProfile; error: unknown }> = [];
       const succeeded: SpecialistWorkingProfile[] = [];
       for (const profile of ready) {
@@ -596,7 +624,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           continue;
         }
         succeeded.push(profile);
-        const partitioned = partitionHitsByDecision(hits, workspace.decidedSourceIds());
+        const partitioned = partitionHitsByDecision(hits, workspace().decidedSourceIds());
         skippedDecidedCount += partitioned.skippedDecidedCount;
         const selected = selectRelevantSearchCards(
           partitioned.undecided,
@@ -612,7 +640,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         for (const card of selected.cards) {
           const remembered = rememberFound(card, profile.id, now);
           if (!remembered.isNew) continue;
-          catalog.record(inboxItemFromFoundCard(remembered.card, now));
+          catalog().record(inboxItemFromFoundCard(remembered.card, now));
           known.add(card.sourceProcurementId);
           addedCount += 1;
         }
@@ -624,14 +652,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         }
         // The watermark is the pass start, not its end: a procedure posted while
         // the pass ran must fall into the next window.
-        workspace.markDiscovered(profile.id, startedAt);
+        workspace().markDiscovered(profile.id, startedAt);
         logger.info("Specialist discovery recorded", {
           profileName: profileDisplayName(profile),
           addedCount,
           skippedDecidedCount,
         });
       }
-      workspace.forgetStaleVerdicts(clock());
+      workspace().forgetStaleVerdicts(clock());
       await pruneStaleCases();
       await persist();
       for (const item of failed) {
@@ -660,11 +688,55 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         addedCount,
         skippedDecidedCount,
       };
-      discoveryController.finish(result, new Date());
       return SpecialistDiscoveryResponse.parse({
         ...result,
         ...monitored,
         items: listed(),
+      });
+  }
+
+  async function runDiscovery(limit = DEFAULT_DISCOVERY_LIMIT) {
+    const start = discoveryController.tryStart(new Date());
+    if (start.kind !== "started") {
+      return SpecialistDiscoveryResponse.parse({
+        ran: false,
+        reason: start.kind === "busy" ? "already_running" : "cooldown",
+        addedCount: 0,
+        skippedDecidedCount: 0,
+        items: listed(),
+      });
+    }
+    try {
+      const scoped = cabinetAls.getStore();
+      const ids =
+        scoped !== undefined ? [scoped.workspaceId] : await cabinets.listIds();
+      const targets = ids.length > 0 ? ids : [defaultCabinet.workspaceId];
+      let addedCount = 0;
+      let skippedDecidedCount = 0;
+      let monitoredCount = 0;
+      let changedCount = 0;
+      let ran = false;
+      let reason: ReturnType<typeof SpecialistDiscoveryResponse.parse>["reason"] = "watch_off";
+      let items: SpecialistProcurementCardValue[] = listed();
+      for (const id of targets) {
+        const cabinet = await cabinets.open(id);
+        const part = await cabinetAls.run(cabinet, () => discoveryPass(limit));
+        addedCount += part.addedCount;
+        skippedDecidedCount += part.skippedDecidedCount;
+        monitoredCount += part.monitoredCount;
+        changedCount += part.changedCount;
+        ran = ran || part.ran;
+        if (part.ran) reason = "ok";
+        else if (reason === "watch_off") reason = part.reason;
+        items = part.items;
+      }
+      const result: DiscoveryResult = { ran, reason, addedCount, skippedDecidedCount };
+      discoveryController.finish(result, new Date());
+      return SpecialistDiscoveryResponse.parse({
+        ...result,
+        monitoredCount,
+        changedCount,
+        items,
       });
     } catch (error) {
       discoveryController.recordFailure(error, new Date());
@@ -675,9 +747,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   app.get("/api/health", async () => ({ ok: true as const }));
 
   app.get("/api/admin/discovery", async () => {
-    const watchingCount = workspace.profiles().filter((item) =>
-      shouldRunDiscovery(item.watchNewProcurements),
-    ).length;
+    const ids = await cabinets.listIds();
+    let watchingCount = 0;
+    for (const id of ids.length > 0 ? ids : [defaultCabinet.workspaceId]) {
+      const cabinet = await cabinets.open(id);
+      watchingCount += cabinet.workspace
+        .profiles()
+        .filter((item) => shouldRunDiscovery(item.watchNewProcurements)).length;
+    }
     return SpecialistDiscoveryHealthResponse.parse({
       health: discoveryController.health(watchingCount),
     });
@@ -685,15 +762,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   function profileList() {
     return SpecialistProfileListResponse.parse({
-      items: workspace.profiles(),
-      activeProfileId: workspace.profile().id,
+      items: workspace().profiles(),
+      activeProfileId: workspace().profile().id,
     });
   }
 
   app.get("/api/profiles", async () => profileList());
 
   app.post("/api/profiles", async () => {
-    const created = workspace.addProfile();
+    const created = workspace().addProfile();
     await persist();
     logger.info("Specialist working profile created", { id: created.id });
     return SpecialistWorkingProfile.parse(created);
@@ -701,12 +778,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.post("/api/profiles/:id/activate", async (request, reply) => {
     const params = request.params as { id: string };
-    if (workspace.findProfile(params.id) === undefined) {
+    if (workspace().findProfile(params.id) === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    workspace.activate(params.id);
+    workspace().activate(params.id);
     await persist();
-    return SpecialistWorkingProfile.parse(workspace.profile());
+    return SpecialistWorkingProfile.parse(workspace().profile());
   });
 
   app.put("/api/profiles/:id", async (request, reply) => {
@@ -715,10 +792,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    if (workspace.findProfile(params.id) === undefined) {
+    if (workspace().findProfile(params.id) === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    const saved = workspace.replaceProfileById(params.id, parsed.data);
+    const saved = workspace().replaceProfileById(params.id, parsed.data);
     await persist();
     logger.info("Specialist working profile saved", {
       id: saved.id,
@@ -730,13 +807,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.delete("/api/profiles/:id", async (request, reply) => {
     const params = request.params as { id: string };
-    if (workspace.findProfile(params.id) === undefined) {
+    if (workspace().findProfile(params.id) === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    if (workspace.profiles().length === 1) {
+    if (workspace().profiles().length === 1) {
       return reply.code(409).send({ error: "last_profile" });
     }
-    workspace.removeProfile(params.id);
+    workspace().removeProfile(params.id);
     await persist();
     logger.info("Specialist working profile removed", { id: params.id });
     return profileList();
@@ -748,10 +825,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    if (workspace.findProfile(params.id) === undefined) {
+    if (workspace().findProfile(params.id) === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    const saved = workspace.setWatchById(params.id, parsed.data.watchNewProcurements);
+    const saved = workspace().setWatchById(params.id, parsed.data.watchNewProcurements);
     await persist();
     logger.info("Specialist profile watch updated", {
       id: saved.id,
@@ -760,16 +837,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return SpecialistWorkingProfile.parse(saved);
   });
 
-  app.get("/api/profile", async () => SpecialistWorkingProfile.parse(workspace.profile()));
+  app.get("/api/profile", async () => SpecialistWorkingProfile.parse(workspace().profile()));
 
   app.put("/api/profile", async (request, reply) => {
     const parsed = SpecialistProfileWrite.safeParse(request.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    workspace.replaceProfile(parsed.data);
+    workspace().replaceProfile(parsed.data);
     await persist();
-    const saved = workspace.profile();
+    const saved = workspace().profile();
     logger.info("Specialist working profile saved", {
       name: profileDisplayName(saved),
       keywordCount: saved.keywords.length,
@@ -782,12 +859,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    workspace.setWatch(parsed.data.watchNewProcurements);
+    workspace().setWatch(parsed.data.watchNewProcurements);
     await persist();
     logger.info("Specialist profile watch updated", {
       watchNewProcurements: parsed.data.watchNewProcurements,
     });
-    return SpecialistWorkingProfile.parse(workspace.profile());
+    return SpecialistWorkingProfile.parse(workspace().profile());
   });
 
   app.post("/api/profile/discovery", async (request, reply) => {
@@ -804,7 +881,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   });
 
   app.get("/api/inbox", async () =>
-    SpecialistInboxListResponse.parse({ items: catalog.urgentInbox() }),
+    SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() }),
   );
 
   app.post("/api/inbox/events", async (request, reply) => {
@@ -812,24 +889,24 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    const recorded = catalog.record(parsed.data);
+    const recorded = catalog().record(parsed.data);
     logger.info("Specialist inbox event recorded", {
       duplicate: recorded.duplicate,
       changeId: recorded.item.change.id,
     });
     return reply.code(recorded.duplicate ? 200 : 201).send(
-      SpecialistInboxListResponse.parse({ items: catalog.urgentInbox() }),
+      SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() }),
     );
   });
 
   app.delete("/api/inbox/:id", async (request, reply) => {
     const params = request.params as { id: string };
-    if (!catalog.dismiss(params.id)) {
+    if (!catalog().dismiss(params.id)) {
       return reply.code(404).send({ error: "not_found" });
     }
-    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
-    return SpecialistInboxListResponse.parse({ items: catalog.urgentInbox() });
+    return SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() });
   });
 
   app.post("/api/inbox/:id/resolve", async (request, reply) => {
@@ -838,7 +915,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    const item = catalog.inboxItem(params.id);
+    const item = catalog().inboxItem(params.id);
     if (item === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
@@ -851,23 +928,23 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "invalid_action" });
     }
 
-    let card = catalog.procurement(item.change.procurementId);
+    let card = catalog().procurement(item.change.procurementId);
     // Opening a review case from the inbox is the specialist taking it on:
     // from now on it belongs in the list like any confident match.
     if (action !== "dismiss" && card !== undefined && card.foundAs === "review") {
-      card = withTriage({ ...card, foundAs: "match" }, workspace);
-      catalog.upsertCase(card);
+      card = withTriage({ ...card, foundAs: "match" }, workspace());
+      catalog().upsertCase(card);
     }
     if (action === "refresh" && card !== undefined) {
-      card = withTriage(applyInboxChangeToCard(card, item.change), workspace);
-      catalog.upsertCase(card);
+      card = withTriage(applyInboxChangeToCard(card, item.change), workspace());
+      catalog().upsertCase(card);
     }
     if (action === "documents" && card !== undefined && documentIngest !== undefined) {
       ingestProgress.begin(card.id);
       try {
-        card = withTriage(await documentIngest.ingest(card), workspace);
+        card = withTriage(await documentIngest.ingest(card), workspace());
         ingestProgress.done(card.id);
-        catalog.upsertCase(card);
+        catalog().upsertCase(card);
       } catch (error) {
         ingestProgress.fail(card.id);
         logger.error("Specialist inbox document ingest failed", error, {
@@ -882,8 +959,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
     }
 
-    catalog.dismiss(params.id);
-    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    catalog().dismiss(params.id);
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
     logger.info("Specialist inbox resolved", {
       changeId: params.id,
@@ -891,7 +968,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       topic,
     });
     return SpecialistInboxResolveResponse.parse({
-      items: catalog.urgentInbox(),
+      items: catalog().urgentInbox(),
       documents: action === "documents" ? inboxDocumentLinks(card) : [],
       ...(card === undefined ? {} : { card }),
     });
@@ -906,7 +983,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    if (workspace.profile().keywords.length === 0) {
+    if (workspace().profile().keywords.length === 0) {
       return reply.code(400).send({ error: "no_keywords" });
     }
     try {
@@ -928,8 +1005,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    workspace.recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
-    let next = withTriage(card, workspace);
+    workspace().recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
+    let next = withTriage(card, workspace());
     // One stdio MCP process cannot run get + get_documents at once: the
     // responses cross and the platform card is lost while files still arrive.
     if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
@@ -938,7 +1015,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (parsed.data.kind === "participate" && documentIngest !== undefined) {
       ingestProgress.begin(card.id);
       try {
-        next = withTriage(await documentIngest.ingest(next), workspace);
+        next = withTriage(await documentIngest.ingest(next), workspace());
         ingestProgress.done(card.id);
       } catch (error) {
         ingestProgress.fail(card.id);
@@ -953,9 +1030,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         });
       }
     }
-    catalog.upsertCase(next);
-    catalog.dismissByProcurementId(next.id);
-    workspace.setDismissedInboxIds(catalog.dismissedIds());
+    catalog().upsertCase(next);
+    catalog().dismissByProcurementId(next.id);
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,
@@ -979,8 +1056,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    workspace.setArchived(card.sourceProcurementId, parsed.data.archived);
-    catalog.upsertCase(withTriage(card, workspace));
+    workspace().setArchived(card.sourceProcurementId, parsed.data.archived);
+    catalog().upsertCase(withTriage(card, workspace()));
     await persist();
     logger.info("Specialist archive flag recorded", {
       sourceProcurementId: card.sourceProcurementId,
@@ -1024,7 +1101,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "card_unavailable" });
     }
     try {
-      catalog.upsertCase(withTriage(applySourceCard(card, live, clock()), workspace));
+      catalog().upsertCase(withTriage(applySourceCard(card, live, clock()), workspace()));
       await persist();
     } catch (error) {
       // The page was read fine; only the console copy failed. Still show it.
@@ -1040,9 +1117,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!isSha256Hex(params.hash)) {
       return reply.code(400).send({ error: "invalid_hash" });
     }
-    const document = findCatalogDocument(catalog, params.hash);
+    const document = findCatalogDocument(catalog(), params.hash);
     if (document === undefined) {
       return reply.code(404).send({ error: "not_found" });
+    }
+    if (cabinets.hasDocumentHash !== undefined) {
+      const allowed = await cabinets.hasDocumentHash(currentCabinet().workspaceId, params.hash);
+      if (!allowed) {
+        return reply.code(404).send({ error: "not_found" });
+      }
     }
     const bytes =
       options.blobStore === undefined

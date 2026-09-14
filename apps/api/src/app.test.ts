@@ -185,6 +185,42 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("shows a watched case in My procurements even when live-only listing is on", async () => {
+    const catalog = new SpecialistCatalog();
+    const stored = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000501",
+      title: "КТПБ без отметки live",
+      status: "accepting_bids",
+      statusLabel: "Прием предложений",
+      url: "https://goszakupki.by/auction/view/live-flag",
+      sourceProcurementId: "auction/live-flag",
+      live: false,
+      foundAs: "match",
+    });
+    catalog.upsertCase(stored);
+    const app = await buildSpecialistApi({
+      catalog,
+      liveProcurementsOnly: true,
+    });
+
+    const before = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${stored.id}/decision`,
+      payload: { kind: "monitor" },
+    });
+    const after = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
+    const watching = await app.inject({ method: "GET", url: "/api/procurements?tab=monitor" });
+
+    expect(JSON.parse(before.body).items).toEqual([]);
+    expect(JSON.parse(after.body).items).toEqual([
+      expect.objectContaining({ id: stored.id, triage: "monitor" }),
+    ]);
+    expect(JSON.parse(watching.body).items[0]?.id).toBe(stored.id);
+
+    await app.close();
+  });
+
   it("does not seed fixture stubs or the captured dump when only live cases are listed", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),

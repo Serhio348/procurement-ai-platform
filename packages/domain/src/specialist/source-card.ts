@@ -57,6 +57,7 @@ export function applySourceCard(
         : card.statusLabel;
   return SpecialistProcurementCard.parse({
     ...card,
+    live: true,
     title: source.title,
     status: nextStatus,
     statusLabel: nextStatusLabel,

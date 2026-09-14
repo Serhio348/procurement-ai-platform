@@ -70,6 +70,7 @@ describe("applySourceCard", () => {
     expect(next.statusLabel).toBe("Рассмотрение документов/сведений");
     expect(next.watchSnapshot?.priceKey).toBe("160651.42");
     expect(next.documents).toHaveLength(1);
+    expect(next.live).toBe(true);
   });
 
   it("does not store a blank source status as the specialist label", () => {

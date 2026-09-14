@@ -239,11 +239,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   ) => {
     const tab = query.tab ?? "listed";
     const offset = query.offset ?? 0;
+    const liveOnly = liveProcurementsOnly && tab === "listed";
     const page = await cabinets.listCases(currentCabinet().workspaceId, {
       tab,
       limit: query.limit ?? 100,
       offset,
-      liveOnly: liveProcurementsOnly,
+      liveOnly,
       ...(tab === "trash" ? {} : { rejectedSourceIds: workspace().rejectedSourceIds() }),
     });
     const rejectedSourceIds = workspace().rejectedSourceIds();
@@ -253,7 +254,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         tab === "trash"
           ? item.triage === "reject"
           : isConsoleListedCase(item, {
-              liveOnly: liveProcurementsOnly,
+              ...(liveOnly ? { liveOnly: true } : {}),
               rejectedSourceIds,
             }) && caseMatchesListTab(item, tab),
       );
@@ -381,6 +382,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             ...existing,
             title: card.title,
             statusLabel: card.statusLabel,
+            live: existing.live === true || card.live === true,
             ...(card.buyerName === undefined ? {} : { buyerName: card.buyerName }),
             ...(card.amountLabel === undefined ? {} : { amountLabel: card.amountLabel }),
             ...(foundAs === undefined ? {} : { foundAs }),
@@ -1073,6 +1075,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     // responses cross and the platform card is lost while files still arrive.
     if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
       next = await hydrateSourceCard(next);
+      if (next.live !== true) {
+        next = SpecialistProcurementCard.parse({ ...next, live: true });
+      }
     }
     if (parsed.data.kind === "participate" && documentIngest !== undefined) {
       ingestProgress.begin(card.id);

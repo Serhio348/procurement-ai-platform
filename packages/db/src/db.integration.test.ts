@@ -164,6 +164,7 @@ integration("PostgreSQL migrations and invariants", () => {
           excludeSingleSource: false,
           filters: {},
           watchNewProcurements: false,
+          lastDiscoveryAt: "2026-09-09T10:00:00.000Z",
         },
       ],
       activeProfileId: "00000000-0000-4000-8000-000000000902",
@@ -204,6 +205,7 @@ integration("PostgreSQL migrations and invariants", () => {
       .where(eq(documentVersions.hash, hash));
 
     expect(loadedWorkspace?.profiles[0]?.name).toBe("Persist");
+    expect(loadedWorkspace?.profiles[0]?.lastDiscoveryAt).toBe("2026-09-09T10:00:00.000Z");
     expect(loadedCases.map((item) => item.sourceProcurementId)).toContain("auction/901-persist");
     expect(versions[0]?.hash).toBe(hash);
     expect(versions[0]?.storageKey).toBe(blobStorageKey(hash));

@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { blobStorageKey, jsonbSafe, postgresErrorMessage, uniqueBySource } from "./specialist-store.js";
+import {
+  blobStorageKey,
+  jsonbSafe,
+  postgresErrorMessage,
+  toIsoDateTime,
+  uniqueBySource,
+} from "./specialist-store.js";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 
 describe("blobStorageKey", () => {
   it("keeps the sha256 as the object name so PostgreSQL stores the hash, not the bytes", () => {
     const hash = "a".repeat(64);
     expect(blobStorageKey(hash)).toBe(`blobs/${hash}`);
+  });
+});
+
+describe("toIsoDateTime", () => {
+  it("turns Postgres timestamptz strings into ISO so profile load can parse lastDiscoveryAt", () => {
+    expect(toIsoDateTime("2026-09-09 10:00:00+00")).toBe("2026-09-09T10:00:00.000Z");
+    expect(toIsoDateTime("2026-09-09 10:00:00.651+00")).toBe("2026-09-09T10:00:00.651Z");
+    expect(toIsoDateTime("2026-09-09T10:00:00.000Z")).toBe("2026-09-09T10:00:00.000Z");
   });
 });
 

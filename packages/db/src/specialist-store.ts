@@ -145,7 +145,9 @@ export function createSpecialistStore(db: Database) {
             excludeSingleSource: row.excludeSingleSource,
             filters: row.filters,
             watchNewProcurements: row.watchNewProcurements,
-            ...(row.lastDiscoveryAt === null ? {} : { lastDiscoveryAt: row.lastDiscoveryAt }),
+            ...(row.lastDiscoveryAt === null
+              ? {}
+              : { lastDiscoveryAt: toIsoDateTime(row.lastDiscoveryAt) }),
           }),
         );
         const active =
@@ -157,7 +159,7 @@ export function createSpecialistStore(db: Database) {
           decisions: decisionRows.map((row) => ({
             sourceProcurementId: row.sourceProcurementId,
             kind: row.kind,
-            madeAt: row.madeAt,
+            madeAt: toIsoDateTime(row.madeAt),
           })),
           dismissedInboxIds: inboxRows
             .filter((row) => row.state !== "open")
@@ -168,7 +170,7 @@ export function createSpecialistStore(db: Database) {
           reviewedIrrelevant: verdictRows.map((row) => ({
             profileId: row.profileId,
             sourceProcurementId: row.sourceProcurementId,
-            decidedAt: row.decidedAt,
+            decidedAt: toIsoDateTime(row.decidedAt),
           })),
           archivedSourceIds: caseRows
             .filter((row) => row.archived)
@@ -329,7 +331,7 @@ export function createSpecialistStore(db: Database) {
               archived: row.archived,
               ...(row.triage === null ? {} : { triage: row.triage }),
               ...(row.foundAs === null ? {} : { foundAs: row.foundAs }),
-              ...(row.lastSeenAt === null ? {} : { lastSeenAt: row.lastSeenAt }),
+              ...(row.lastSeenAt === null ? {} : { lastSeenAt: toIsoDateTime(row.lastSeenAt) }),
             }),
           );
         }
@@ -454,6 +456,26 @@ export function createSpecialistStore(db: Database) {
       });
     },
   };
+}
+
+/**
+ * Drizzle timestamptz `mode: "string"` returns Postgres wire format
+ * (`2026-09-09 10:00:00+00`), which Zod IsoDateTime rejects.
+ */
+export function toIsoDateTime(value: string | Date): string {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new Error("Invalid timestamp");
+    }
+    return value.toISOString();
+  }
+  const withT = value.includes("T") ? value : value.replace(" ", "T");
+  const withColonOffset = withT.replace(/([+-]\d{2})$/, "$1:00");
+  const parsed = new Date(withColonOffset);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid timestamp: ${value}`);
+  }
+  return parsed.toISOString();
 }
 
 /** Drops NUL bytes that PostgreSQL rejects inside jsonb. */

@@ -219,7 +219,7 @@ export function AdminApp() {
               <div className="admin-actions">
                 <button
                   type="button"
-                  className="profile-fill"
+                  className={errorCount === 0 ? "search-profile" : "search-profile is-pressed-monitor"}
                   disabled={errorCount === 0}
                   onClick={() => {
                     void (async () => {
@@ -315,7 +315,7 @@ function AdminUserRow({
           </select>
         </label>
         {onApprove !== undefined ? (
-          <button type="button" className="profile-fill" onClick={() => void onApprove()}>
+          <button type="button" className="search-profile is-pressed-monitor" onClick={() => void onApprove()}>
             Одобрить
           </button>
         ) : null}
@@ -325,7 +325,7 @@ function AdminUserRow({
           </button>
         ) : null}
         {onChangeRole !== undefined ? (
-          <button type="button" className="profile-fill" onClick={() => void onChangeRole()}>
+          <button type="button" className="search-profile" onClick={() => void onChangeRole()}>
             Сохранить роль
           </button>
         ) : null}

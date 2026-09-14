@@ -18,6 +18,7 @@ describe("AdminApp", () => {
 
     expect(await screen.findByText("Иван")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Отклонить" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Одобрить" })).toHaveProperty("disabled", false);
     expect(screen.queryByText("Площадка goszakupki.by недоступна")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Одобрить" }));
     expect(approvals).toEqual([{ role: "specialist" }]);
@@ -54,6 +55,7 @@ describe("AdminApp", () => {
     renderAdmin("/admin/errors");
 
     expect(await screen.findByText("Площадка goszakupki.by недоступна")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Снять ошибки (1)" })).toHaveProperty("disabled", false);
     await user.click(screen.getByRole("button", { name: "Снять ошибки (1)" }));
 
     expect(await screen.findByRole("button", { name: "Активных ошибок нет" })).toBeTruthy();

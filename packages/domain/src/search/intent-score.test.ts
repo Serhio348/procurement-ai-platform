@@ -1,6 +1,11 @@
 import { SearchIntentPlan } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { inferSearchIntentPlan, parseSearchIntentPlan } from "./intent-plan.js";
+import {
+  inferSearchIntentPlan,
+  parseSearchIntentPlan,
+  platformSearchTerms,
+  CONSOLE_PLATFORM_SEARCH_TERM_LIMIT,
+} from "./intent-plan.js";
 import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
 
 const nkuPlan = SearchIntentPlan.parse({
@@ -184,5 +189,28 @@ describe("inferSearchIntentPlan", () => {
     expect(plan.desired_actions).toContain("поставка");
     expect(plan.excluded_actions).toContain("монтаж");
     expect(plan.intent).toBe("equipment_purchase");
+  });
+});
+
+describe("platformSearchTerms", () => {
+  it("keeps plan order and drops the tail past the console cap", () => {
+    const plan = SearchIntentPlan.parse({
+      objects: ["НКУ", "шкаф управления", "щит", "КТП", "ячейка"],
+      desired_actions: ["поставка"],
+      intent: "equipment_purchase",
+    });
+    expect(platformSearchTerms(plan, ["ignored"])).toEqual([
+      "НКУ",
+      "шкаф управления",
+      "щит",
+      "КТП",
+      "ячейка",
+    ]);
+    expect(platformSearchTerms(plan, ["ignored"], CONSOLE_PLATFORM_SEARCH_TERM_LIMIT)).toEqual([
+      "НКУ",
+      "шкаф управления",
+      "щит",
+      "КТП",
+    ]);
   });
 });

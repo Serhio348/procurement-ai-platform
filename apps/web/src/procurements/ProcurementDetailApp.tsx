@@ -14,6 +14,7 @@ import {
   procedurePublicId,
 } from "@procurement/domain";
 import { fetchProcurementCard } from "../api/specialist.js";
+import { ConfirmToast, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { DocumentNameLink, ingestProgressCaption, officeDownloadFrame, triageActionClass } from "./ProcurementsApp.js";
 
@@ -49,6 +50,7 @@ export function ProcurementDetailApp({
   const [error, setError] = useState<string | undefined>(undefined);
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
   const [trashBusy, setTrashBusy] = useState<"restore" | "purge" | undefined>();
+  const [purgeConfirm, setPurgeConfirm] = useState(false);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const ingestGeneration = useRef(0);
 
@@ -155,11 +157,6 @@ export function ProcurementDetailApp({
 
   async function runPurge(): Promise<void> {
     if (purge === undefined || stored === undefined || trashBusy !== undefined) return;
-    if (
-      !window.confirm("Удалить закупку из корзины безвозвратно? Вернуть её уже будет нельзя.")
-    ) {
-      return;
-    }
     setTrashBusy("purge");
     try {
       await purge(stored.id);
@@ -189,6 +186,19 @@ export function ProcurementDetailApp({
 
   return (
     <Shell>
+      {purgeConfirm ? (
+        <ConfirmToast
+          message={TRASH_PURGE_PROMPT}
+          danger
+          onConfirm={() => {
+            setPurgeConfirm(false);
+            void runPurge();
+          }}
+          onCancel={() => {
+            setPurgeConfirm(false);
+          }}
+        />
+      ) : null}
       <main className="procurement-detail">
         <p className="procurement-detail-back">
           <button type="button" className="procurement-detail-back-link" onClick={() => navigate(-1)}>
@@ -245,7 +255,7 @@ export function ProcurementDetailApp({
                   className="search-profile is-pressed-reject"
                   disabled={trashBusy !== undefined}
                   onClick={() => {
-                    void runPurge();
+                    setPurgeConfirm(true);
                   }}
                 >
                   {trashBusy === "purge" ? "Удаляем…" : "Удалить из корзины"}

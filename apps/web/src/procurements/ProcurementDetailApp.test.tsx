@@ -193,4 +193,41 @@ describe("ProcurementDetailApp", () => {
       expect(screen.getByText("Мои закупки")).toBeTruthy();
     });
   });
+
+  it("purges a trashed card only after the in-app confirmation", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000405",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "reject",
+      sourceCard: source,
+    });
+    const purge = vi.fn(async () => undefined);
+
+    render(
+      <MemoryRouter initialEntries={[`/trash/${trashed.id}`]}>
+        <Routes>
+          <Route
+            path="/trash/:id"
+            element={<ProcurementDetailApp procurements={[trashed]} purge={purge} />}
+          />
+          <Route path="/trash" element={<p>Список корзины</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Удалить из корзины" }));
+    expect(purge).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(purge).toHaveBeenCalledWith(trashed.id);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Список корзины")).toBeTruthy();
+    });
+  });
 });

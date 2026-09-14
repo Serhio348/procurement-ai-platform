@@ -1156,6 +1156,22 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return SpecialistProcurementListResponse.parse({ items: [next] });
   });
 
+  app.delete("/api/procurements/trash", async (_request, reply) => {
+    const ids = await cabinets.listTrashIds(currentCabinet().workspaceId);
+    for (const id of ids) {
+      catalog().dropCase(id);
+      catalog().dismissByProcurementId(id);
+    }
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
+    await persist();
+    await cabinets.removeCases(currentCabinet().workspaceId, ids);
+    if (options.removeCases !== undefined) {
+      await options.removeCases(ids, currentCabinet().workspaceId);
+    }
+    logger.info("Specialist trash emptied", { count: ids.length });
+    return reply.code(204).send();
+  });
+
   app.delete("/api/procurements/:id", async (request, reply) => {
     const params = request.params as { id: string };
     const card = await resolveCase(params.id);

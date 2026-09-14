@@ -17,6 +17,7 @@ import {
   profileDisplayName,
   specialistDocumentWasRead,
 } from "@procurement/domain";
+import { ConfirmToast, TRASH_MOVE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
@@ -193,6 +194,7 @@ export function ProcurementsApp({
   const [busy, setBusy] = useState(false);
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
+  const [rejectConfirm, setRejectConfirm] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [searchPct, setSearchPct] = useState(0);
@@ -329,6 +331,18 @@ export function ProcurementsApp({
 
   return (
     <Shell>
+      {rejectConfirm ? (
+        <ConfirmToast
+          message={TRASH_MOVE_PROMPT}
+          onConfirm={() => {
+            setRejectConfirm(false);
+            void runDecide("reject");
+          }}
+          onCancel={() => {
+            setRejectConfirm(false);
+          }}
+        />
+      ) : null}
       <main className="workspace">
         <section className="inbox" aria-labelledby="procurements-heading">
           <div className="inbox-toolbar">
@@ -524,14 +538,7 @@ export function ProcurementsApp({
                     aria-pressed={selected.triage === "reject"}
                     disabled={busy}
                     onClick={() => {
-                      if (
-                        !window.confirm(
-                          "Убрать закупку в корзину? Потом её можно вернуть или удалить.",
-                        )
-                      ) {
-                        return;
-                      }
-                      void runDecide("reject");
+                      setRejectConfirm(true);
                     }}
                   >
                     Не нужно

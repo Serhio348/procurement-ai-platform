@@ -372,6 +372,21 @@ export function createSpecialistStore(db: Database) {
       });
     },
 
+    async listTrashIds(workspaceId: string): Promise<string[]> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select({ id: workspaceProcurements.id })
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              eq(workspaceProcurements.triage, "reject"),
+            ),
+          );
+        return rows.map((row) => row.id);
+      });
+    },
+
     async getCase(workspaceId: string, id: string): Promise<SpecialistProcurementCardValue | undefined> {
       return withWorkspace(db, workspaceId, async (tx) => {
         const rows = await tx

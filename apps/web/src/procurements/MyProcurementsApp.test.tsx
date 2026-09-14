@@ -74,7 +74,6 @@ describe("MyProcurementsApp", () => {
     const user = userEvent.setup();
     const onArchive = vi.fn(async () => undefined);
     const onRemove = vi.fn(async () => undefined);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <MemoryRouter initialEntries={["/my-procurements"]}>
         <MyProcurementsApp
@@ -90,14 +89,16 @@ describe("MyProcurementsApp", () => {
     expect(onArchive).toHaveBeenCalledWith(card.id, true);
 
     await user.click(screen.getByRole("button", { name: "Убрать" }));
-    expect(window.confirm).toHaveBeenCalled();
-    expect(onRemove).toHaveBeenCalledWith(card.id);
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(onRemove).toHaveBeenCalledWith(card.id);
+    });
   });
 
   it("does not remove a card when the confirmation is declined", async () => {
     const user = userEvent.setup();
     const onRemove = vi.fn(async () => undefined);
-    vi.spyOn(window, "confirm").mockReturnValue(false);
     render(
       <MemoryRouter initialEntries={["/my-procurements"]}>
         <MyProcurementsApp
@@ -109,6 +110,10 @@ describe("MyProcurementsApp", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Убрать" }));
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
     expect(onRemove).not.toHaveBeenCalled();
   });
 
@@ -273,7 +278,6 @@ describe("MyProcurementsApp", () => {
     const user = userEvent.setup();
     const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
     const onPurge = vi.fn(async () => undefined);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <MemoryRouter initialEntries={["/trash"]}>
         <MyProcurementsApp
@@ -286,7 +290,76 @@ describe("MyProcurementsApp", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Удалить" }));
-    expect(window.confirm).toHaveBeenCalled();
-    expect(onPurge).toHaveBeenCalledWith(trashed.id);
+    expect(onPurge).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(onPurge).toHaveBeenCalledWith(trashed.id);
+    });
+  });
+
+  it("hides a purged card before the delete request finishes", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    let finish = () => undefined;
+    const onPurge = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[trashed]}
+          onPurge={onPurge}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+    });
+    finish();
+  });
+
+  it("empties the trash after confirmation", async () => {
+    const user = userEvent.setup();
+    const first = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const second = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "Вторая в корзине",
+      triage: "reject",
+      sourceProcurementId: "single-source/2",
+    });
+    const onEmptyTrash = vi.fn(async () => undefined);
+    const onPurge = vi.fn(async () => undefined);
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[first, second]}
+          onEmptyTrash={onEmptyTrash}
+          onPurge={onPurge}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "Очистить корзину" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Очистить корзину" }));
+    expect(onEmptyTrash).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(onEmptyTrash).toHaveBeenCalledTimes(1);
+    });
+    expect(onPurge).not.toHaveBeenCalled();
+    expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+    expect(screen.queryByText("Вторая в корзине")).toBeNull();
+    expect(screen.getByText("Корзина пуста.")).toBeTruthy();
   });
 });

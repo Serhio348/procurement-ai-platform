@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   SpecialistIngestProgress,
@@ -461,11 +461,12 @@ describe("ProcurementsApp", () => {
     expect(screen.getByText("Отслеживаем. Карточка в «Мои закупки».")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Кабель силовой/ })).toBeTruthy();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     await user.click(screen.getByRole("button", { name: "Не нужно" }));
-    expect(window.confirm).toHaveBeenCalled();
-    expect(screen.getByText("Перемещено в корзину. Вернуть можно в разделе «Корзина».")).toBeTruthy();
-    vi.restoreAllMocks();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(screen.getByText("Перемещено в корзину. Вернуть можно в разделе «Корзина».")).toBeTruthy();
+    });
   });
 
   it("shows file indexing percent then a read mark after the agent finishes", async () => {

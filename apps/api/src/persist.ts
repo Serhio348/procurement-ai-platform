@@ -226,6 +226,14 @@ export async function openSpecialistPersistence(options: {
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);
     },
+    async listTrashIds(workspaceId) {
+      if (store !== undefined) return store.listTrashIds(workspaceId);
+      const cabinet = await openCabinet(workspaceId);
+      return cabinet.catalog
+        .storedCases()
+        .filter((item) => item.triage === "reject")
+        .map((item) => item.id);
+    },
     async listCases(workspaceId, query = {}) {
       if (store !== undefined) {
         return store.listCases(workspaceId, {

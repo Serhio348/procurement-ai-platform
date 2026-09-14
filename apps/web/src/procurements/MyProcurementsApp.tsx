@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SpecialistProcurementCard } from "@procurement/contracts";
 import { bidsDeadlinePassed, isSingleSourceAfterFailedProcedure } from "@procurement/domain";
+import { ConfirmToast, TRASH_EMPTY_PROMPT, TRASH_MOVE_PROMPT, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 
 type MineTab = "all" | "monitor" | "participate" | "archive";
@@ -38,6 +39,7 @@ export function MyProcurementsApp({
   onRemove,
   onRestore,
   onPurge,
+  onEmptyTrash,
   load,
   now = () => new Date(),
 }: {
@@ -47,6 +49,7 @@ export function MyProcurementsApp({
   onRemove?: (id: string) => Promise<unknown> | void;
   onRestore?: (id: string) => Promise<unknown> | void;
   onPurge?: (id: string) => Promise<unknown> | void;
+  onEmptyTrash?: () => Promise<unknown> | void;
   load?: (tab: ListTab) => Promise<readonly SpecialistProcurementCard[]>;
   now?: () => Date;
 }): ReactElement {
@@ -55,6 +58,9 @@ export function MyProcurementsApp({
   const isTrash = section === "trash";
   const [filter, setFilter] = useState<MineTab>("all");
   const [pendingId, setPendingId] = useState<string | undefined>();
+  const [confirm, setConfirm] = useState<
+    { kind: "empty" } | { kind: "purge" | "remove"; id: string } | undefined
+  >();
   const [remote, setRemote] = useState<readonly SpecialistProcurementCard[] | undefined>(undefined);
   const activeTab: ListTab = isTrash ? "trash" : filter;
 
@@ -94,14 +100,38 @@ export function MyProcurementsApp({
   async function runCardAction(
     item: SpecialistProcurementCard,
     action: (() => Promise<unknown> | void) | undefined,
+    dropFromList = false,
   ): Promise<void> {
     if (action === undefined || pendingId !== undefined) return;
     setPendingId(item.id);
+    const previous = remote;
+    if (dropFromList) {
+      setRemote((current) => (current ?? source).filter((card) => card.id !== item.id));
+    }
     try {
       await action();
       if (load !== undefined) {
         setRemote(await load(activeTab));
       }
+    } catch {
+      if (dropFromList) setRemote(previous);
+    } finally {
+      setPendingId(undefined);
+    }
+  }
+
+  async function runEmptyTrash(): Promise<void> {
+    if (onEmptyTrash === undefined || pendingId !== undefined) return;
+    setPendingId("empty");
+    const previous = remote;
+    setRemote([]);
+    try {
+      await onEmptyTrash();
+      if (load !== undefined) {
+        setRemote(await load("trash"));
+      }
+    } catch {
+      setRemote(previous);
     } finally {
       setPendingId(undefined);
     }
@@ -109,8 +139,52 @@ export function MyProcurementsApp({
 
   return (
     <Shell>
+      {confirm === undefined ? null : (
+        <ConfirmToast
+          message={
+            confirm.kind === "empty"
+              ? TRASH_EMPTY_PROMPT
+              : confirm.kind === "purge"
+                ? TRASH_PURGE_PROMPT
+                : TRASH_MOVE_PROMPT
+          }
+          danger={confirm.kind === "purge" || confirm.kind === "empty"}
+          onConfirm={() => {
+            const next = confirm;
+            setConfirm(undefined);
+            if (next.kind === "empty") {
+              void runEmptyTrash();
+              return;
+            }
+            const item = visible.find((card) => card.id === next.id);
+            if (item === undefined) return;
+            if (next.kind === "purge") {
+              void runCardAction(item, () => onPurge?.(item.id), true);
+              return;
+            }
+            void runCardAction(item, () => onRemove?.(item.id), true);
+          }}
+          onCancel={() => {
+            setConfirm(undefined);
+          }}
+        />
+      )}
       <main className="my-procurements">
-        <h1>{isTrash ? "Корзина" : "Мои закупки"}</h1>
+        <div className="my-procurements-header">
+          <h1>{isTrash ? "Корзина" : "Мои закупки"}</h1>
+          {isTrash && onEmptyTrash !== undefined && visible.length > 0 ? (
+            <button
+              type="button"
+              className="my-procurements-empty-trash"
+              disabled={pendingId !== undefined}
+              onClick={() => {
+                setConfirm({ kind: "empty" });
+              }}
+            >
+              {pendingId === "empty" ? "Очищаем…" : "Очистить корзину"}
+            </button>
+          ) : null}
+        </div>
         {isTrash ? (
           <p className="my-procurements-lead">{EMPTY_TEXT.trash}</p>
         ) : (
@@ -221,14 +295,7 @@ export function MyProcurementsApp({
                           className="my-procurements-card-action my-procurements-card-action-danger"
                           disabled={pendingId === item.id}
                           onClick={() => {
-                            if (
-                              !window.confirm(
-                                "Удалить закупку из корзины безвозвратно? Вернуть её уже будет нельзя.",
-                              )
-                            ) {
-                              return;
-                            }
-                            void runCardAction(item, () => onPurge(item.id));
+                            setConfirm({ kind: "purge", id: item.id });
                           }}
                         >
                           Удалить
@@ -255,14 +322,7 @@ export function MyProcurementsApp({
                           className="my-procurements-card-action my-procurements-card-action-danger"
                           disabled={pendingId === item.id}
                           onClick={() => {
-                            if (
-                              !window.confirm(
-                                "Убрать закупку в корзину? Потом её можно вернуть или удалить.",
-                              )
-                            ) {
-                              return;
-                            }
-                            void runCardAction(item, () => onRemove(item.id));
+                            setConfirm({ kind: "remove", id: item.id });
                           }}
                         >
                           Убрать

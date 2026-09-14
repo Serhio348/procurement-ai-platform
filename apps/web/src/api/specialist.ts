@@ -252,6 +252,13 @@ export async function restoreProcurement(
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }
 
+export async function emptyTrash(fetcher: typeof fetch = fetch): Promise<void> {
+  const response = await fetcher("/api/procurements/trash", withCredentials({ method: "DELETE" }));
+  if (!response.ok) {
+    throw new Error("Не удалось очистить корзину");
+  }
+}
+
 export async function purgeProcurement(
   id: string,
   fetcher: typeof fetch = fetch,

@@ -43,6 +43,7 @@ export interface SpecialistAppProps {
   ) => Promise<readonly SpecialistProcurementCard[]>;
   restore?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
   purge?: (id: string) => Promise<void>;
+  emptyTrash?: () => Promise<void>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
   resolveInbox?: (
@@ -70,6 +71,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const archiveCase = props.archive;
   const restoreCase = props.restore;
   const purgeCase = props.purge;
+  const emptyTrashCase = props.emptyTrash;
   const activateProfile = props.activateProfile;
   const createProfile = props.createProfile;
   const deleteProfile = props.deleteProfile;
@@ -196,6 +198,14 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       : async (id: string) => {
           await purgeCase(id);
           setProcurements((current) => current.filter((item) => item.id !== id));
+        };
+
+  const emptyTrash =
+    emptyTrashCase === undefined
+      ? undefined
+      : async () => {
+          await emptyTrashCase();
+          setProcurements((current) => current.filter((item) => item.triage !== "reject"));
         };
 
   const listMine = props.listMine;
@@ -387,6 +397,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               procurements={procurements}
               {...(restore === undefined ? {} : { onRestore: restore })}
               {...(purge === undefined ? {} : { onPurge: purge })}
+              {...(emptyTrash === undefined ? {} : { onEmptyTrash: emptyTrash })}
               {...(listMine === undefined ? {} : { load: loadList })}
             />
           }

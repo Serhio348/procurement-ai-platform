@@ -47,7 +47,7 @@ discovery не предлагали процедуру снова.
 Изменённые: contracts `tab=trash`; domain `case-list`, `lastWorkingKind`,
 `catalog.dropCase`; store SQL-фильтр корзины; API restore / DELETE; web раздел
 «Корзина» в главном меню, кнопки на плитке и карточке, «Не нужно» с
-подтверждением.
+подтверждением в toast, а не в системном окне браузера.
 
 ## Database changes
 
@@ -60,6 +60,7 @@ discovery не предлагали процедуру снова.
 | `GET /api/procurements?tab=trash` | страница корзины |
 | `POST /api/procurements/:id/restore` | вернуть в «Мои закупки»; 400 `not_in_trash` |
 | `DELETE /api/procurements/:id` | удалить из корзины; 204; 400 если не reject |
+| `DELETE /api/procurements/trash` | очистить всю корзину кабинета; 204 |
 
 Поиск по профилю по-прежнему пропускает `rejectedSourceIds`.
 
@@ -71,8 +72,8 @@ discovery не предлагали процедуру снова.
 - API: reject → `?tab=trash` → restore как participate → `?tab=all`; purge 204
   и поиск снова пуст; чужой кабинет и новый поисковый профиль не получают
   чужие reject
-- web: раздел «Корзина» в меню, «Вернуть» / «Удалить»; карточка без Отслеживать;
-  «Не нужно» пишет про корзину
+- web: раздел «Корзина» в меню, «Вернуть» / «Удалить» / «Очистить корзину»;
+  карточка без Отслеживать; «Не нужно» / «Удалить» / очистка подтверждают toast
 
 ## Риски
 

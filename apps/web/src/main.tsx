@@ -12,6 +12,7 @@ import {
   fetchProcurements,
   fetchProfiles,
   purgeProcurement,
+  emptyTrash,
   resolveInbox,
   restoreProcurement,
   saveProfile,
@@ -135,6 +136,7 @@ function LiveConsole() {
       archive={setProcurementArchived}
       restore={restoreProcurement}
       purge={purgeProcurement}
+      emptyTrash={emptyTrash}
       ingestProgress={fetchIngestProgress}
       refreshInbox={fetchInbox}
       resolveInbox={resolveInbox}

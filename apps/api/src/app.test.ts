@@ -1580,6 +1580,61 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("empties every rejected case from trash and keeps them out of search", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/empty-1",
+        url: "https://goszakupki.by/auction/view/empty-1",
+        title: "Кабель первая в корзину",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/empty-2",
+        url: "https://goszakupki.by/auction/view/empty-2",
+        title: "Кабель вторая в корзину",
+      }),
+    ];
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const ids = (JSON.parse(searched.body).items as Array<{ id: string }>).map((item) => item.id);
+    expect(ids).toHaveLength(2);
+    for (const id of ids) {
+      await app.inject({
+        method: "POST",
+        url: `/api/procurements/${id}/decision`,
+        payload: { kind: "reject" },
+      });
+    }
+    const trash = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    expect(JSON.parse(trash.body).items).toHaveLength(2);
+
+    const emptied = await app.inject({ method: "DELETE", url: "/api/procurements/trash" });
+    const trashAfter = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    expect(emptied.statusCode).toBe(204);
+    expect(JSON.parse(trashAfter.body).items).toEqual([]);
+    expect(JSON.parse(again.body).items).toEqual([]);
+
+    await app.close();
+  });
+
   it("maps a blocked live source to 503 without inventing search hits", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),

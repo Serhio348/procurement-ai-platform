@@ -41,6 +41,7 @@ export interface CabinetRegistry {
   listIds: () => Promise<string[]>;
   persist: (cabinet: SpecialistCabinet) => Promise<void>;
   removeCases: (workspaceId: string, ids: readonly string[]) => Promise<void>;
+  listTrashIds: (workspaceId: string) => Promise<string[]>;
   listCases: (workspaceId: string, query?: SpecialistCaseListQuery) => Promise<SpecialistCaseListPage>;
   getCase: (workspaceId: string, id: string) => Promise<SpecialistProcurementCardValue | undefined>;
   findCaseBySource: (
@@ -120,6 +121,11 @@ export function createMemoryCabinetRegistry(options: {
     },
     async removeCases() {
       // The in-memory catalog is already pruned by the request that called this.
+    },
+    async listTrashIds(workspaceId) {
+      return casesOf(workspaceId)
+        .filter((item) => item.triage === "reject")
+        .map((item) => item.id);
     },
     async listCases(workspaceId, query = {}) {
       return pageListedCases(casesOf(workspaceId), query);

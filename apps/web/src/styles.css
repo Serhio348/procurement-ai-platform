@@ -1321,6 +1321,104 @@ h3 {
   box-shadow: 0 8px 24px rgb(30 36 48 / 28%);
 }
 
+.confirm-toast-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgb(30 36 48 / 28%);
+}
+
+.confirm-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  margin: 0;
+  padding: 16px 18px;
+  background: #1e2430;
+  color: #eef2f6;
+  border: 1px solid #c9a25a;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(30 36 48 / 36%);
+  animation: confirm-toast-in 0.18s ease-out;
+}
+
+.confirm-toast-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.confirm-toast p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.confirm-toast-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.confirm-toast-ok,
+.confirm-toast-cancel {
+  min-width: 88px;
+  padding: 7px 16px;
+  font: inherit;
+  font-size: 13px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.confirm-toast-ok {
+  background: #2f8f86;
+  color: #fff;
+}
+
+.confirm-toast-ok:hover {
+  background: #267a73;
+}
+
+.confirm-toast-ok.is-danger {
+  background: #c45c4a;
+}
+
+.confirm-toast-ok.is-danger:hover {
+  background: #b04e3e;
+}
+
+.confirm-toast-cancel {
+  background: #d7e4f2;
+  color: #1e2430;
+}
+
+.confirm-toast-cancel:hover {
+  background: #c5d6e8;
+}
+
+@keyframes confirm-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-toast {
+    animation: none;
+  }
+}
+
 .my-procurements,
 .procurement-detail {
   padding: 24px;
@@ -1332,8 +1430,37 @@ h3 {
 
 .my-procurements h1,
 .procurement-detail h1 {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 22px;
+}
+
+.my-procurements-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.my-procurements-empty-trash {
+  flex: none;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: #8a1c1c;
+  background: #fde8e8;
+  border: 1px solid #efc4c4;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.my-procurements-empty-trash:hover:not(:disabled) {
+  background: #f8d4d4;
+}
+
+.my-procurements-empty-trash:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .my-procurements-filters {

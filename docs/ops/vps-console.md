@@ -348,10 +348,8 @@ npm run db:migrate
 systemctl restart procurement-api
 ```
 
-Этап 42 (`0007_personal_workspaces`) клонирует прежний общий кабинет
-каждому активному пользователю. Перед `db:migrate` сделайте
-`pg_dump`. Blob в MinIO не копируется. Новые регистрации получают
-пустой личный кабинет.
+Обычное обновление — эти команды. Этот раз (личные кабинеты, этап 42) —
+шаг 11.2: сначала дамп, потом миграция.
 
 Статику nginx подхватит из `apps/web/dist` сразу после `build` web.
 Если страница «старая» — жёсткое обновление в браузере (Ctrl+F5).
@@ -431,6 +429,107 @@ systemctl restart procurement-api
 
 Другие сотрудники: «Регистрация» → ждут → вы в **Администрирование**
 одобряете и ставите роль.
+
+### 11.2. Этот раз: личные кабинеты (этап 42)
+
+После этого обновления у каждого пользователя свой кабинет. Общие
+закупки больше не перезаписывают друг друга. Миграция `0007` клонирует
+прежний общий кабинет `console` **каждому active** пользователю.
+Файлы в MinIO не копируются. Новые регистрации получают пустой кабинет.
+
+Новых переменных в `.env` нет. Без дампа не запускайте `db:migrate`.
+
+**1. Остановить API и снять дамп**
+
+```bash
+systemctl stop procurement-api
+mkdir -p /opt/backups
+cd /opt/procurement-ai-platform
+set -a
+source .env
+set +a
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+  > /opt/backups/procurement-before-stage42-$(date +%Y%m%d).dump
+ls -lh /opt/backups/procurement-before-stage42-*.dump
+```
+
+Ожидание: файл не нулевого размера. Если `POSTGRES_USER` пустой —
+подставьте `procurement` и базу `procurement`.
+
+**2. Код, пакеты, сборка**
+
+```bash
+cd /opt/procurement-ai-platform
+git config --global --add safe.directory /opt/procurement-ai-platform
+git pull
+npm install --include=dev
+npm run build
+npm run build -w @procurement/web
+```
+
+Ожидание `git log -1 --oneline`: коммит про personal workspace
+(`7990d4c` или новее на `main`).
+
+**3. Миграция**
+
+API всё ещё остановлен. `.env` уже в оболочке с шага 1; если сессия
+новая — снова `set -a; source .env; set +a`.
+
+```bash
+cd /opt/procurement-ai-platform
+npm run db:migrate
+```
+
+Ожидание: `PostgreSQL migrations applied`, без traceback. Повторный
+запуск безопасен: клон кабинета идёт один раз (маркер
+`personal_workspaces.v1`).
+
+Проверка, что кабинеты появились:
+
+```bash
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "select id from workspace_backfill_runs;
+   select count(*) as workspaces from workspaces;
+   select access_status, count(*) from auth_users group by 1;"
+```
+
+Ожидание: строка `personal_workspaces.v1`; число `workspaces` не меньше
+числа пользователей; active пользователи получат копию старого кабинета.
+
+**4. Права и запуск API**
+
+```bash
+chown -R procurement:procurement /opt/procurement-ai-platform
+chmod o+x /opt/procurement-ai-platform /opt/procurement-ai-platform/apps /opt/procurement-ai-platform/apps/web
+chmod -R o+rX /opt/procurement-ai-platform/apps/web/dist
+systemctl start procurement-api
+journalctl -u procurement-api -n 40 --no-pager
+```
+
+Ожидание: `active (running)`, `Specialist API listening`.
+
+**5. Проверка в браузере**
+
+Откройте сайт, **Ctrl+F5**, войдите двумя разными учётками (если есть).
+У каждого — свои «Мои закупки» и профили. Решение одного не видно у
+другого. Админка по-прежнему только пользователи и журнал, не чужой
+кабинет.
+
+**Если миграция упала.** Не повторяйте наугад `git pull`. Пришлите хвост
+`npm run db:migrate` и `journalctl`. Откат схемы — только из дампа шага 1,
+пока API выключен:
+
+```bash
+systemctl stop procurement-api
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists \
+  < /opt/backups/procurement-before-stage42-ДАТА.dump
+```
+
+Подставьте имя файла с `ls /opt/backups`. После отката не запускайте
+`db:migrate`, пока не разобрали ошибку.
 
 ---
 

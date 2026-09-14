@@ -23,16 +23,6 @@ import type { GoszakupkiPageClient } from "./goszakupki-by-http.js";
 import { downloadPublicDocumentation, type PublicDocumentationFetch } from "./public-download.js";
 import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.js";
 
-/** Rows one /tenders/posted page carries. Used only to size paging. */
-export const GOSZAKUPKI_LISTING_PAGE_SIZE = 20;
-/**
- * Console `limit` is "how many relevant hits to keep after scoring", not
- * "walk this many listing rows". Two pages per object is enough for what is
- * posted now; discovery repeats with a watermark. Six pages at 20 req/min
- * was a minute of waiting before the scorer ran.
- */
-export const GOSZAKUPKI_MAX_LISTING_PAGES_PER_TERM = 2;
-
 export interface GoszakupkiBySourceOptions {
   client: GoszakupkiPageClient;
   cacheTtlMs?: number;
@@ -69,7 +59,10 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
       string,
       ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]
     >();
-    const pagesPerTerm = listingPagesPerTerm(query);
+    const pagesPerTerm = Math.min(
+      30,
+      Math.max(1, Math.ceil((query.offset + query.limit) / 20) + 1),
+    );
 
     for (const term of terms) {
       for (let page = 1; page <= pagesPerTerm; page += 1) {
@@ -284,12 +277,4 @@ function matchesSearchRow(
 function sourceSequence(id: string): number {
   const value = Number(id.split("/").at(-1));
   return Number.isFinite(value) ? value : 0;
-}
-
-function listingPagesPerTerm(query: SearchQuery): number {
-  const needed = Math.max(
-    1,
-    Math.ceil((query.offset + query.limit) / GOSZAKUPKI_LISTING_PAGE_SIZE),
-  );
-  return Math.min(GOSZAKUPKI_MAX_LISTING_PAGES_PER_TERM, needed);
 }

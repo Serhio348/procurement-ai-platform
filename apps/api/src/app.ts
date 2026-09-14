@@ -39,7 +39,6 @@ import {
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inboxTopic,
-  CONSOLE_PLATFORM_SEARCH_TERM_LIMIT,
   inferSearchIntentPlan,
   isConsoleListedCase,
   partitionHitsByDecision,
@@ -512,17 +511,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    * A hit already remembered as irrelevant, or already waiting in the inbox
    * as a review case, is not looked at again: the source returning it once
    * more is not new information.
-   *
-   * Button search passes fetchCards: false — each card is a rate-limited
-   * procurement.get on the same pipe as listing, and waiting for dozens of
-   * them is why the specialist stared at a spinner for a minute. Discovery
-   * still opens cards; the listing score already dropped the junk.
    */
   async function reviewAmbiguous(
     selected: ReturnType<typeof selectRelevantSearchCards>,
     profile: SpecialistWorkingProfile,
     now: string,
-    options: { inboxForMatches: boolean; fetchCards?: boolean },
+    options: { inboxForMatches: boolean },
   ): Promise<{ matched: SpecialistProcurementCardValue[]; discarded: number; ambiguousCount: number }> {
     const rejected = workspace().rejectedSourceIds();
     const sourceIds = selected.ambiguousCards.map((item) => item.sourceProcurementId);
@@ -551,7 +545,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       pending.push({ card, hit });
     }
     const outcomes =
-      options.fetchCards === false || searchReview === undefined || pending.length === 0
+      searchReview === undefined || pending.length === 0
         ? undefined
         : await searchReview.review(
             pending.map((item) => item.hit),
@@ -682,45 +676,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   }
 
-  /**
-   * Button search: listing + code score. The plan model overlaps the site
-   * query (cheap inferred terms, not a second round-trip). Cards of review
-   * hits are not fetched here — that wait is a discovery job.
-   */
   async function runManualSearch(
     limit: number,
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace().profile();
-    const inferred = inferSearchIntentPlan({
-      name: profileDisplayName(profile),
-      keywords: profile.keywords,
-      excludeKeywords: profile.excludeKeywords,
-    });
-    const listingTerms = platformSearchTerms(
-      inferred,
-      profile.keywords,
-      CONSOLE_PLATFORM_SEARCH_TERM_LIMIT,
+    const plan = await resolveSearchPlan(profile);
+    const hits = await searchHits.search(
+      buildSearchQuery(profile, limit, offset, undefined, platformSearchTerms(plan, profile.keywords)),
     );
-    let planMs = 0;
-    let listingMs = 0;
-    const startedAt = Date.now();
-    const [plan, hits] = await Promise.all([
-      (async () => {
-        const t0 = Date.now();
-        const next = await resolveSearchPlan(profile);
-        planMs = Date.now() - t0;
-        return next;
-      })(),
-      (async () => {
-        const t0 = Date.now();
-        const next = await searchHits.search(
-          buildSearchQuery(profile, limit, offset, undefined, listingTerms),
-        );
-        listingMs = Date.now() - t0;
-        return next;
-      })(),
-    ]);
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -742,10 +706,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       resultItems.push((await rememberFound(card, profile.id, now)).card);
     }
-    const reviewed = await reviewAmbiguous(selected, profile, now, {
-      inboxForMatches: false,
-      fetchCards: false,
-    });
+    const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: false });
     resultItems.push(...reviewed.matched);
     const relevantCount = resultItems.length;
     const discardedCount =
@@ -755,9 +716,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       relevantCount,
       discardedCount,
       ambiguousCount: reviewed.ambiguousCount,
-      planMs,
-      listingMs,
-      totalMs: Date.now() - startedAt,
     });
     await pruneStaleCases();
     await persist();
@@ -828,7 +786,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               limit,
               0,
               discoveryPublishedFrom(profile),
-              platformSearchTerms(plan, profile.keywords, CONSOLE_PLATFORM_SEARCH_TERM_LIMIT),
+              platformSearchTerms(plan, profile.keywords),
             ),
           );
         } catch (error) {

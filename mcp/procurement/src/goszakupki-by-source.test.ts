@@ -197,29 +197,6 @@ describe("GoszakupkiBySource", () => {
     );
   });
 
-  it("does not walk extra listing pages just because the caller asked for 100 relevant hits", async () => {
-    const get = vi.fn(async (path: string) => ({
-      status: 200,
-      url: `https://goszakupki.by${path}`,
-      body: searchHtml,
-    }));
-    const source = new GoszakupkiBySource({ client: { get } });
-
-    await source.search(
-      SearchQuery.parse({
-        sourceId: "goszakupki_by",
-        keywords: ["выключатель"],
-        limit: 100,
-      }),
-    );
-
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(decodeURIComponent(String(get.mock.calls[1]?.[0]))).toContain("page=2");
-    expect(get.mock.calls.some((call) => decodeURIComponent(String(call[0])).includes("page=3"))).toBe(
-      false,
-    );
-  });
-
   it("does not query the next profile keyword after the requested limit is filled", async () => {
     const get = vi.fn(async (path: string) => ({
       status: 200,

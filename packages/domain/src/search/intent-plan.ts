@@ -74,24 +74,13 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
   });
 }
 
-/**
- * Console and discovery send at most this many phrases to the site. Each
- * phrase is its own listing query behind a 20 req/min cap; a long objects
- * list is why a button search used to take a minute before scoring ran.
- * Evaluation dumps pass no cap and keep every object.
- */
-export const CONSOLE_PLATFORM_SEARCH_TERM_LIMIT = 4;
-
 /** Platform queries: objects when we have them, otherwise the saved keywords. */
 export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
-  limit?: number,
 ): string[] {
-  const terms = plan.objects.length > 0 ? [...plan.objects] : [...fallbackKeywords];
-  if (limit === undefined) return terms;
-  const cap = Math.max(1, Math.floor(limit));
-  return terms.slice(0, cap);
+  if (plan.objects.length > 0) return [...plan.objects];
+  return [...fallbackKeywords];
 }
 
 /**

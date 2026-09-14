@@ -9,7 +9,7 @@ import {
   electricalEquipmentSeedV1,
   type InboxFixtureItem,
 } from "@procurement/contracts";
-import { SpecialistCatalog, SpecialistWorkspace, inferSearchIntentPlan, type ReviewOutcome } from "@procurement/domain";
+import { SpecialistCatalog, SpecialistWorkspace, type ReviewOutcome } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
@@ -437,7 +437,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("lets discovery's review port promote a checked hit, drop an unrelated one and ask about the rest", async () => {
+  it("lets the review port promote a checked hit, drop an unrelated one and ask about the rest", async () => {
     const hits = [
       SearchHit.parse({
         sourceId: "goszakupki_by",
@@ -501,73 +501,6 @@ describe("specialist API", () => {
       url: "/api/profile",
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-    await app.inject({
-      method: "POST",
-      url: "/api/profile/watch",
-      payload: { watchNewProcurements: true },
-    });
-
-    const ran = await app.inject({
-      method: "POST",
-      url: "/api/profile/discovery",
-      payload: {},
-    });
-    const body = JSON.parse(ran.body) as {
-      addedCount: number;
-      items: Array<{ id: string; title: string }>;
-    };
-    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
-    const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
-      (item) => item.title,
-    );
-    const card = await app.inject({
-      method: "GET",
-      url: `/api/procurements/${body.items[0]?.id ?? ""}`,
-    });
-    const detail = JSON.parse(card.body) as { foundAs?: string; actions: Array<{ detail: string }> };
-
-    // Button search no longer waits on cards. Discovery still opens them:
-    // listing noise is discarded first, a lot keyword promotes a hit.
-    expect(review).toHaveBeenCalledTimes(1);
-    expect(review.mock.calls[0]?.[0]).toHaveLength(3);
-    expect(body.addedCount).toBe(1);
-    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
-    expect(detail.foundAs).toBe("match");
-    expect(detail.actions.at(-1)?.detail).toContain("насосная");
-    expect(inboxTitles).toContain("Закупка НКУ");
-    expect(inboxTitles).not.toContain("СО2-инкубатор (термостат электронный)");
-
-    await app.close();
-  });
-
-  it("does not wait on card review when the specialist presses search", async () => {
-    const hits = [
-      SearchHit.parse({
-        sourceId: "goszakupki_by",
-        sourceProcurementId: "auction/lot-1",
-        url: "https://goszakupki.by/auction/view/lot-1",
-        title: "Поставка НКУ 0,4 кВ",
-      }),
-      SearchHit.parse({
-        sourceId: "goszakupki_by",
-        sourceProcurementId: "auction/incubator-1",
-        url: "https://goszakupki.by/auction/view/incubator-1",
-        title: "СО2-инкубатор (термостат электронный)",
-      }),
-    ];
-    const review = vi.fn(async () => {
-      throw new Error("button search must not fetch cards");
-    });
-    const app = await buildSpecialistApi({
-      catalog: new SpecialistCatalog(),
-      searchHits: { search: async () => hits },
-      searchReview: { review },
-    });
-    await app.inject({
-      method: "PUT",
-      url: "/api/profile",
-      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
-    });
 
     const searched = await app.inject({
       method: "POST",
@@ -578,73 +511,23 @@ describe("specialist API", () => {
       relevantCount: number;
       ambiguousCount: number;
       discardedCount: number;
-      items: Array<{ title: string }>;
+      items: Array<{ title: string; foundAs?: string; actions: Array<{ detail: string }> }>;
     };
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
       (item) => item.title,
     );
 
-    expect(review).not.toHaveBeenCalled();
-    expect(body.items).toEqual([]);
-    expect(body.relevantCount).toBe(0);
-    expect(body.discardedCount).toBe(1);
-    expect(body.ambiguousCount).toBe(1);
-    expect(inboxTitles).toEqual(["Поставка НКУ 0,4 кВ"]);
-
-    await app.close();
-  });
-
-  it("asks the source while the intent model is still running", async () => {
-    let releasePlan!: () => void;
-    const planBlocked = new Promise<void>((resolve) => {
-      releasePlan = resolve;
-    });
-    let searchStarted = false;
-    const app = await buildSpecialistApi({
-      catalog: new SpecialistCatalog(),
-      searchIntent: {
-        plan: async () => {
-          await planBlocked;
-          return inferSearchIntentPlan({
-            name: "НКУ для управления насосами",
-            keywords: ["НКУ"],
-            excludeKeywords: [],
-          });
-        },
-      },
-      searchHits: {
-        search: async () => {
-          searchStarted = true;
-          releasePlan();
-          return [
-            SearchHit.parse({
-              sourceId: "goszakupki_by",
-              sourceProcurementId: "auction/pump-1",
-              url: "https://goszakupki.by/auction/view/pump-1",
-              title: "Поставка НКУ для насосной станции",
-            }),
-          ];
-        },
-      },
-    });
-    await app.inject({
-      method: "PUT",
-      url: "/api/profile",
-      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
-    });
-
-    const searched = await app.inject({
-      method: "POST",
-      url: "/api/procurements/search",
-      payload: {},
-    });
-    const body = JSON.parse(searched.body) as { relevantCount: number; items: Array<{ title: string }> };
-
-    expect(searchStarted).toBe(true);
-    expect(searched.statusCode).toBe(200);
+    // Missing purpose goes to the review port. Substring noise is discarded first.
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(review.mock.calls[0]?.[0]).toHaveLength(3);
+    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+    expect(body.items[0]?.foundAs).toBe("match");
+    expect(body.items[0]?.actions.at(-1)?.detail).toContain("насосная");
     expect(body.relevantCount).toBe(1);
-    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ для насосной станции"]);
+    expect(body.discardedCount).toBe(2);
+    expect(body.ambiguousCount).toBe(1);
+    expect(inboxTitles).toEqual(["Закупка НКУ"]);
 
     await app.close();
   });
@@ -838,14 +721,9 @@ describe("specialist API", () => {
       url: "/api/profile",
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-    await app.inject({
-      method: "POST",
-      url: "/api/profile/watch",
-      payload: { watchNewProcurements: true },
-    });
 
-    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
-    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
 
     expect(review).toHaveBeenCalledTimes(1);
@@ -855,17 +733,19 @@ describe("specialist API", () => {
     ]);
     // Incubator is discarded before the port. The dropped shield is remembered;
     // missing purpose waits in the inbox.
+    expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
+    expect(JSON.parse(second.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
     expect((JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
       "Поставка НКУ 0,4 кВ",
     ]);
 
-    // Changing the phrases forgets the irrelevant verdict: the next pass asks again.
+    // Changing the phrases forgets the irrelevant verdict: the next search asks again.
     await app.inject({
       method: "PUT",
       url: "/api/profile",
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ", "ЩО"] },
     });
-    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     expect(review).toHaveBeenCalledTimes(2);
 
     await app.close();

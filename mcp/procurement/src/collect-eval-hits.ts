@@ -10,8 +10,7 @@ import { GoszakupkiBySource } from "./goszakupki-by-source.js";
  * Does not score, filter, or change SearchIntentPlan.
  *
  * Extra coverage terms are only for the dataset mix (монтаж, ремонт, …).
- * Production console search uses platformSearchTerms(plan, keywords, 4).
- * This dump keeps every object so the eval set is not silently truncated.
+ * Production console search still uses platformSearchTerms(plan, keywords).
  */
 const PROFILE = {
   name: "НКУ для управления насосами",

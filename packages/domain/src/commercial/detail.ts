@@ -41,14 +41,26 @@ export function formatCommercialDetailLines(
   if (paymentDays.length >= 1) {
     lines.push(
       `Срок оплаты: ${paymentDays
-        .map((value) => formatDayCount(value, unitForNumber(claims, "commercial.payment_deadline_days", value)))
+        .map((value) =>
+          formatDeadlineWithContext(
+            value,
+            unitForNumber(claims, "commercial.payment_deadline_days", value),
+            quoteForNumber(claims, "commercial.payment_deadline_days", value),
+          ),
+        )
         .join("; ")}`,
     );
   }
   if (deliveryDays.length >= 1) {
     lines.push(
       `Срок поставки: ${deliveryDays
-        .map((value) => formatDayCount(value, unitForNumber(claims, "commercial.delivery_period_days", value)))
+        .map((value) =>
+          formatDeadlineWithContext(
+            value,
+            unitForNumber(claims, "commercial.delivery_period_days", value),
+            quoteForNumber(claims, "commercial.delivery_period_days", value),
+          ),
+        )
         .join("; ")}`,
     );
   }
@@ -73,8 +85,32 @@ export function formatDayCount(value: number, unit: string | undefined): string 
   return `${String(value)} дн.`;
 }
 
+/** The event a period is counted from, copied from the quote, never invented. */
+export function durationContextFromQuote(quote: string): string | undefined {
+  const match = quote.match(
+    /(?:после|с(?:о)?\s+(?:даты|дня|момента)|со\s+дня)\s+[^.\n;,]{3,180}/iu,
+  );
+  const context = match?.[0]?.replace(/\s+/g, " ").trim();
+  if (context === undefined || context.length < 8) return undefined;
+  return context;
+}
+
+export function formatDeadlineWithContext(
+  value: number,
+  unit: string | undefined,
+  quote: string,
+): string {
+  const days = formatDayCount(value, unit);
+  const context = durationContextFromQuote(quote);
+  return context === undefined ? days : `${days} ${context}`;
+}
+
 function unitForNumber(claims: readonly CommercialClaim[], key: string, value: number): string | undefined {
   return claims.find((item) => item.key === key && item.value === value)?.unit;
+}
+
+function quoteForNumber(claims: readonly CommercialClaim[], key: string, value: number): string {
+  return claims.find((item) => item.key === key && item.value === value)?.quote ?? "";
 }
 
 function uniqueNumbers(claims: readonly CommercialClaim[], key: string): number[] {

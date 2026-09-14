@@ -3,7 +3,7 @@ import type {
   CommercialFactKey,
   SpecialistTermsEvidence,
 } from "@procurement/contracts";
-import { formatDayCount, paymentKindLabel } from "./detail.js";
+import { formatDeadlineWithContext, paymentKindLabel } from "./detail.js";
 import type { TrustedClaimPage } from "./trust.js";
 
 /** Conditions the specialist asks about first. Their absence is what triggers a model read. */
@@ -148,7 +148,7 @@ function claimValueLabel(claim: CommercialClaim): string | undefined {
       claim.key === "commercial.payment_deadline_days" ||
       claim.key === "commercial.delivery_period_days"
     ) {
-      return formatDayCount(claim.value, claim.unit);
+      return formatDeadlineWithContext(claim.value, claim.unit, claim.quote);
     }
     return String(claim.value);
   }

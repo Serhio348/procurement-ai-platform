@@ -314,8 +314,8 @@ describe("applyParticipateDocuments", () => {
     ]);
 
     expect(next.termsDetail).toContain("Гарантия: 24 мес.");
-    expect(next.termsDetail).toContain("Срок поставки: 30 календарных дн.");
-    expect(next.termsDetail).toContain("Срок оплаты: 15 календарных дн.");
+    expect(next.termsDetail).toContain("Срок поставки: 30 календарных дн. с даты заключения договора");
+    expect(next.termsDetail).toContain("Срок оплаты: 15 календарных дн. с даты поставки");
     expect(next.termsDetail ?? "").not.toMatch(/^Срок:/m);
   });
 });

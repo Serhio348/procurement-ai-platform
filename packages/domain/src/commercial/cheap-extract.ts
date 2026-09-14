@@ -15,10 +15,16 @@ export function cheapExtractCommercialClaims(page: {
     const regex = new RegExp(pattern.source, "giu");
     for (const match of page.text.matchAll(regex)) {
       const raw = match[1];
-      const quote = match[0]?.trim();
+      let quote = match[0]?.trim();
       if (raw === undefined || quote === undefined || quote.length === 0) continue;
       const value = pattern.parse(raw);
       if (value === undefined) continue;
+      if (
+        pattern.key === "commercial.payment_deadline_days" ||
+        pattern.key === "commercial.delivery_period_days"
+      ) {
+        quote = quoteWithDurationAnchor(quote, page.text.slice((match.index ?? 0) + match[0].length));
+      }
       if (pattern.key === "commercial.advance_percent" && quoteLooksLikeAdvanceCap(quote)) {
         claims.push(
           CommercialClaim.parse({
@@ -71,7 +77,7 @@ function dedupeClaimValues(claims: CommercialClaimValue[]): CommercialClaimValue
 }
 
 const commercialNoteSource =
-  "(?:срок(?:и)?\\s+поставки|условия оплаты|условия доставки|место поставки|срок(?:и)?\\s+выполнения\\p{L}*|срок(?:и)?\\s+оказания\\p{L}*|срок\\s+действия\\s+(?:предложени|заявк)\\p{L}*)\\s*:\\s*[^\\n;]{3,160}";
+  "(?:срок(?:и)?\\s+поставки|условия оплаты|условия доставки|место поставки|срок(?:и)?\\s+выполнения\\p{L}*|срок(?:и)?\\s+оказания\\p{L}*|срок\\s+действия\\s+(?:предложени|заявк)\\p{L}*)\\s*[:–—-]\\s*(?:(?!\\.\\s)[^\\n;]){3,220}";
 
 /** Labeled lines from TZ/request text. The match is the quote; no numbers invented. */
 export function cheapExtractCommercialNotes(pageText: { text: string }): string[] {
@@ -166,10 +172,11 @@ function extractWithinDuration(page: {
     if (phrase === undefined || phrase.length === 0) continue;
     const index = match.index ?? 0;
     const left = page.text.slice(Math.max(0, index - 280), index);
-    const right = page.text.slice(index + phrase.length, index + phrase.length + 80);
+    const right = page.text.slice(index + phrase.length, index + phrase.length + 220);
     const nearLeft = lastClause(left);
     const nearRight = firstClause(right);
     const kind = classifyWithinDuration(nearLeft, nearRight, left);
+    const quoted = quoteWithDurationAnchor(phrase, right);
     // The specialist asked for supply and payment terms only — bid validity,
     // bank details, contract signing and unlabeled durations are noise.
     if (kind === "note" || kind === "bidValidity") continue;
@@ -185,7 +192,7 @@ function extractWithinDuration(page: {
     const value = days(raw);
     if (value === undefined) continue;
     if (kind === "work") {
-      const note = `${label}: ${phrase}.`;
+      const note = `${label}: ${quoted}.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
@@ -197,7 +204,7 @@ function extractWithinDuration(page: {
         confidence: 0.9,
         hash: page.hash,
         page: page.page,
-        quote: phrase,
+        quote: quoted,
       }),
     );
   }
@@ -277,6 +284,23 @@ function extractInstallmentNotes(page: { text: string }): string[] {
     if (!notes.includes(note)) notes.push(note);
   }
   return notes;
+}
+
+/** «после подписания акта», «с даты поставки» — the event the period is counted from. */
+const durationAnchorSource =
+  "(?:после|с(?:о)?\\s+(?:даты|дня|момента)|со\\s+дня)\\s+[^\\n.;,]{3,180}";
+
+function durationAnchorAfter(right: string): string {
+  const trimmed = right.replace(/^[\s,]+/u, "");
+  const match = trimmed.match(new RegExp(`^${durationAnchorSource}`, "iu"));
+  if (match?.[0] === undefined) return "";
+  return match[0].replace(/\s+/g, " ").trim();
+}
+
+function quoteWithDurationAnchor(phrase: string, right: string): string {
+  const anchor = durationAnchorAfter(right);
+  if (anchor.length === 0) return phrase;
+  return `${phrase} ${anchor}`.replace(/\s+/g, " ");
 }
 
 export function dayCountUnitFromQuote(quote: string): string {
@@ -470,7 +494,7 @@ const patterns: readonly CheapPattern[] = [
 ];
 
 function quoteLooksLikeAdvanceCap(quote: string): boolean {
-  return /до\s+\d/u.test(quote) || /не\s+более/u.test(quote);
+  return /до\s+\d/u.test(quote) || /не\s+более/u.test(quote) || /не\s+превышающ/u.test(quote);
 }
 
 function pageHasAdvanceCap(text: string, value: number): boolean {

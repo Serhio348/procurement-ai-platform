@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cheapExtractCommercialClaims, cheapExtractCommercialNotes } from "./cheap-extract.js";
+import { formatCommercialDetailLines } from "./detail.js";
 
 const hash = "a".repeat(64);
 
@@ -176,7 +177,7 @@ describe("cheapExtractCommercialClaims", () => {
         key: "commercial.payment_deadline_days",
         value: 15,
         unit: "calendar_days",
-        quote: expect.stringMatching(/в течение 15 календарных дней/i),
+        quote: expect.stringMatching(/в течение 15 календарных дней с даты подписания акта/i),
       }),
     ]);
     expect(
@@ -299,6 +300,38 @@ describe("cheapExtractCommercialClaims", () => {
       expect.objectContaining({ value: 15, unit: "calendar_days" }),
     ]);
     expect(claims.some((item) => item.key === "commercial.delivery_period_days")).toBe(false);
+  });
+
+  it("keeps what a 30-day payment is counted from, and treats «не превышающий» as a cap", () => {
+    const text =
+      "Условия оплаты – текущий аванс, не превышающий 70% стоимости работ, планируемых к выполнению в следующем (расчетном) месяце, при условии получения денежных средств от Заказчика. Оплата выполненных работ производится Подрядчиком на основании подписанной Сторонами справки формы С-3а в течении 30 (тридцать) календарных дней после подписания акта сдачи-приемки выполненных строительных и иных специальных монтажных работ, при условии получения денежных средств от Заказчика.";
+    const claims = cheapExtractCommercialClaims({ hash, page: 1, text });
+    expect(claims.filter((item) => item.key === "commercial.advance_percent")).toEqual([]);
+    expect(claims.filter((item) => item.key === "commercial.advance_percent_cap")).toEqual([
+      expect.objectContaining({
+        key: "commercial.advance_percent_cap",
+        value: 70,
+        quote: expect.stringMatching(/не превышающий 70%/i),
+      }),
+    ]);
+    expect(claims.filter((item) => item.key === "commercial.payment_deadline_days")).toEqual([
+      expect.objectContaining({
+        key: "commercial.payment_deadline_days",
+        value: 30,
+        unit: "calendar_days",
+        quote: expect.stringMatching(
+          /в течении 30 \(тридцать\) календарных дней после подписания акта сдачи-приемки/i,
+        ),
+      }),
+    ]);
+    expect(formatCommercialDetailLines(claims)).toEqual(
+      expect.arrayContaining([
+        "Аванс: до 70%.",
+        expect.stringMatching(
+          /Срок оплаты: 30 календарных дн\. после подписания акта сдачи-приемки/i,
+        ),
+      ]),
+    );
   });
 
   it("reads «без аванса» as a zero advance, not a missing field", () => {

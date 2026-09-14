@@ -44,6 +44,7 @@ import {
   partitionHitsByDecision,
   platformSearchTerms,
   profileDisplayName,
+  reconcileSearchIntentPlan,
   selectRelevantSearchCards,
   shouldRunDiscovery,
   SpecialistCatalog,
@@ -447,11 +448,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
     if (searchIntent === undefined) return inferred;
     try {
-      return await searchIntent.plan({
-        name: profileDisplayName(profile),
-        keywords: profile.keywords,
-        excludeKeywords: profile.excludeKeywords,
-      });
+      return await reconcileSearchIntentPlan(
+        inferred,
+        await searchIntent.plan({
+          name: profileDisplayName(profile),
+          keywords: profile.keywords,
+          excludeKeywords: profile.excludeKeywords,
+        }),
+      );
     } catch (error) {
       logger.warn("Search intent parser failed; using the cheap plan", {
         profileName: profileDisplayName(profile),

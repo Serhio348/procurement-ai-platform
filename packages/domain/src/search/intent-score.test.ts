@@ -4,6 +4,7 @@ import {
   inferSearchIntentPlan,
   parseSearchIntentPlan,
   platformSearchTerms,
+  reconcileSearchIntentPlan,
 } from "./intent-plan.js";
 import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
 
@@ -136,6 +137,18 @@ describe("scoreSearchIntent", () => {
     expect(result.matchedObjects).toContain("НКУ");
   });
 
+  it("reviews a works hit whose title has монтаж even when the object phrase is absent", () => {
+    const worksPlan = SearchIntentPlan.parse({
+      objects: ["электросиловое оборудование"],
+      desired_actions: ["монтаж", "пусконаладка"],
+      excluded_actions: [],
+      intent: "works",
+    });
+    const result = scoreSearchIntent({ title: "Монтаж КРУ 10 кВ" }, worksPlan);
+    expect(result.decision).toBe("review");
+    expect(result.matchedDesired).toContain("монтаж");
+  });
+
   it("discards NCU whose purpose is clearly something else", () => {
     const result = scoreSearchIntent(
       { title: "Поставка НКУ для уличного освещения" },
@@ -189,6 +202,18 @@ describe("inferSearchIntentPlan", () => {
     expect(plan.excluded_actions).toContain("монтаж");
     expect(plan.intent).toBe("equipment_purchase");
   });
+
+  it("treats монтаж in the profile name as works even when keywords are only equipment", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электросиловое оборудование", "КРУ"],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.desired_actions).toEqual(expect.arrayContaining(["монтаж", "пусконаладка"]));
+    expect(plan.excluded_actions).not.toContain("монтаж");
+    expect(plan.objects).toEqual(expect.arrayContaining(["электросиловое оборудование", "КРУ"]));
+  });
 });
 
 describe("platformSearchTerms", () => {
@@ -206,5 +231,39 @@ describe("platformSearchTerms", () => {
       "ячейка",
       "ещё фраза",
     ]);
+  });
+
+  it("puts works verbs on the site query together with every keyword", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электросиловое оборудование", "КРУ"],
+      excludeKeywords: [],
+    });
+    expect(platformSearchTerms(plan, plan.objects)).toEqual([
+      "монтаж",
+      "пусконаладка",
+      "электросиловое оборудование",
+      "КРУ",
+    ]);
+  });
+});
+
+describe("reconcileSearchIntentPlan", () => {
+  it("keeps a works profile as works when the model filled a purchase plan", () => {
+    const inferred = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["КРУ"],
+      excludeKeywords: [],
+    });
+    const fromModel = SearchIntentPlan.parse({
+      objects: ["КРУ"],
+      desired_actions: ["поставка"],
+      excluded_actions: ["монтаж", "пусконаладка"],
+      intent: "equipment_purchase",
+    });
+    const merged = reconcileSearchIntentPlan(inferred, fromModel);
+    expect(merged.intent).toBe("works");
+    expect(merged.desired_actions).toEqual(expect.arrayContaining(["монтаж", "пусконаладка"]));
+    expect(merged.excluded_actions).not.toContain("монтаж");
   });
 });

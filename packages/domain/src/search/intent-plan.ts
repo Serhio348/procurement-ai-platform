@@ -38,7 +38,9 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
   const objects: string[] = [];
   const desired: string[] = [];
   const context: string[] = [];
-  const lookingForWorks = profile.keywords.some((phrase) => matchesAny(phrase, WORK_LEXICON));
+  const lookingForWorks = [profile.name, ...profile.keywords].some((phrase) =>
+    matchesAny(phrase, WORK_LEXICON),
+  );
   for (const phrase of profile.keywords) {
     if (matchesAny(phrase, DESIRED_LEXICON)) {
       pushUnique(desired, phrase);
@@ -51,6 +53,10 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
     const split = splitPurposePhrase(phrase);
     if (split.object !== undefined) pushUnique(objects, split.object);
     for (const item of split.context) pushUnique(context, item);
+  }
+  for (const action of WORK_LEXICON) {
+    if (action === "пуско-наладка") continue;
+    if (matchesAny(profile.name, [action])) pushUnique(desired, action);
   }
   for (const item of splitPurposePhrase(profile.name).context) pushUnique(context, item);
   if (!lookingForWorks && desired.length === 0 && objects.length > 0) {
@@ -75,18 +81,47 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
 }
 
 /**
- * Every saved phrase goes to the site as its own query. Objects from the
- * plan come first so the listing is equipment-shaped; leftover keywords
- * are appended, never truncated.
+ * Every saved phrase still goes to the site as its own query. Objects from
+ * the plan come first; a works profile also sends монтаж / пусконаладка so
+ * the listing is not only equipment names. The model must not drop a line
+ * the specialist typed.
  */
 export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
 ): string[] {
   const terms: string[] = [];
+  if (plan.intent === "works") {
+    for (const item of plan.desired_actions) pushUnique(terms, item);
+  }
   for (const item of plan.objects) pushUnique(terms, item);
   for (const item of fallbackKeywords) pushUnique(terms, item);
   return terms;
+}
+
+/**
+ * A works profile stays works even if the model filled equipment_purchase
+ * and put монтаж into excluded_actions. Cheap infer already saw the verbs
+ * in the name or keywords; that is not something the parser may override.
+ */
+export function reconcileSearchIntentPlan(
+  inferred: SearchIntentPlanValue,
+  fromModel: SearchIntentPlanValue,
+): SearchIntentPlanValue {
+  if (inferred.intent !== "works") return fromModel;
+  const desired: string[] = [];
+  for (const item of fromModel.desired_actions) pushUnique(desired, item);
+  for (const item of inferred.desired_actions) pushUnique(desired, item);
+  const excluded = fromModel.excluded_actions.filter((item) => !matchesAny(item, WORK_LEXICON));
+  return SearchIntentPlan.parse({
+    objects: fromModel.objects.length > 0 ? fromModel.objects : inferred.objects,
+    required_context:
+      fromModel.required_context.length > 0 ? fromModel.required_context : inferred.required_context,
+    excluded_context: fromModel.excluded_context,
+    desired_actions: desired,
+    excluded_actions: excluded,
+    intent: "works",
+  });
 }
 
 /**

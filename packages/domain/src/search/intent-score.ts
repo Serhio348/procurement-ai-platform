@@ -204,6 +204,10 @@ function decisionFor(
   if (excludedRole === "subject") return "veto";
   if (contextRole === "mismatch") return "discard";
   if (objectRole === "none") {
+    // Works profiles search by монтаж / пусконаладка. The object phrase
+    // («электросиловое оборудование») often never appears in the title;
+    // that is review, not junk. Equipment purchase still discards score 0.
+    if (plan.intent === "works" && desiredCount > 0) return "review";
     if (plan.objects.length > 0) return "discard";
     if (desiredCount > 0) return "review";
     return "discard";

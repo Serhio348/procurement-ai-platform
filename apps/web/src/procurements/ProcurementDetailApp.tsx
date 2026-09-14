@@ -8,6 +8,7 @@ import type {
 } from "@procurement/contracts";
 import {
   bidsDeadlinePassed,
+  isIngestRunning,
   isSingleSourceAfterFailedProcedure,
   procedureBuyerFields,
   procedureDetailFields,
@@ -32,6 +33,7 @@ export function ProcurementDetailApp({
   restore,
   purge,
   ingestProgress,
+  activeIngest = {},
 }: {
   procurements: readonly SpecialistProcurementCard[];
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
@@ -40,6 +42,7 @@ export function ProcurementDetailApp({
   restore?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
   purge?: (id: string) => Promise<void>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
+  activeIngest?: Record<string, SpecialistIngestProgress>;
 }): ReactElement {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -55,6 +58,16 @@ export function ProcurementDetailApp({
   const [purgeConfirm, setPurgeConfirm] = useState(false);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const ingestGeneration = useRef(0);
+  const fetchCaseRef = useRef(fetchCase);
+  fetchCaseRef.current = fetchCase;
+  const onCardLoadedRef = useRef(onCardLoaded);
+  onCardLoadedRef.current = onCardLoaded;
+  const shownProgress =
+    id !== undefined && isIngestRunning(activeIngest[id]?.phase)
+      ? activeIngest[id]
+      : isIngestRunning(progress?.phase)
+        ? progress
+        : undefined;
 
   useEffect(() => {
     setMissing(false);
@@ -91,6 +104,41 @@ export function ProcurementDetailApp({
     }
     void loadPlatformCard(id);
   }, [id, stored?.id, stored?.sourceCard, stored?.triage]);
+
+  useEffect(() => {
+    if (id === undefined || ingestProgress === undefined) return undefined;
+    if (stored?.triage !== "participate") return undefined;
+    let cancelled = false;
+    let timer = 0;
+    const pull = (): void => {
+      void ingestProgress(id)
+        .then(async (next) => {
+          if (cancelled) return;
+          if (isIngestRunning(next.phase)) {
+            setProgress(next);
+            return;
+          }
+          setProgress(undefined);
+          window.clearInterval(timer);
+          if (next.phase !== "done" || fetchCaseRef.current === undefined) return;
+          try {
+            const card = await fetchCaseRef.current(id);
+            if (cancelled) return;
+            setFetched(card);
+            onCardLoadedRef.current?.(card);
+          } catch {
+            // Participate stub stays until the specialist reloads the card.
+          }
+        })
+        .catch(() => undefined);
+    };
+    pull();
+    timer = window.setInterval(pull, 400);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [id, stored?.triage, ingestProgress]);
 
   async function loadPlatformCard(procurementId: string): Promise<void> {
     setLoading(true);
@@ -287,10 +335,10 @@ export function ProcurementDetailApp({
                 void runDecide("participate");
               }}
             >
-              {busyKind === "participate"
-                ? (progress === undefined
+              {busyKind === "participate" || shownProgress !== undefined
+                ? (shownProgress === undefined
                   ? "Скачиваем документы…"
-                  : ingestProgressCaption(progress))
+                  : ingestProgressCaption(shownProgress))
                 : "Участвовать"}
             </button>
           </div>
@@ -387,6 +435,21 @@ export function ProcurementDetailApp({
             </p>
           ) : null}
         </section>
+
+        {shownProgress === undefined ? null : (
+          <div className="ingest-progress" aria-live="polite">
+            <div className="ingest-progress-label">{ingestProgressCaption(shownProgress)}</div>
+            <div
+              className="ingest-progress-bar"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={shownProgress.percent}
+            >
+              <span style={{ width: `${String(shownProgress.percent)}%` }} />
+            </div>
+          </div>
+        )}
 
         <details className="procurement-detail-collapse">
           <summary>Документы ({stored.documents.length})</summary>

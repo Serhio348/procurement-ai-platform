@@ -47,6 +47,31 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
   });
 
+  it("shows live ingest progress on a participate card", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[card]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+          activeIngest={{
+            [card.id]: {
+              procurementId: card.id,
+              phase: "downloading",
+              total: 2,
+              downloaded: 1,
+              indexed: 0,
+              readCount: 0,
+              percent: 40,
+              currentName: "ТЗ.pdf",
+              files: [],
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/Скачивание «ТЗ.pdf» — 40%/)).toBeTruthy();
+  });
+
   it("does not flag a deadline that is still ahead", () => {
     render(
       <MemoryRouter initialEntries={["/my-procurements"]}>

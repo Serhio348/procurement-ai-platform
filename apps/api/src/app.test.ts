@@ -24,6 +24,19 @@ afterEach(async () => {
   await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+async function waitForCase(
+  app: Awaited<ReturnType<typeof buildSpecialistApi>>,
+  id: string,
+  assert: (body: Record<string, unknown>) => void,
+): Promise<Record<string, unknown>> {
+  return vi.waitFor(async () => {
+    const response = await app.inject({ method: "GET", url: `/api/procurements/${id}` });
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    assert(body);
+    return body;
+  });
+}
+
 describe("specialist API", () => {
   it("lists seeded urgent inbox items without the non-urgent household panel", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
@@ -1018,14 +1031,17 @@ describe("specialist API", () => {
       url: `/api/procurements/${found.id}/decision`,
       payload: { kind: "participate" },
     });
-    const items = JSON.parse(participated.body).items as Array<{
-      documents: Array<{ name: string; status: string }>;
-    }>;
+    const stored = await waitForCase(app, found.id, (body) => {
+      expect(body["documents"]).toEqual([
+        expect.objectContaining({ name: "ТЗ.pdf", status: "hashed" }),
+      ]);
+    });
 
     expect(monitored.statusCode).toBe(200);
     expect(ingest).toHaveBeenCalledTimes(1);
     expect(participated.statusCode).toBe(200);
-    expect(items[0]?.documents).toEqual([
+    expect(JSON.parse(participated.body).items[0]?.triage).toBe("participate");
+    expect(stored["documents"]).toEqual([
       expect.objectContaining({ name: "ТЗ.pdf", status: "hashed" }),
     ]);
 
@@ -1090,12 +1106,14 @@ describe("specialist API", () => {
       sourceCard?: { buyer?: { registrationNumber?: string } };
       documents?: Array<{ name: string }>;
     }>;
+    await waitForCase(app, found.id, (body) => {
+      expect(body["documents"]).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
+    });
 
     expect(participated.statusCode).toBe(200);
     expect(ingest).toHaveBeenCalledTimes(1);
     expect(items[0]?.amountLabel).toBe("160 651.42 BYN");
     expect(items[0]?.sourceCard?.buyer?.registrationNumber).toBe("200050653");
-    expect(items[0]?.documents).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
 
     await app.close();
   });
@@ -1140,13 +1158,12 @@ describe("specialist API", () => {
       url: `/api/procurements/${found.id}/decision`,
       payload: { kind: "participate" },
     });
-    const items = JSON.parse(participated.body).items as Array<{
-      documents: Array<{ name: string }>;
-    }>;
+    await waitForCase(app, found.id, (body) => {
+      expect(body["documents"]).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
+    });
 
     expect(participated.statusCode).toBe(200);
     expect(ingest).toHaveBeenCalledTimes(1);
-    expect(items[0]?.documents).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
 
     await app.close();
   });
@@ -1188,15 +1205,77 @@ describe("specialist API", () => {
       url: `/api/procurements/${found.id}/decision`,
       payload: { kind: "participate" },
     });
-    const done = await app.inject({
-      method: "GET",
-      url: `/api/procurements/${found.id}/ingest-progress`,
+    await vi.waitFor(async () => {
+      const done = await app.inject({
+        method: "GET",
+        url: `/api/procurements/${found.id}/ingest-progress`,
+      });
+      expect(JSON.parse(done.body).phase).toBe("done");
+      expect(JSON.parse(done.body).percent).toBe(100);
     });
 
     expect(JSON.parse(idle.body).phase).toBe("idle");
     expect(participated.statusCode).toBe(200);
-    expect(JSON.parse(done.body).phase).toBe("done");
-    expect(JSON.parse(done.body).percent).toBe(100);
+
+    await app.close();
+  });
+
+  it("keeps participate ingest running after the decision request returns", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    let release: ((card: typeof found) => void) | undefined;
+    const ingest = vi.fn(
+      () =>
+        new Promise<typeof found>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest },
+    });
+
+    const participated = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/decision`,
+      payload: { kind: "participate" },
+    });
+    const mid = await app.inject({
+      method: "GET",
+      url: `/api/procurements/${found.id}/ingest-progress`,
+    });
+
+    expect(participated.statusCode).toBe(200);
+    expect(JSON.parse(participated.body).items[0]?.documents).toEqual([]);
+    expect(JSON.parse(participated.body).items[0]?.triage).toBe("participate");
+    expect(JSON.parse(mid.body).phase).toBe("listing");
+
+    release?.(
+      SpecialistProcurementCard.parse({
+        ...found,
+        triage: "participate",
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/401",
+            hash: "a".repeat(64),
+            status: "hashed",
+          },
+        ],
+      }),
+    );
+    await waitForCase(app, found.id, (body) => {
+      expect(body["documents"]).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
+    });
 
     await app.close();
   });

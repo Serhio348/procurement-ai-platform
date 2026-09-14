@@ -303,13 +303,8 @@ export function ProcurementsApp({
         if (kind === "reject") {
           setNotice("Перемещено в корзину. Вернуть можно в разделе «Корзина».");
         } else if (kind === "participate" && updated !== undefined) {
-          const hashed = updated.documents.filter((item) => item.status === "hashed").length;
-          const failed = updated.documents.filter((item) => item.status === "download_failed").length;
-          const read = updated.documents.filter((item) => specialistDocumentWasRead(item)).length;
           setNotice(
-            failed > 0
-              ? `Участвуем. Карточка в «Мои закупки». Прочитано: ${String(read)}, скачано: ${String(hashed)}, не скачалось: ${String(failed)}.`
-              : `Участвуем. Карточка в «Мои закупки». Прочитано агентом: ${String(read)} из ${String(hashed)}.`,
+            "Участвуем. Карточка в «Мои закупки». Документы скачиваются — можно открыть другой раздел.",
           );
         } else {
           setNotice("Отслеживаем. Карточка в «Мои закупки».");

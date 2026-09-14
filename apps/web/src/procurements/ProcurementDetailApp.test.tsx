@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
+import { ProcedureCard, SpecialistIngestProgress, SpecialistProcurementCard } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ProcurementDetailApp } from "./ProcurementDetailApp.js";
@@ -229,5 +229,56 @@ describe("ProcurementDetailApp", () => {
     await waitFor(() => {
       expect(screen.getByText("Список корзины")).toBeTruthy();
     });
+  });
+
+  it("keeps ingest progress on the card after the specialist opens it", async () => {
+    const participating = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000405",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "participate",
+      sourceCard: source,
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/my-procurements/${participating.id}`]}>
+        <Routes>
+          <Route
+            path="/my-procurements/:id"
+            element={
+              <ProcurementDetailApp
+                procurements={[participating]}
+                ingestProgress={async () =>
+                  SpecialistIngestProgress.parse({
+                    procurementId: participating.id,
+                    phase: "downloading",
+                    total: 1,
+                    downloaded: 0,
+                    indexed: 0,
+                    readCount: 0,
+                    percent: 15,
+                    currentName: "ТЗ.pdf",
+                    files: [
+                      {
+                        name: "ТЗ.pdf",
+                        sourceUrl: "https://goszakupki.by/files/1",
+                        state: "downloading",
+                        percent: 15,
+                      },
+                    ],
+                  })
+                }
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("progressbar")).toBeTruthy();
+    expect(screen.getByText(/Скачивание «ТЗ.pdf» — 15%/)).toBeTruthy();
   });
 });

@@ -2,7 +2,11 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SdkMcpToolCaller, type McpToolCaller } from "@procurement/mcp-client";
+import {
+  SdkMcpToolCaller,
+  serializeMcpToolCaller,
+  type McpToolCaller,
+} from "@procurement/mcp-client";
 import type { Logger } from "@procurement/observability";
 
 export interface ProcurementMcpProcess {
@@ -55,7 +59,7 @@ export async function connectProcurementMcp(options: {
   }
   options.logger.info("Procurement MCP connected", { mode: options.mode });
   return {
-    caller: new SdkMcpToolCaller(client),
+    caller: serializeMcpToolCaller(new SdkMcpToolCaller(client)),
     close: async () => {
       await client.close();
     },

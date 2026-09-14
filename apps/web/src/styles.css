@@ -1747,6 +1747,12 @@ h3 {
   overflow: hidden;
 }
 
+.my-procurements-card-ingest {
+  color: #2d5a3d;
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
 .my-procurements-card-facts {
   display: flex;
   flex-wrap: wrap;

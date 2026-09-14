@@ -189,8 +189,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const journal = options.journal ?? createMemoryAdminJournal();
   const caseMaxAgeMs = options.caseMaxAgeMs ?? DEFAULT_CASE_MAX_AGE_MS;
   const discoveryController = options.discoveryController ?? createDiscoveryController();
-  const persist = async (): Promise<void> => {
-    const cabinet = currentCabinet();
+  const persist = async (cabinet = currentCabinet()): Promise<void> => {
     await cabinets.persist(cabinet);
     if (options.persistWorkspace !== undefined) {
       await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
@@ -250,6 +249,46 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return card;
     }
   }
+
+  /**
+   * Participate ingest is long and must outlive the HTTP request: switching
+   * console tabs aborts the fetch, and one stdio MCP pipe cannot overlap get
+   * with get_documents. Persist triage first, then download in the cabinet
+   * that owned the request.
+   */
+  const ingestJobs = new Set<string>();
+  const startParticipateIngest = (card: SpecialistProcurementCardValue): void => {
+    const ingest = documentIngest;
+    if (ingest === undefined || ingestJobs.has(card.id)) return;
+    ingestJobs.add(card.id);
+    ingestProgress.begin(card.id);
+    const cabinet = currentCabinet();
+    void cabinetAls.run(cabinet, async () => {
+      try {
+        const ingested = withTriage(await ingest.ingest(card), workspace());
+        ingestProgress.done(card.id);
+        catalog().upsertCase(ingested);
+        await persist(cabinet);
+        logger.info("Specialist participate document ingest finished", {
+          sourceProcurementId: card.sourceProcurementId,
+          documentCount: ingested.documents.length,
+        });
+      } catch (error) {
+        ingestProgress.fail(card.id);
+        logger.error("Specialist participate document ingest failed", error, {
+          sourceProcurementId: card.sourceProcurementId,
+        });
+        await recordJournal(journal, {
+          kind: "documents",
+          level: "error",
+          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
+          sourceProcurementId: card.sourceProcurementId,
+        });
+      } finally {
+        ingestJobs.delete(card.id);
+      }
+    });
+  };
 
   const listPage = async (
     query: {
@@ -1216,36 +1255,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     workspace().recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
     let next = withTriage(card, workspace());
-    // One stdio MCP process cannot run get + get_documents at once: the
-    // responses cross and the platform card is lost while files still arrive.
+    // Hydrate the platform card before returning; file ingest continues after.
     if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
       next = await hydrateSourceCard(next);
       if (next.live !== true) {
         next = SpecialistProcurementCard.parse({ ...next, live: true });
       }
     }
-    if (parsed.data.kind === "participate" && documentIngest !== undefined) {
-      ingestProgress.begin(card.id);
-      try {
-        next = withTriage(await documentIngest.ingest(next), workspace());
-        ingestProgress.done(card.id);
-      } catch (error) {
-        ingestProgress.fail(card.id);
-        logger.error("Specialist participate document ingest failed", error, {
-          sourceProcurementId: card.sourceProcurementId,
-        });
-        await recordJournal(journal, {
-          kind: "documents",
-          level: "error",
-          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
-          sourceProcurementId: card.sourceProcurementId,
-        });
-      }
-    }
     catalog().upsertCase(next);
     catalog().dismissByProcurementId(next.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
+    if (parsed.data.kind === "participate") {
+      startParticipateIngest(next);
+    }
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,
       kind: parsed.data.kind,

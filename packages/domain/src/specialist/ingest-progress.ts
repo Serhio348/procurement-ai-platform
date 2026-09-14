@@ -2,7 +2,14 @@ import type {
   SpecialistCaseDocument,
   SpecialistIngestFileProgress,
   SpecialistIngestFileState,
+  SpecialistIngestProgress,
 } from "@procurement/contracts";
+
+export function isIngestRunning(
+  phase: SpecialistIngestProgress["phase"] | undefined,
+): boolean {
+  return phase === "listing" || phase === "downloading" || phase === "indexing";
+}
 
 /** Download is the cheap slice of one file; recognition is the rest. */
 const DOWNLOAD_WEIGHT = 20;

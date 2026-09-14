@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
-import type { SpecialistProcurementCard } from "@procurement/contracts";
-import { bidsDeadlinePassed, isSingleSourceAfterFailedProcedure } from "@procurement/domain";
+import type { SpecialistIngestProgress, SpecialistProcurementCard } from "@procurement/contracts";
+import {
+  bidsDeadlinePassed,
+  isIngestRunning,
+  isSingleSourceAfterFailedProcedure,
+} from "@procurement/domain";
 import { ConfirmToast, TRASH_EMPTY_PROMPT, TRASH_MOVE_PROMPT, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
+import { ingestProgressCaption } from "./ProcurementsApp.js";
 
 type MineTab = "all" | "monitor" | "participate" | "archive";
 export type MyProcurementsSection = "mine" | "trash";
@@ -32,6 +37,18 @@ function isDecided(item: SpecialistProcurementCard): boolean {
   return item.triage === "monitor" || item.triage === "participate";
 }
 
+function runningIngest(
+  ingest: SpecialistIngestProgress | undefined,
+): SpecialistIngestProgress | undefined {
+  return ingest !== undefined && isIngestRunning(ingest.phase) ? ingest : undefined;
+}
+
+function CardIngestCaption({ ingest }: { ingest: SpecialistIngestProgress | undefined }) {
+  const running = runningIngest(ingest);
+  if (running === undefined) return null;
+  return <p className="my-procurements-card-ingest">{ingestProgressCaption(running)}</p>;
+}
+
 export function MyProcurementsApp({
   procurements,
   section = "mine",
@@ -42,6 +59,7 @@ export function MyProcurementsApp({
   onEmptyTrash,
   load,
   now = () => new Date(),
+  activeIngest = {},
 }: {
   procurements: readonly SpecialistProcurementCard[];
   section?: MyProcurementsSection;
@@ -52,6 +70,7 @@ export function MyProcurementsApp({
   onEmptyTrash?: () => Promise<unknown> | void;
   load?: (tab: ListTab) => Promise<readonly SpecialistProcurementCard[]>;
   now?: () => Date;
+  activeIngest?: Record<string, SpecialistIngestProgress>;
 }): ReactElement {
   const navigate = useNavigate();
   const today = now();
@@ -271,6 +290,7 @@ export function MyProcurementsApp({
                       <span className="my-procurements-card-id">{shortId(item.id)}</span>
                     </div>
                     <h2 className="my-procurements-card-title">{item.title}</h2>
+                    <CardIngestCaption ingest={activeIngest[item.id]} />
                     <dl className="my-procurements-card-facts">
                       {item.amountLabel ? (
                         <div>

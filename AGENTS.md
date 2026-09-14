@@ -61,6 +61,7 @@
 - [`docs/architecture/STAGE-49.md`](docs/architecture/STAGE-49.md) — evaluation harness: Precision/Recall старого и нового поиска
 - [`docs/architecture/STAGE-50.md`](docs/architecture/STAGE-50.md) — живой dump goszakupki.by, baseline «НКУ для управления насосами»
 - [`docs/architecture/STAGE-51.md`](docs/architecture/STAGE-51.md) — фильтр выдачи, discard vs review, required_context
+- [`docs/architecture/STAGE-52.md`](docs/architecture/STAGE-52.md) — «Участвовать» качает файлы после смены вкладки
 
 ---
 
@@ -230,6 +231,7 @@ docs/architecture/ Документы этапов
   44 карточки площадки + 7 seed, Old vs New без подгонки весов
 - Этап 51 — поиск: term-match по выдаче площадки, score 0 без объекта не
   review, поставщик ≠ поставка, `required_context` считает код
+- Этап 52 — «Участвовать»: ingest в фоне, смена вкладки не отменяет скачивание
 
 Не начато: документы на «Отслеживать» (только хеши),
 PostgreSQL outbox для inbox, входящий Telegram-бот.

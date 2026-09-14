@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
   SpecialistInboxAction,
@@ -12,7 +12,7 @@ import type {
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
-import { isRejectedTriage, isWatchedTriage } from "@procurement/domain";
+import { isIngestRunning, isRejectedTriage, isWatchedTriage } from "@procurement/domain";
 import { AdminApp } from "./admin/AdminApp.js";
 import { InboxAlertProvider } from "./inbox/InboxAlert.js";
 import { InboxApp } from "./inbox/InboxApp.js";
@@ -102,6 +102,14 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     readStoredSearchIds(props.storageScope),
   );
   const searchIds = searchIdsByProfile[activeProfileId];
+  const ingestingIds = useRef(new Set<string>());
+  const [ingestById, setIngestById] = useState<Record<string, SpecialistIngestProgress>>(
+    {},
+  );
+  const ingestProgressRef = useRef(props.ingestProgress);
+  ingestProgressRef.current = props.ingestProgress;
+  const loadCardRef = useRef(props.loadCard);
+  loadCardRef.current = props.loadCard;
 
   const search =
     searchProfile === undefined
@@ -142,6 +150,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     decideCase === undefined
       ? undefined
       : async (id: string, kind: SpecialistTriageKind) => {
+          if (kind === "participate") ingestingIds.current.add(id);
           const items = await decideCase(id, kind);
           const updated = items.find((item) => item.id === id);
           setProcurements((current) => {
@@ -224,6 +233,47 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       return [...current, card];
     });
   }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const pull = ingestProgressRef.current;
+      if (pull === undefined) return;
+      for (const id of ingestingIds.current) {
+        void pull(id)
+          .then(async (snap) => {
+            if (!ingestingIds.current.has(id)) return;
+            setIngestById((current) => ({ ...current, [id]: snap }));
+            if (isIngestRunning(snap.phase)) return;
+            ingestingIds.current.delete(id);
+            if (snap.phase === "done") {
+              const load = loadCardRef.current;
+              if (load !== undefined) {
+                try {
+                  const card = await load(id);
+                  setProcurements((current) => {
+                    if (current.some((item) => item.id === card.id)) {
+                      return current.map((item) => (item.id === card.id ? card : item));
+                    }
+                    return [...current, card];
+                  });
+                } catch {
+                  // Detail/list still have the participate stub; next open reloads.
+                }
+              }
+              setIngestById((current) => {
+                const next = { ...current };
+                delete next[id];
+                return next;
+              });
+              return;
+            }
+            setIngestById((current) => ({ ...current, [id]: snap }));
+          })
+          .catch(() => undefined);
+      }
+    }, 400);
+    return () => window.clearInterval(timer);
+  }, []);
 
   function showInSearchPane(card: SpecialistProcurementCard): void {
     const next =
@@ -384,6 +434,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 ? {}
                 : { onRemove: async (id: string) => void decide(id, "reject") })}
               {...(listMine === undefined ? {} : { load: loadList })}
+              activeIngest={ingestById}
             />
           }
         />
@@ -411,6 +462,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(restore === undefined ? {} : { restore })}
               {...(purge === undefined ? {} : { purge })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
+              activeIngest={ingestById}
             />
           }
         />
@@ -425,6 +477,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(restore === undefined ? {} : { restore })}
               {...(purge === undefined ? {} : { purge })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
+              activeIngest={ingestById}
             />
           }
         />

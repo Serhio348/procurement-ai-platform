@@ -25,6 +25,24 @@ export interface McpToolCaller {
   ): Promise<McpCallResult>;
 }
 
+/**
+ * Stdio MCP is one request at a time: overlapping get + get_documents
+ * cross on the pipe and both answers are lost. Queue calls instead.
+ */
+export function serializeMcpToolCaller(inner: McpToolCaller): McpToolCaller {
+  let tail: Promise<void> = Promise.resolve();
+  return {
+    callTool(toolName, argumentsValue, options) {
+      const run = tail.then(() => inner.callTool(toolName, argumentsValue, options));
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+  };
+}
+
 export class SdkMcpToolCaller implements McpToolCaller {
   constructor(private readonly client: Client) {}
 

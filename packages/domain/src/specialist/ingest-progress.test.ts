@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ingestFileFinishState,
   ingestOverallPercent,
+  isIngestRunning,
   specialistDocumentWasRead,
 } from "./ingest-progress.js";
 
@@ -16,6 +17,15 @@ describe("ingest progress", () => {
     ).toBe(60);
     expect(ingestOverallPercent([{ state: "downloading", percent: 10 }])).toBe(10);
     expect(ingestOverallPercent([])).toBe(0);
+  });
+
+  it("treats listing/download/index as still running after the specialist leaves the card", () => {
+    expect(isIngestRunning("listing")).toBe(true);
+    expect(isIngestRunning("downloading")).toBe(true);
+    expect(isIngestRunning("indexing")).toBe(true);
+    expect(isIngestRunning("done")).toBe(false);
+    expect(isIngestRunning("failed")).toBe(false);
+    expect(isIngestRunning("idle")).toBe(false);
   });
 
   it("marks only extracted text as read by the agent", () => {

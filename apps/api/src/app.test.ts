@@ -270,6 +270,43 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("does not persist inbox stubs as cabinet cases", async () => {
+    const catalog = new SpecialistCatalog();
+    catalog.record({
+      procurement: {
+        title: "Поставка КТПБ",
+        status: "cancelled",
+        url: "https://goszakupki.by/auction/view/001",
+        sourceProcurementId: "auction/001",
+      },
+      change: {
+        id: "00000000-0000-4000-8000-000000000101",
+        procurementId: "00000000-0000-4000-8000-000000000020",
+        kind: "status_changed",
+        previous: "accepting_bids",
+        current: "cancelled",
+        detectedAt: "2026-09-03T08:15:00.000Z",
+        urgent: true,
+      },
+    });
+    const persistCases = vi.fn(async () => undefined);
+    const app = await buildSpecialistApi({
+      catalog,
+      persistCases,
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+
+    expect(persistCases).toHaveBeenCalledWith([], expect.any(String));
+    expect(catalog.procurements()).toHaveLength(1);
+
+    await app.close();
+  });
+
   it("persists found cases after search so a restart can reload them", async () => {
     const persistCases = vi.fn(async () => undefined);
     const app = await buildSpecialistApi({

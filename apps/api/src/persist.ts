@@ -220,7 +220,7 @@ export async function openSpecialistPersistence(options: {
     async persist(cabinet) {
       cache.set(cabinet.workspaceId, cabinet);
       await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
-      await persistCases(cabinet.catalog.procurements(), cabinet.workspaceId);
+      await persistCases(cabinet.catalog.storedCases(), cabinet.workspaceId);
       await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
     },
     async removeCases(workspaceId, ids) {
@@ -334,7 +334,7 @@ export async function openSpecialistPersistence(options: {
     cabinets,
     async hydrateCatalog(catalog) {
       const cabinet = await openCabinet(defaultWorkspaceId);
-      for (const card of cabinet.catalog.procurements()) {
+      for (const card of cabinet.catalog.storedCases()) {
         catalog.upsertCase(card);
       }
       for (const item of cabinet.catalog.inboxItems()) {

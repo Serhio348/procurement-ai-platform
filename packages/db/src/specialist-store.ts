@@ -708,8 +708,9 @@ export function jsonbSafe<T>(value: T): T {
 }
 
 /**
- * catalog.procurements() can list a case and an inbox stub for the same
- * source. The unique index on source_procurement_id allows only one row.
+ * Persist may still see a decided case and an inbox stub for the same
+ * source. The unique index on source_procurement_id allows only one row;
+ * keep the decided card so a stub cannot wipe reject/monitor.
  */
 export function uniqueBySource(
   cards: readonly SpecialistProcurementCardValue[],
@@ -728,10 +729,20 @@ function preferCase(
   candidate: SpecialistProcurementCardValue,
   previous: SpecialistProcurementCardValue,
 ): boolean {
+  const candidateRank = casePersistRank(candidate);
+  const previousRank = casePersistRank(previous);
+  if (candidateRank !== previousRank) return candidateRank > previousRank;
   if (candidate.documents.length !== previous.documents.length) {
     return candidate.documents.length > previous.documents.length;
   }
-  return candidate.sourceCard !== undefined && previous.sourceCard === undefined;
+  return false;
+}
+
+function casePersistRank(card: SpecialistProcurementCardValue): number {
+  if (card.triage === "monitor" || card.triage === "participate") return 3;
+  if (card.triage === "reject") return 2;
+  if (card.sourceCard !== undefined) return 1;
+  return 0;
 }
 
 export function postgresErrorMessage(error: unknown): string {

@@ -56,6 +56,28 @@ describe("uniqueBySource", () => {
     });
     expect(uniqueBySource([stub, full])).toEqual([full]);
   });
+
+  it("keeps a rejected case over an inbox stub so persist cannot empty trash", () => {
+    const stub = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      title: "Заглушка",
+      status: "unknown",
+      statusLabel: "неизвестен",
+      url: "https://goszakupki.by/request/view/1",
+      sourceProcurementId: "request/1",
+    });
+    const rejected = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "Не нужно",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/request/view/1",
+      sourceProcurementId: "request/1",
+      triage: "reject",
+    });
+    expect(uniqueBySource([stub, rejected])).toEqual([rejected]);
+    expect(uniqueBySource([rejected, stub])).toEqual([rejected]);
+  });
 });
 
 describe("postgresErrorMessage", () => {

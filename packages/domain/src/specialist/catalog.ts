@@ -120,6 +120,15 @@ export class SpecialistCatalog {
       .map(toInboxEntry);
   }
 
+  /**
+   * Cases the specialist actually stored. Inbox stubs are listing-only:
+   * persisting them as workspace_procurements recreates other cabinets'
+   * rejects after a restart.
+   */
+  storedCases(): SpecialistProcurementCard[] {
+    return [...this.#cases.values()];
+  }
+
   procurements(): SpecialistProcurementCard[] {
     const latest = new Map<string, InboxFixtureItemValue>();
     for (const item of this.#order) {
@@ -129,7 +138,7 @@ export class SpecialistCatalog {
     const rest = fromChanges.filter(
       (item) => !this.#cases.has(item.id) && !this.#pruned.has(item.id),
     );
-    return [...this.#cases.values(), ...rest];
+    return [...this.storedCases(), ...rest];
   }
 
   procurement(id: string): SpecialistProcurementCard | undefined {

@@ -183,7 +183,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
     }
     if (options.persistCases !== undefined) {
-      await options.persistCases(cabinet.catalog.procurements(), cabinet.workspaceId);
+      await options.persistCases(cabinet.catalog.storedCases(), cabinet.workspaceId);
     }
     if (options.persistInbox !== undefined) {
       await options.persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
@@ -1169,8 +1169,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     catalog().dismissByProcurementId(card.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
-    // persist() upserts leftover inbox rows; drop the SQL case after that so
-    // a stub from the inbox cannot recreate the purged card.
     await cabinets.removeCases(currentCabinet().workspaceId, [card.id]);
     if (options.removeCases !== undefined) {
       await options.removeCases([card.id], currentCabinet().workspaceId);

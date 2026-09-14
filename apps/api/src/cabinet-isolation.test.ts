@@ -123,6 +123,41 @@ describe("personal cabinets", () => {
     ).toBe(false);
     expect(JSON.parse(inboxA.body).items.length).toBeGreaterThanOrEqual(0);
 
+    const foundId = found.items[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${foundId}/decision`,
+      headers: { cookie: userA.cookie },
+      payload: { kind: "reject" },
+    });
+    const trashA = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=trash",
+      headers: { cookie: userA.cookie },
+    });
+    const trashB = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=trash",
+      headers: { cookie: userB.cookie },
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/profiles",
+      headers: { cookie: userB.cookie },
+    });
+    const trashAfterProfile = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=trash",
+      headers: { cookie: userB.cookie },
+    });
+
+    expect(JSON.parse(trashA.body).items).toEqual([
+      expect.objectContaining({ id: foundId, triage: "reject" }),
+    ]);
+    expect(JSON.parse(trashB.body).items).toEqual([]);
+    expect(created.statusCode).toBe(200);
+    expect(JSON.parse(trashAfterProfile.body).items).toEqual([]);
+
     await app.close();
   });
 });

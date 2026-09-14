@@ -48,6 +48,20 @@ describe("AdminApp", () => {
     expect(screen.queryByRole("button", { name: "Одобрить" })).toBeNull();
   });
 
+  it("clears active errors and keeps them in the log as taken off", async () => {
+    const user = userEvent.setup();
+    stubAdminFetch([]);
+    renderAdmin("/admin/errors");
+
+    expect(await screen.findByText("Площадка goszakupki.by недоступна")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Снять ошибки (1)" }));
+
+    expect(await screen.findByRole("button", { name: "Активных ошибок нет" })).toBeTruthy();
+    expect(screen.getByText(/снято/)).toBeTruthy();
+    expect(screen.getByText("Площадка goszakupki.by недоступна")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Ошибки" })).toBeTruthy();
+  });
+
   it("opens another specialist cabinet as a read-only list", async () => {
     const user = userEvent.setup();
     stubAdminFetch([]);
@@ -140,6 +154,21 @@ function stubAdminFetch(approvals: unknown[]) {
         total: 1,
         tab: "all",
         hasMore: false,
+      });
+    }
+    if (String(url) === "/api/admin/journal/errors/ack") {
+      return json({
+        items: [
+          {
+            id: "00000000-0000-4000-8000-000000000301",
+            at: "2026-09-06T12:00:00.000Z",
+            kind: "search",
+            level: "error",
+            message: "Площадка goszakupki.by недоступна",
+            acknowledgedAt: "2026-09-07T09:00:00.000Z",
+          },
+        ],
+        errorCount: 0,
       });
     }
     if (String(url) === "/api/admin/journal") {

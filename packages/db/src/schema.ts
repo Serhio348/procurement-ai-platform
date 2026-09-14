@@ -808,7 +808,10 @@ export const adminJournalKind = pgEnum("admin_journal_kind", [
 
 export const adminJournalLevel = pgEnum("admin_journal_level", ["info", "error"]);
 
-/** Append-only ops/audit log for the admin console. Application code must not update or delete rows. */
+/**
+ * Ops/audit log for the admin console. Rows are never deleted and their text is never rewritten;
+ * `acknowledged_at` is the single allowed update, so an admin can stop an old error from counting.
+ */
 export const adminJournal = pgTable(
   "admin_journal",
   {
@@ -820,10 +823,12 @@ export const adminJournal = pgTable(
     actorName: varchar("actor_name", { length: 200 }),
     actorEmail: varchar("actor_email", { length: 320 }),
     sourceProcurementId: varchar("source_procurement_id", { length: 256 }),
+    acknowledgedAt: timestamptz("acknowledged_at"),
   },
   (table) => [
     index("admin_journal_at_idx").on(table.at),
     index("admin_journal_level_at_idx").on(table.level, table.at),
+    index("admin_journal_open_error_idx").on(table.level, table.acknowledgedAt, table.at),
   ],
 );
 

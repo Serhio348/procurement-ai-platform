@@ -275,6 +275,61 @@ describe("specialist auth API", () => {
     await app.close();
   });
 
+  it("lets the admin take the error badge off without erasing the outage", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const app = await buildSpecialistApi({
+      authDirectory: directory,
+      searchHits: {
+        search: async () => {
+          throw new McpToolCallError("source_unavailable", "procurement.search", "blocked");
+        },
+      },
+    });
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const cookie = cookieHeader(adminIn);
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      headers: { cookie },
+      payload: { name: "Кабель", keywords: ["кабель"], purpose: "", description: "", excludeKeywords: [], statuses: ["accepting_bids"], filters: {} },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      headers: { cookie },
+      payload: {},
+    });
+
+    const acked = await app.inject({
+      method: "POST",
+      url: "/api/admin/journal/errors/ack",
+      headers: { cookie },
+    });
+    const session = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { cookie },
+    });
+
+    const body = JSON.parse(acked.body) as {
+      errorCount: number;
+      items: Array<{ level: string; message: string; acknowledgedAt?: string }>;
+    };
+    expect(acked.statusCode).toBe(200);
+    expect(body.errorCount).toBe(0);
+    expect(body.items.some((item) => item.level === "error" && item.acknowledgedAt !== undefined)).toBe(
+      true,
+    );
+    expect(body.items.some((item) => item.message.includes("снял ошибки: 1"))).toBe(true);
+    expect(JSON.parse(session.body).user.errorEventCount).toBe(0);
+    await app.close();
+  });
+
   it("journals who signed in and how long they stayed", async () => {
     const directory = createMemoryAuthDirectory();
     await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");

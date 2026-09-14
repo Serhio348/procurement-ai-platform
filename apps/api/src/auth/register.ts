@@ -261,6 +261,21 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     return listedJournal(await journal.list(), await journal.errorCount());
   });
 
+  app.post("/api/admin/journal/errors/ack", async (request) => {
+    if (journal === undefined) return listedJournal([], 0);
+    const cleared = await journal.acknowledgeErrors();
+    if (cleared > 0) {
+      const actor = await resolveUser(request);
+      await recordJournal(journal, {
+        kind: "platform",
+        level: "info",
+        message: `${actorName(actor)} снял ошибки: ${String(cleared)}`,
+        ...(actor === undefined ? {} : { actorName: actor.name, actorEmail: actor.email }),
+      });
+    }
+    return listedJournal(await journal.list(), await journal.errorCount());
+  });
+
   app.post("/api/admin/users/:id/approve", async (request, reply) => {
     return mutateAdminUser(request, reply, directory, journal, resolveUser, async (store, id, body) => {
       const parsed = AdminApproveWrite.safeParse(body);

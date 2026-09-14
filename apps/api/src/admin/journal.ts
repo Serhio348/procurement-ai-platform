@@ -6,7 +6,7 @@ import {
   type AdminJournalWrite as AdminJournalWriteValue,
 } from "@procurement/contracts";
 import { adminJournal, type Database } from "@procurement/db";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull } from "drizzle-orm";
 import { toIsoDateTime } from "../auth/instant.js";
 
 export const ADMIN_JOURNAL_LIST_LIMIT = 200;
@@ -16,6 +16,8 @@ export interface AdminJournalPort {
   record: (input: AdminJournalWriteValue) => Promise<void>;
   list: (limit?: number) => Promise<AdminJournalEntryValue[]>;
   errorCount: () => Promise<number>;
+  /** Clears the error badge without erasing history. Returns how many rows stopped being active. */
+  acknowledgeErrors: (at?: string) => Promise<number>;
 }
 
 export function listedJournal(items: readonly AdminJournalEntryValue[], errorCount: number) {
@@ -48,11 +50,25 @@ export function createMemoryAdminJournal(): AdminJournalPort {
     },
     async errorCount() {
       const since = Date.now() - ADMIN_ERROR_WINDOW_MS;
-      return items.filter(
-        (item) => item.level === "error" && Date.parse(item.at) >= since,
-      ).length;
+      return items.filter((item) => isOpenError(item, since)).length;
+    },
+    async acknowledgeErrors(at = new Date().toISOString()) {
+      let cleared = 0;
+      for (const [index, item] of items.entries()) {
+        if (item.level !== "error" || item.acknowledgedAt !== undefined) continue;
+        items[index] = AdminJournalEntry.parse({ ...item, acknowledgedAt: at });
+        cleared += 1;
+      }
+      return cleared;
     },
   };
+}
+
+/** An error is active while it is inside the badge window and nobody has cleared it. */
+export function isOpenError(item: AdminJournalEntryValue, since: number): boolean {
+  if (item.level !== "error") return false;
+  if (item.acknowledgedAt !== undefined) return false;
+  return Date.parse(item.at) >= since;
 }
 
 export function createPostgresAdminJournal(db: Database): AdminJournalPort {
@@ -82,7 +98,21 @@ export function createPostgresAdminJournal(db: Database): AdminJournalPort {
       const rows = await db
         .select({ id: adminJournal.id })
         .from(adminJournal)
-        .where(and(eq(adminJournal.level, "error"), gte(adminJournal.at, since)));
+        .where(
+          and(
+            eq(adminJournal.level, "error"),
+            gte(adminJournal.at, since),
+            isNull(adminJournal.acknowledgedAt),
+          ),
+        );
+      return rows.length;
+    },
+    async acknowledgeErrors(at = new Date().toISOString()) {
+      const rows = await db
+        .update(adminJournal)
+        .set({ acknowledgedAt: at })
+        .where(and(eq(adminJournal.level, "error"), isNull(adminJournal.acknowledgedAt)))
+        .returning({ id: adminJournal.id });
       return rows.length;
     },
   };
@@ -112,5 +142,8 @@ function rowToEntry(row: typeof adminJournal.$inferSelect): AdminJournalEntryVal
     ...(row.sourceProcurementId === null || row.sourceProcurementId.length === 0
       ? {}
       : { sourceProcurementId: row.sourceProcurementId }),
+    ...(row.acknowledgedAt === null
+      ? {}
+      : { acknowledgedAt: toIsoDateTime(row.acknowledgedAt) }),
   });
 }

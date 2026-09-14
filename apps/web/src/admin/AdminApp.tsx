@@ -9,6 +9,7 @@ import type {
   SpecialistRole,
 } from "@procurement/contracts";
 import {
+  acknowledgeAdminErrors,
   approveUser,
   changeUserRole,
   fetchAdminJournal,
@@ -214,6 +215,27 @@ export function AdminApp() {
         ) : (
           <section className="profile-section">
             <h2>{adminPaneLabel(pane)}</h2>
+            {pane === "errors" ? (
+              <div className="admin-actions">
+                <button
+                  type="button"
+                  className="profile-fill"
+                  disabled={errorCount === 0}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        setJournal(await acknowledgeAdminErrors());
+                        await refresh();
+                      } catch (cause) {
+                        setError(cause instanceof Error ? cause.message : "Не удалось снять ошибки");
+                      }
+                    })();
+                  }}
+                >
+                  {errorCount === 0 ? "Активных ошибок нет" : `Снять ошибки (${String(errorCount)})`}
+                </button>
+              </div>
+            ) : null}
             {journalItems.length === 0 ? (
               <p className="profile-empty-queries">Записей нет.</p>
             ) : (
@@ -231,11 +253,15 @@ export function AdminApp() {
 }
 
 function JournalRow({ item }: { item: AdminJournalEntry }) {
+  const cleared = item.acknowledgedAt !== undefined;
   return (
-    <li className={item.level === "error" ? "admin-row is-journal-error" : "admin-row"}>
+    <li className={item.level === "error" && !cleared ? "admin-row is-journal-error" : "admin-row"}>
       <div>
         <strong>{journalKindLabel(item.kind)}</strong>
-        <p className="profile-list-meta">{formatJournalTime(item.at)}</p>
+        <p className="profile-list-meta">
+          {formatJournalTime(item.at)}
+          {cleared ? ` · снято ${formatJournalTime(item.acknowledgedAt ?? "")}` : ""}
+        </p>
         <p>{item.message}</p>
       </div>
     </li>

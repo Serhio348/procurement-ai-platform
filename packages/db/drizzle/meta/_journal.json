@@ -57,6 +57,13 @@
       "when": 1788205342802,
       "tag": "0007_personal_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788205342803,
+      "tag": "0008_admin_journal_ack",
+      "breakpoints": true
     }
   ]
 }

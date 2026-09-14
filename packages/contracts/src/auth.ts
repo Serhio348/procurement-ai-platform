@@ -108,10 +108,16 @@ export const AdminJournalEntry = z.object({
   actorName: z.string().max(200).optional(),
   actorEmail: z.string().email().optional(),
   sourceProcurementId: z.string().max(256).optional(),
+  /** Set when an admin cleared the error: the row stays in the log but stops being active. */
+  acknowledgedAt: IsoDateTime.optional(),
 });
 export type AdminJournalEntry = z.infer<typeof AdminJournalEntry>;
 
-export const AdminJournalWrite = AdminJournalEntry.omit({ id: true, at: true }).extend({
+export const AdminJournalWrite = AdminJournalEntry.omit({
+  id: true,
+  at: true,
+  acknowledgedAt: true,
+}).extend({
   at: IsoDateTime.optional(),
 });
 export type AdminJournalWrite = z.infer<typeof AdminJournalWrite>;

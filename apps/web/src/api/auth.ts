@@ -119,6 +119,19 @@ export async function fetchAdminJournal(
   return AdminJournalListResponse.parse(await response.json());
 }
 
+export async function acknowledgeAdminErrors(
+  fetcher: typeof fetch = fetch,
+): Promise<AdminJournalListResponseValue> {
+  const response = await fetcher(
+    "/api/admin/journal/errors/ack",
+    withCredentials({ method: "POST" }),
+  );
+  if (!response.ok) {
+    throw new Error("Не удалось снять ошибки");
+  }
+  return AdminJournalListResponse.parse(await response.json());
+}
+
 export async function fetchAdminUsers(
   fetcher: typeof fetch = fetch,
 ): Promise<AdminUserListResponseValue> {

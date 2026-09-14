@@ -1635,6 +1635,55 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("purges a trash case without rewriting inbox or other cases", async () => {
+    const persistCases = vi.fn(async () => undefined);
+    const persistInbox = vi.fn(async () => undefined);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      persistCases,
+      persistInbox,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/purge-fast-1",
+            url: "https://goszakupki.by/auction/view/purge-fast-1",
+            title: "Кабель быстро удалить",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "reject" },
+    });
+    persistCases.mockClear();
+    persistInbox.mockClear();
+    persistCases.mockImplementation(async () => {
+      throw new Error("persistCases must not run on purge");
+    });
+    persistInbox.mockImplementation(async () => {
+      throw new Error("persistInbox must not run on purge");
+    });
+    const purged = await app.inject({ method: "DELETE", url: `/api/procurements/${id}` });
+    expect(purged.statusCode).toBe(204);
+    expect(persistCases).not.toHaveBeenCalled();
+    expect(persistInbox).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("maps a blocked live source to 503 without inventing search hits", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),

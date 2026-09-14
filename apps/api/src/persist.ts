@@ -223,6 +223,10 @@ export async function openSpecialistPersistence(options: {
       await persistCases(cabinet.catalog.storedCases(), cabinet.workspaceId);
       await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
     },
+    async persistWorkspaceOnly(cabinet) {
+      cache.set(cabinet.workspaceId, cabinet);
+      await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+    },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);
     },

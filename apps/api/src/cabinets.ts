@@ -40,6 +40,7 @@ export interface CabinetRegistry {
   open: (workspaceId: string) => Promise<SpecialistCabinet>;
   listIds: () => Promise<string[]>;
   persist: (cabinet: SpecialistCabinet) => Promise<void>;
+  persistWorkspaceOnly: (cabinet: SpecialistCabinet) => Promise<void>;
   removeCases: (workspaceId: string, ids: readonly string[]) => Promise<void>;
   listTrashIds: (workspaceId: string) => Promise<string[]>;
   listCases: (workspaceId: string, query?: SpecialistCaseListQuery) => Promise<SpecialistCaseListPage>;
@@ -117,6 +118,9 @@ export function createMemoryCabinetRegistry(options: {
       return [...byId.keys()];
     },
     async persist() {
+      // Memory is the store.
+    },
+    async persistWorkspaceOnly() {
       // Memory is the store.
     },
     async removeCases() {

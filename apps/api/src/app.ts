@@ -190,6 +190,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   };
 
+  async function persistWorkspaceOnly(): Promise<void> {
+    const cabinet = currentCabinet();
+    await cabinets.persistWorkspaceOnly(cabinet);
+    if (options.persistWorkspace !== undefined) {
+      await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+    }
+  }
+
   // Cases the specialist never touched do not pile up: once a search stops
   // returning them for caseMaxAgeMs they leave the catalog and the database.
   const pruneStaleCases = async (): Promise<void> => {
@@ -308,6 +316,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     workspaceIdFor: (userId) => cabinets.workspaceIdFor(userId),
   });
   app.addHook("onRequest", async (request) => {
+    const path = request.url.split("?")[0] ?? request.url;
+    if (path === "/api/health" || path.startsWith("/api/auth")) return;
     const workspaceId = request.principal?.workspaceId ?? TEST_WORKSPACE_ID;
     request.cabinet = await cabinets.open(workspaceId);
   });
@@ -1163,7 +1173,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       catalog().dismissByProcurementId(id);
     }
     workspace().setDismissedInboxIds(catalog().dismissedIds());
-    await persist();
+    await persistWorkspaceOnly();
     await cabinets.removeCases(currentCabinet().workspaceId, ids);
     if (options.removeCases !== undefined) {
       await options.removeCases(ids, currentCabinet().workspaceId);
@@ -1184,7 +1194,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     catalog().dropCase(card.id);
     catalog().dismissByProcurementId(card.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
-    await persist();
+    await persistWorkspaceOnly();
     await cabinets.removeCases(currentCabinet().workspaceId, [card.id]);
     if (options.removeCases !== undefined) {
       await options.removeCases([card.id], currentCabinet().workspaceId);

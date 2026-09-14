@@ -1,6 +1,7 @@
 import { McpToolCallError } from "@procurement/mcp-client";
 import { describe, expect, it } from "vitest";
 import { buildSpecialistApi } from "../app.js";
+import { createMemoryCabinetRegistry } from "../cabinets.js";
 import { createMemoryAuthDirectory } from "./memory-directory.js";
 import { SESSION_COOKIE } from "./cookie.js";
 
@@ -46,6 +47,17 @@ describe("specialist auth API", () => {
     expect(signedUp.statusCode).toBe(200);
     expect(body.user.accessStatus).toBe("pending");
     expect(body.user.role).toBeNull();
+
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up",
+      payload: {
+        email: "user@example.com",
+        name: "Иван",
+        password: "secret-password",
+      },
+    });
+    expect(again.statusCode).toBe(409);
 
     const pendingInbox = await app.inject({
       method: "GET",
@@ -111,6 +123,26 @@ describe("specialist auth API", () => {
     });
     expect(viewerInbox.statusCode).toBe(200);
     expect(viewerSearch.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("does not open a cabinet while signing up", async () => {
+    const directory = createMemoryAuthDirectory();
+    const cabinets = createMemoryCabinetRegistry();
+    cabinets.open = async () => {
+      throw new Error("cabinet must not open on sign-up");
+    };
+    const app = await buildSpecialistApi({ authDirectory: directory, cabinets });
+    const signed = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up",
+      payload: {
+        email: "fresh@example.com",
+        name: "Новый",
+        password: "secret-password",
+      },
+    });
+    expect(signed.statusCode).toBe(200);
     await app.close();
   });
 

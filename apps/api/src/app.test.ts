@@ -139,6 +139,52 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("does not dump search hits into My procurements", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/page-1",
+            url: "https://goszakupki.by/auction/view/page-1",
+            title: "КТПБ из поиска",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+    const mine = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
+    const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "monitor" },
+    });
+    const mineAfter = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
+    const one = await app.inject({ method: "GET", url: `/api/procurements/${id}` });
+    const badTab = await app.inject({ method: "GET", url: "/api/procurements?tab=nope" });
+
+    expect(JSON.parse(listed.body).items).toHaveLength(1);
+    expect(JSON.parse(mine.body).items).toEqual([]);
+    expect(JSON.parse(mineAfter.body).items[0]?.triage).toBe("monitor");
+    expect(JSON.parse(one.body).id).toBe(id);
+    expect(JSON.parse(one.body).title).toBe("КТПБ из поиска");
+    expect(badTab.statusCode).toBe(400);
+
+    await app.close();
+  });
+
   it("does not seed fixture stubs or the captured dump when only live cases are listed", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
@@ -285,6 +331,7 @@ describe("specialist API", () => {
       payload: { action: "open" },
     });
     expect(opened.statusCode).toBe(200);
+    expect(JSON.parse(opened.body).card?.foundAs).toBe("match");
     const listedAfterOpen = await app.inject({ method: "GET", url: "/api/procurements" });
     expect(titles(listedAfterOpen.body).sort()).toEqual(
       ["Поставка КТПБ-250", "Реконструкция ВЛ-0,4 кВ от БКТПБ-746"].sort(),
@@ -1379,6 +1426,83 @@ describe("specialist API", () => {
     expect(restoredItem?.archived).toBe(false);
     expect(restoredItem?.triage).toBe("monitor");
     expect(JSON.parse(third.body).monitoredCount).toBe(1);
+
+    await app.close();
+  });
+
+  it("moves a rejected case to trash, restores it, then purges it", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/trash-1",
+            url: "https://goszakupki.by/auction/view/trash-1",
+            title: "Кабель в корзину",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "participate" },
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "reject" },
+    });
+
+    const trash = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    const mine = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
+    expect(JSON.parse(trash.body).items[0]?.id).toBe(id);
+    expect(JSON.parse(trash.body).items[0]?.triage).toBe("reject");
+    expect(JSON.parse(mine.body).items).toEqual([]);
+
+    const restored = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/restore`,
+    });
+    const restoredItem = (
+      JSON.parse(restored.body).items as Array<{ id: string; triage?: string }>
+    ).find((item) => item.id === id);
+    const mineAfter = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
+    const trashAfter = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    expect(restoredItem?.triage).toBe("participate");
+    expect(JSON.parse(mineAfter.body).items[0]?.triage).toBe("participate");
+    expect(JSON.parse(trashAfter.body).items).toEqual([]);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "reject" },
+    });
+    const purged = await app.inject({ method: "DELETE", url: `/api/procurements/${id}` });
+    const missing = await app.inject({ method: "GET", url: `/api/procurements/${id}` });
+    const trashPurged = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    expect(purged.statusCode).toBe(204);
+    expect(missing.statusCode).toBe(404);
+    expect(JSON.parse(trashPurged.body).items).toEqual([]);
+
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    expect(JSON.parse(again.body).items).toEqual([]);
 
     await app.close();
   });

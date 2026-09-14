@@ -11,6 +11,8 @@ import type {
 } from "@procurement/contracts";
 import {
   ingestFileWeight,
+  isRejectedTriage,
+  isWatchedTriage,
   procurementsForProfile,
   profileDisplayName,
   specialistDocumentWasRead,
@@ -44,7 +46,7 @@ export function ingestFileAsDocument(
   };
 }
 
-const officeDownloadFrame = "procurement-office-download";
+export const officeDownloadFrame = "procurement-office-download";
 
 export function documentStatusLabel(document: SpecialistCaseDocument): string {
   const extraction = document.extraction;
@@ -121,7 +123,7 @@ function DocumentReadMark() {
   );
 }
 
-function DocumentNameLink({ document }: { document: SpecialistCaseDocument }) {
+export function DocumentNameLink({ document }: { document: SpecialistCaseDocument }) {
   if (documentOpensInline(document)) {
     return (
       <a href={documentHref(document)} target="_blank" rel="noreferrer">
@@ -218,13 +220,19 @@ export function ProcurementsApp({
     // Parent refreshed a card (decide / inbox). Update rows already on screen
     // without swapping a search hit list for the whole database catalog.
     setCatalogItems((current) => {
-      if (!showingSearch.current) return [...catalog];
-      const byId = new Map(catalog.map((item) => [item.id, item] as const));
-      return current.map((item) => byId.get(item.id) ?? item);
+      const incoming = catalog.filter(isSearchQueueCard);
+      if (!showingSearch.current) return incoming;
+      const byId = new Map(incoming.map((item) => [item.id, item] as const));
+      return current
+        .map((item) => byId.get(item.id) ?? item)
+        .filter(isSearchQueueCard);
     });
   }
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
-  const items = procurementsForProfile(catalogItems, chosenProfile);
+  const items = procurementsForProfile(
+    catalogItems.filter(isSearchQueueCard),
+    chosenProfile,
+  );
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
   const ingestForSelected =
     selected !== undefined &&
@@ -283,28 +291,30 @@ export function ProcurementsApp({
         : undefined;
     if (kind === "participate") pullProgress();
     try {
-      const next = await decide(selected.id, kind);
-      const updated = next.find((item) => item.id === selected.id);
-      if (kind === "reject") {
-        const without = catalogItems.filter((item) => item.id !== selected.id);
+      const next = await decide(procurementId, kind);
+      const updated = next.find((item) => item.id === procurementId);
+      if (kind === "reject" || kind === "monitor" || kind === "participate") {
+        const without = catalogItems.filter((item) => item.id !== procurementId);
         setCatalogItems(without);
-        setNotice("Закупка скрыта и больше не будет предлагаться.");
-        const remaining = procurementsForProfile(without, chosenProfile)[0];
-        await navigate(remaining === undefined ? "/procurements" : `/procurements/${remaining.id}`);
-      } else if (updated !== undefined) {
-        setCatalogItems((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item)),
-        );
-        if (kind === "participate") {
+        if (kind === "reject") {
+          setNotice("Перемещено в корзину. Вернуть можно в разделе «Корзина».");
+        } else if (kind === "participate" && updated !== undefined) {
           const hashed = updated.documents.filter((item) => item.status === "hashed").length;
           const failed = updated.documents.filter((item) => item.status === "download_failed").length;
           const read = updated.documents.filter((item) => specialistDocumentWasRead(item)).length;
           setNotice(
             failed > 0
-              ? `Участвуем. Прочитано агентом: ${String(read)}, скачано: ${String(hashed)}, не скачалось: ${String(failed)}.`
-              : `Участвуем. Прочитано агентом: ${String(read)} из ${String(hashed)}.`,
+              ? `Участвуем. Карточка в «Мои закупки». Прочитано: ${String(read)}, скачано: ${String(hashed)}, не скачалось: ${String(failed)}.`
+              : `Участвуем. Карточка в «Мои закупки». Прочитано агентом: ${String(read)} из ${String(hashed)}.`,
           );
+        } else {
+          setNotice("Отслеживаем. Карточка в «Мои закупки».");
         }
+        const remaining = procurementsForProfile(
+          without.filter(isSearchQueueCard),
+          chosenProfile,
+        )[0];
+        await navigate(remaining === undefined ? "/procurements" : `/procurements/${remaining.id}`);
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Не удалось сохранить решение.");
@@ -514,6 +524,13 @@ export function ProcurementsApp({
                     aria-pressed={selected.triage === "reject"}
                     disabled={busy}
                     onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Убрать закупку в корзину? Потом её можно вернуть или удалить.",
+                        )
+                      ) {
+                        return;
+                      }
                       void runDecide("reject");
                     }}
                   >
@@ -635,4 +652,8 @@ export function ProcurementsApp({
       </main>
     </Shell>
   );
+}
+
+function isSearchQueueCard(item: SpecialistProcurementCard): boolean {
+  return !isWatchedTriage(item) && !isRejectedTriage(item.triage);
 }

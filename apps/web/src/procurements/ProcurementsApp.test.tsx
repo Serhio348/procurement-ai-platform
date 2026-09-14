@@ -17,6 +17,7 @@ import {
   ingestProgressCaption,
   ProcurementsApp,
 } from "./ProcurementsApp.js";
+import { ProcurementDetailApp } from "./ProcurementDetailApp.js";
 
 afterEach(() => {
   cleanup();
@@ -228,9 +229,12 @@ describe("ProcurementsApp", () => {
     ];
 
     render(
-      <MemoryRouter initialEntries={[`/procurements/${items[0]!.id}`]}>
+      <MemoryRouter initialEntries={[`/my-procurements/${items[0]!.id}`]}>
         <Routes>
-          <Route path="/procurements/:id" element={<ProcurementsApp items={items} />} />
+          <Route
+            path="/my-procurements/:id"
+            element={<ProcurementDetailApp procurements={items} />}
+          />
         </Routes>
       </MemoryRouter>,
     );
@@ -239,8 +243,6 @@ describe("ProcurementsApp", () => {
     expect(link.getAttribute("href")).toBe(`/api/documents/${"a".repeat(64)}`);
     expect(link.getAttribute("target")).toBe("procurement-office-download");
     expect(link.getAttribute("download")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Текст документа" })).toBeNull();
-    expect(screen.getByRole("heading", { level: 3, name: "Коммерческие условия" })).toBeTruthy();
     expect(screen.getByText(/Оплата: по факту поставки/)).toBeTruthy();
     expect(screen.getByText(/сентябрь 2026/)).toBeTruthy();
   });
@@ -411,7 +413,7 @@ describe("ProcurementsApp", () => {
     expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();
   });
 
-  it("records a specialist choice and hides a rejected case from the list", async () => {
+  it("records a specialist choice and moves the case out of Закупки", async () => {
     const user = userEvent.setup();
     const found = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000401",
@@ -421,6 +423,14 @@ describe("ProcurementsApp", () => {
       url: "https://example.test/auction/001",
       sourceProcurementId: "auction-001",
     });
+    const other = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/002",
+      sourceProcurementId: "auction-002",
+    });
 
     render(
       <MemoryRouter initialEntries={["/procurements"]}>
@@ -429,30 +439,8 @@ describe("ProcurementsApp", () => {
             path="/procurements"
             element={
               <ProcurementsApp
-                items={[found]}
-                decide={async (_id, kind) =>
-                  kind === "reject"
-                    ? []
-                    : [
-                        {
-                          ...found,
-                          triage: kind,
-                          ...(kind === "participate"
-                            ? {
-                                documents: [
-                                  {
-                                    name: "ТЗ.pdf",
-                                    sourceUrl: "https://example.test/files/tz.pdf",
-                                    hash: "a".repeat(64),
-                                    sizeBytes: 12,
-                                    status: "hashed" as const,
-                                  },
-                                ],
-                              }
-                            : {}),
-                        },
-                      ]
-                }
+                items={[found, other]}
+                decide={async (_id, kind) => [{ ...found, triage: kind }]}
               />
             }
           />
@@ -460,30 +448,8 @@ describe("ProcurementsApp", () => {
             path="/procurements/:id"
             element={
               <ProcurementsApp
-                items={[found]}
-                decide={async (_id, kind) =>
-                  kind === "reject"
-                    ? []
-                    : [
-                        {
-                          ...found,
-                          triage: kind,
-                          ...(kind === "participate"
-                            ? {
-                                documents: [
-                                  {
-                                    name: "ТЗ.pdf",
-                                    sourceUrl: "https://example.test/files/tz.pdf",
-                                    hash: "a".repeat(64),
-                                    sizeBytes: 12,
-                                    status: "hashed" as const,
-                                  },
-                                ],
-                              }
-                            : {}),
-                        },
-                      ]
-                }
+                items={[found, other]}
+                decide={async (_id, kind) => [{ ...found, triage: kind }]}
               />
             }
           />
@@ -492,31 +458,14 @@ describe("ProcurementsApp", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Отслеживать" }));
-    expect(screen.getByText("отслеживаем")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Отслеживать" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Участвовать" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    expect(
-      screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ }).className,
-    ).toContain("is-triage-monitor");
-    await user.click(screen.getByRole("button", { name: "Участвовать" }));
-    expect(screen.getByText("участвуем")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Участвовать" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(
-      screen.getByRole("button", { name: /Комплектная трансформаторная подстанция/ }).className,
-    ).toContain("is-triage-participate");
-    expect(screen.getByText(/Прочитано агентом: 0 из 1/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "ТЗ.pdf" }).getAttribute("href")).toBe(
-      `/api/documents/${"a".repeat(64)}`,
-    );
-    await user.click(screen.getByRole("button", { name: "Не нужно" }));
-    expect(screen.getByText("Закупка скрыта и больше не будет предлагаться.")).toBeTruthy();
+    expect(screen.getByText("Отслеживаем. Карточка в «Мои закупки».")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Комплектная трансформаторная подстанция/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Кабель силовой/ })).toBeTruthy();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await user.click(screen.getByRole("button", { name: "Не нужно" }));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(screen.getByText("Перемещено в корзину. Вернуть можно в разделе «Корзина».")).toBeTruthy();
+    vi.restoreAllMocks();
   });
 
   it("shows file indexing percent then a read mark after the agent finishes", async () => {
@@ -601,11 +550,8 @@ describe("ProcurementsApp", () => {
         ],
       },
     ]);
-    expect(await screen.findByLabelText("Прочитано агентом")).toBeTruthy();
-    expect(screen.getByText(/Прочитано агентом: 1 из 1/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "договор.doc" }).getAttribute("href")).toBe(
-      `/api/documents/${"a".repeat(64)}`,
-    );
+    expect(await screen.findByText(/Карточка в «Мои закупки»/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Комплект фильтров/ })).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
@@ -738,7 +684,9 @@ describe("ProcurementsApp", () => {
       { ...first, triage: "participate" },
       second,
     ]);
-    expect(await screen.findByText("участвуем")).toBeTruthy();
+    expect(await screen.findByText(/Карточка в «Мои закупки»/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Насос для системы очистки воды/ })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "Кабель силовой" })).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 });

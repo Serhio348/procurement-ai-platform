@@ -22,6 +22,7 @@ export * from "./search/review.js";
 export * from "./search/search-cards.js";
 export * from "./search/term-match.js";
 export * from "./specialist/case.js";
+export * from "./specialist/case-list.js";
 export * from "./specialist/catalog.js";
 export * from "./specialist/deadline.js";
 export * from "./specialist/inbox-action.js";

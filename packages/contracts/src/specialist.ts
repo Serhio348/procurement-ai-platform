@@ -226,8 +226,28 @@ export const SpecialistInboxResolveResponse = z.object({
 });
 export type SpecialistInboxResolveResponse = z.infer<typeof SpecialistInboxResolveResponse>;
 
+export const SpecialistProcurementListTab = z.enum([
+  "listed",
+  "all",
+  "monitor",
+  "participate",
+  "archive",
+  "trash",
+]);
+export type SpecialistProcurementListTab = z.infer<typeof SpecialistProcurementListTab>;
+
+export const SpecialistProcurementListQuery = z.object({
+  tab: SpecialistProcurementListTab.default("listed"),
+  limit: z.coerce.number().int().positive().max(200).default(100),
+  offset: z.coerce.number().int().nonnegative().default(0),
+});
+export type SpecialistProcurementListQuery = z.infer<typeof SpecialistProcurementListQuery>;
+
 export const SpecialistProcurementListResponse = z.object({
   items: z.array(SpecialistProcurementCard),
+  total: z.number().int().nonnegative().default(0),
+  tab: SpecialistProcurementListTab.default("listed"),
+  hasMore: z.boolean().default(false),
 });
 export type SpecialistProcurementListResponse = z.infer<typeof SpecialistProcurementListResponse>;
 

@@ -34,10 +34,6 @@ export function InboxPage(props: InboxPageProps) {
                     className={isSelected ? "inbox-row is-selected" : "inbox-row"}
                     aria-current={isSelected ? "true" : undefined}
                     onClick={() => {
-                      if (entry.topic === "new_found") {
-                        props.onResolve?.(entry.id, "open");
-                        return;
-                      }
                       props.onSelect?.(entry.id);
                     }}
                   >
@@ -90,7 +86,7 @@ export function InboxPage(props: InboxPageProps) {
               {selected.topic === "new_found" ? (
                 <button
                   type="button"
-                  className="profile-fill"
+                  className="inbox-open"
                   disabled={props.busyId === selected.id}
                   onClick={() => props.onResolve?.(selected.id, "open")}
                 >
@@ -120,7 +116,7 @@ export function InboxPage(props: InboxPageProps) {
               {selected.topic !== "new_found" ? (
                 <button
                   type="button"
-                  className="profile-fill"
+                  className="inbox-open"
                   disabled={props.busyId === selected.id}
                   onClick={() => props.onResolve?.(selected.id, "open")}
                 >

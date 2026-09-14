@@ -1,23 +1,26 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SpecialistProcurementCard } from "@procurement/contracts";
 import { bidsDeadlinePassed, isSingleSourceAfterFailedProcedure } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
 
-type TabKey = "all" | "monitor" | "participate" | "archive";
+type MineTab = "all" | "monitor" | "participate" | "archive";
+export type MyProcurementsSection = "mine" | "trash";
+type ListTab = MineTab | "trash";
 
-const filterTabs: { key: TabKey; label: string }[] = [
+const filterTabs: { key: MineTab; label: string }[] = [
   { key: "all", label: "Все" },
   { key: "monitor", label: "Слежу" },
   { key: "participate", label: "Участвую" },
   { key: "archive", label: "Архив" },
 ];
 
-const EMPTY_TEXT: Record<TabKey, string> = {
+const EMPTY_TEXT: Record<ListTab, string> = {
   all: "Здесь будут закупки, по которым нажали «Следить» или «Участвовать».",
   monitor: "Здесь будут закупки, по которым нажали «Следить».",
   participate: "Здесь будут закупки, по которым нажали «Участвовать».",
   archive: "Здесь будут завершённые закупки, которые вы переместили в архив.",
+  trash: "Сюда попадают закупки после «Убрать» или «Не нужно». Их можно вернуть или удалить.",
 };
 
 function shortId(id: string): string {
@@ -30,27 +33,59 @@ function isDecided(item: SpecialistProcurementCard): boolean {
 
 export function MyProcurementsApp({
   procurements,
+  section = "mine",
   onArchive,
   onRemove,
+  onRestore,
+  onPurge,
+  load,
   now = () => new Date(),
 }: {
   procurements: readonly SpecialistProcurementCard[];
+  section?: MyProcurementsSection;
   onArchive?: (id: string, archived: boolean) => Promise<unknown> | void;
   onRemove?: (id: string) => Promise<unknown> | void;
+  onRestore?: (id: string) => Promise<unknown> | void;
+  onPurge?: (id: string) => Promise<unknown> | void;
+  load?: (tab: ListTab) => Promise<readonly SpecialistProcurementCard[]>;
   now?: () => Date;
 }): ReactElement {
   const navigate = useNavigate();
   const today = now();
-  const [filter, setFilter] = useState<TabKey>("all");
+  const isTrash = section === "trash";
+  const [filter, setFilter] = useState<MineTab>("all");
   const [pendingId, setPendingId] = useState<string | undefined>();
-  const decided = procurements.filter((item) => isDecided(item) && item.archived !== true);
-  const archived = procurements.filter((item) => item.archived === true);
+  const [remote, setRemote] = useState<readonly SpecialistProcurementCard[] | undefined>(undefined);
+  const activeTab: ListTab = isTrash ? "trash" : filter;
+
+  useEffect(() => {
+    if (load === undefined) {
+      setRemote(undefined);
+      return undefined;
+    }
+    let cancelled = false;
+    void load(activeTab).then((items) => {
+      if (!cancelled) setRemote(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, load]);
+
+  const source = remote ?? procurements;
+  const decided = source.filter((item) => isDecided(item) && item.archived !== true);
+  const archived = source.filter((item) => item.archived === true);
+  const trashed = source.filter((item) => item.triage === "reject");
   const visible =
-    filter === "archive"
-      ? archived
-      : filter === "all"
-        ? decided
-        : decided.filter((item) => item.triage === filter);
+    load !== undefined
+      ? source
+      : isTrash
+        ? trashed
+        : filter === "archive"
+          ? archived
+          : filter === "all"
+            ? decided
+            : decided.filter((item) => item.triage === filter);
 
   async function runCardAction(
     item: SpecialistProcurementCard,
@@ -60,6 +95,9 @@ export function MyProcurementsApp({
     setPendingId(item.id);
     try {
       await action();
+      if (load !== undefined) {
+        setRemote(await load(activeTab));
+      }
     } finally {
       setPendingId(undefined);
     }
@@ -68,27 +106,31 @@ export function MyProcurementsApp({
   return (
     <Shell>
       <main className="my-procurements">
-        <h1>Мои закупки</h1>
-        <div className="my-procurements-filters" role="tablist" aria-label="Фильтр по решению">
-          {filterTabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={filter === tab.key}
-              className={
-                filter === tab.key ? "my-procurements-tab-active" : "my-procurements-tab"
-              }
-              onClick={() => {
-                setFilter(tab.key);
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <h1>{isTrash ? "Корзина" : "Мои закупки"}</h1>
+        {isTrash ? (
+          <p className="my-procurements-lead">{EMPTY_TEXT.trash}</p>
+        ) : (
+          <div className="my-procurements-filters" role="tablist" aria-label="Фильтр по решению">
+            {filterTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={filter === tab.key}
+                className={
+                  filter === tab.key ? "my-procurements-tab-active" : "my-procurements-tab"
+                }
+                onClick={() => {
+                  setFilter(tab.key);
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
         {visible.length === 0 ? (
-          <p className="my-procurements-empty">{EMPTY_TEXT[filter]}</p>
+          <p className="my-procurements-empty">{isTrash ? "Корзина пуста." : EMPTY_TEXT[filter]}</p>
         ) : (
           <ul className="my-procurements-grid">
             {visible.map((item) => (
@@ -99,12 +141,18 @@ export function MyProcurementsApp({
                     className="my-procurements-card-main"
                     aria-label={`Открыть: ${item.title}`}
                     onClick={() => {
-                      void navigate(`/my-procurements/${item.id}`);
+                      void navigate(
+                        isTrash ? `/trash/${item.id}` : `/my-procurements/${item.id}`,
+                      );
                     }}
                   >
                     <div className="my-procurements-card-header">
                       <span className={`my-procurements-card-triage triage-${item.triage ?? ""}`}>
-                        {item.triage === "monitor" ? "Слежу" : "Участвую"}
+                        {item.triage === "monitor"
+                          ? "Слежу"
+                          : item.triage === "participate"
+                            ? "Участвую"
+                            : "Корзина"}
                       </span>
                       <span className="my-procurements-card-status">{item.statusLabel}</span>
                       {bidsDeadlinePassed(item, today) ? (
@@ -149,7 +197,41 @@ export function MyProcurementsApp({
                       Открыть карточку <span className="my-procurements-card-arrow">→</span>
                     </span>
                   </button>
-                  {onArchive !== undefined || onRemove !== undefined ? (
+                  {isTrash ? (
+                    <div className="my-procurements-card-actions">
+                      {onRestore !== undefined ? (
+                        <button
+                          type="button"
+                          className="my-procurements-card-action"
+                          disabled={pendingId === item.id}
+                          onClick={() => {
+                            void runCardAction(item, () => onRestore(item.id));
+                          }}
+                        >
+                          Вернуть
+                        </button>
+                      ) : null}
+                      {onPurge !== undefined ? (
+                        <button
+                          type="button"
+                          className="my-procurements-card-action my-procurements-card-action-danger"
+                          disabled={pendingId === item.id}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                "Удалить закупку из корзины безвозвратно? Вернуть её уже будет нельзя.",
+                              )
+                            ) {
+                              return;
+                            }
+                            void runCardAction(item, () => onPurge(item.id));
+                          }}
+                        >
+                          Удалить
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : onArchive !== undefined || onRemove !== undefined ? (
                     <div className="my-procurements-card-actions">
                       {onArchive !== undefined ? (
                         <button
@@ -169,7 +251,11 @@ export function MyProcurementsApp({
                           className="my-procurements-card-action my-procurements-card-action-danger"
                           disabled={pendingId === item.id}
                           onClick={() => {
-                            if (!window.confirm("Убрать закупку из списка? Она перестанет отслеживаться.")) {
+                            if (
+                              !window.confirm(
+                                "Убрать закупку в корзину? Потом её можно вернуть или удалить.",
+                              )
+                            ) {
                               return;
                             }
                             void runCardAction(item, () => onRemove(item.id));

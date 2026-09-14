@@ -197,6 +197,9 @@ integration("PostgreSQL migrations and invariants", () => {
     const loadedWorkspace = await store.loadWorkspace(workspaceId);
     const loadedCases = await store.loadCases(workspaceId);
     const loadedInbox = await store.loadInbox(workspaceId);
+    const listed = await store.listCases(workspaceId, { tab: "listed", limit: 10 });
+    const mine = await store.listCases(workspaceId, { tab: "all" });
+    const byId = await store.getCase(workspaceId, card.id);
     await store.removeCases([card.id], workspaceId);
     const inboxAfterRemove = await store.loadInbox(workspaceId);
     const versions = await db
@@ -207,6 +210,9 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(loadedWorkspace?.profiles[0]?.name).toBe("Persist");
     expect(loadedWorkspace?.profiles[0]?.lastDiscoveryAt).toBe("2026-09-09T10:00:00.000Z");
     expect(loadedCases.map((item) => item.sourceProcurementId)).toContain("auction/901-persist");
+    expect(listed.items.some((item) => item.id === card.id)).toBe(true);
+    expect(mine.items.some((item) => item.id === card.id)).toBe(false);
+    expect(byId?.sourceProcurementId).toBe(card.sourceProcurementId);
     expect(versions[0]?.hash).toBe(hash);
     expect(versions[0]?.storageKey).toBe(blobStorageKey(hash));
     expect(loadedInbox.map((item) => item.change.id)).toContain(
@@ -256,8 +262,13 @@ integration("PostgreSQL migrations and invariants", () => {
       .where(sql`${procurements.sourceRecordId} = ${source}`);
 
     expect(canonical).toHaveLength(1);
+    const mineA = await store.listCases(workspaceA, { tab: "all" });
+    const mineB = await store.listCases(workspaceB, { tab: "participate" });
     expect(loadedA[0]?.triage).toBe("monitor");
     expect(loadedB[0]?.triage).toBe("participate");
+    expect(mineA.items.map((item) => item.id)).toEqual([cardA.id]);
+    expect(mineB.items.map((item) => item.id)).toEqual([cardB.id]);
+    expect((await store.findCaseBySource(workspaceA, source))?.triage).toBe("monitor");
     expect(loadedA[0]?.id).not.toBe(loadedB[0]?.id);
     expect(loadedA[0]?.canonicalProcurementId).toBe(canonical[0]?.id);
     expect(loadedB[0]?.canonicalProcurementId).toBe(canonical[0]?.id);

@@ -348,8 +348,8 @@ npm run db:migrate
 systemctl restart procurement-api
 ```
 
-Обычное обновление — эти команды. Этот раз (личные кабинеты, этап 42) —
-шаг 11.2: сначала дамп, потом миграция.
+Обычное обновление — эти команды. Этот раз (корзина, этап 44) —
+шаг 11.4: миграция не нужна. Этап 43 (список из SQL) — шаг 11.3.
 
 Статику nginx подхватит из `apps/web/dist` сразу после `build` web.
 Если страница «старая» — жёсткое обновление в браузере (Ctrl+F5).
@@ -530,6 +530,75 @@ docker compose -f infra/docker-compose.yml exec -T postgres \
 
 Подставьте имя файла с `ls /opt/backups`. После отката не запускайте
 `db:migrate`, пока не разобрали ошибку.
+
+### 11.3. Этот раз: список кабинета из SQL (этап 43)
+
+Кабинет больше не поднимает все закупки в память. «Мои закупки» и карточка
+идут страницами из PostgreSQL. Новых таблиц нет — `db:migrate` не запускайте.
+
+Новых переменных в `.env` нет.
+
+**1. Код и сборка**
+
+```bash
+cd /opt/procurement-ai-platform
+git pull
+npm install --include=dev
+npm run build
+npm run build -w @procurement/web
+```
+
+**2. Права и перезапуск API**
+
+```bash
+chown -R procurement:procurement /opt/procurement-ai-platform
+chmod o+x /opt/procurement-ai-platform /opt/procurement-ai-platform/apps /opt/procurement-ai-platform/apps/web
+chmod -R o+rX /opt/procurement-ai-platform/apps/web/dist
+systemctl restart procurement-api
+journalctl -u procurement-api -n 40 --no-pager
+```
+
+Ожидание: `active (running)`, `Specialist API listening`.
+
+**3. Проверка в браузере**
+
+Ctrl+F5, войдите. «Мои закупки» открываются по вкладкам. Прямая ссылка
+на карточку (`/my-procurements/…`) не должна писать «не найдена», пока
+идёт загрузка.
+
+### 11.4. Этот раз: корзина (этап 44)
+
+«Не нужно» и «Убрать» кладут карточку в раздел «Корзина» главного меню. Оттуда её можно
+вернуть в «Мои закупки» или удалить. Новых таблиц нет — `db:migrate` не
+запускайте. Новых переменных в `.env` нет.
+
+**1. Код и сборка**
+
+```bash
+cd /opt/procurement-ai-platform
+git pull
+npm install --include=dev
+npm run build
+npm run build -w @procurement/web
+```
+
+**2. Права и перезапуск API**
+
+```bash
+chown -R procurement:procurement /opt/procurement-ai-platform
+chmod o+x /opt/procurement-ai-platform /opt/procurement-ai-platform/apps /opt/procurement-ai-platform/apps/web
+chmod -R o+rX /opt/procurement-ai-platform/apps/web/dist
+systemctl restart procurement-api
+journalctl -u procurement-api -n 40 --no-pager
+```
+
+Ожидание: `active (running)`, `Specialist API listening`.
+
+**3. Проверка в браузере**
+
+Ctrl+F5, войдите. В меню слева есть «Корзина». «Убрать» или «Не нужно» —
+карточка там. «Вернуть» ставит её обратно в «Слежу» / «Участвую».
+«Удалить» спрашивает подтверждение и убирает карточку насовсем.
 
 ---
 

@@ -6,10 +6,11 @@ import {
   type InboxFixtureItem as InboxFixtureItemValue,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistProcurementListTab,
   type SpecialistTriageKind,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import type { Database } from "./client.js";
 import {
   documentVersions,
@@ -29,6 +30,20 @@ import { withRlsBypass, withUser, withWorkspace } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
+export const DEFAULT_CASE_LIST_LIMIT = 100;
+
+export interface SpecialistCaseListQuery {
+  tab?: SpecialistProcurementListTab;
+  limit?: number;
+  offset?: number;
+  liveOnly?: boolean;
+  rejectedSourceIds?: readonly string[];
+}
+
+export interface SpecialistCaseListPage {
+  items: SpecialistProcurementCardValue[];
+  total: number;
+}
 
 /** Object-store key for bytes. The sha256 itself lives on document_versions.hash. */
 export function blobStorageKey(hash: string): string {
@@ -321,21 +336,173 @@ export function createSpecialistStore(db: Database) {
           .where(eq(workspaceProcurements.workspaceId, workspaceId));
         const cards: SpecialistProcurementCardValue[] = [];
         for (const row of rows) {
-          const parsed = SpecialistProcurementCard.safeParse(row.card);
-          if (!parsed.success) continue;
-          cards.push(
-            SpecialistProcurementCard.parse({
-              ...parsed.data,
-              id: row.id,
-              canonicalProcurementId: row.procurementId,
-              archived: row.archived,
-              ...(row.triage === null ? {} : { triage: row.triage }),
-              ...(row.foundAs === null ? {} : { foundAs: row.foundAs }),
-              ...(row.lastSeenAt === null ? {} : { lastSeenAt: toIsoDateTime(row.lastSeenAt) }),
-            }),
-          );
+          const parsed = parseCaseRow(row);
+          if (parsed !== undefined) cards.push(parsed);
         }
         return cards;
+      });
+    },
+
+    async listCases(
+      workspaceId: string,
+      query: SpecialistCaseListQuery = {},
+    ): Promise<SpecialistCaseListPage> {
+      const tab = query.tab ?? "listed";
+      const limit = query.limit ?? DEFAULT_CASE_LIST_LIMIT;
+      const offset = query.offset ?? 0;
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const filters = caseListFilters(workspaceId, { ...query, tab });
+        const totalRows = await tx
+          .select({ n: count() })
+          .from(workspaceProcurements)
+          .where(and(...filters));
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(and(...filters))
+          .orderBy(desc(workspaceProcurements.updatedAt), asc(workspaceProcurements.id))
+          .limit(limit)
+          .offset(offset);
+        const items: SpecialistProcurementCardValue[] = [];
+        for (const row of rows) {
+          const parsed = parseCaseRow(row);
+          if (parsed !== undefined) items.push(parsed);
+        }
+        return { items, total: Number(totalRows[0]?.n ?? 0) };
+      });
+    },
+
+    async getCase(workspaceId: string, id: string): Promise<SpecialistProcurementCardValue | undefined> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(and(eq(workspaceProcurements.workspaceId, workspaceId), eq(workspaceProcurements.id, id)))
+          .limit(1);
+        return rows[0] === undefined ? undefined : parseCaseRow(rows[0]);
+      });
+    },
+
+    async findCaseBySource(
+      workspaceId: string,
+      sourceProcurementId: string,
+    ): Promise<SpecialistProcurementCardValue | undefined> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              eq(workspaceProcurements.sourceProcurementId, sourceProcurementId),
+            ),
+          )
+          .limit(1);
+        return rows[0] === undefined ? undefined : parseCaseRow(rows[0]);
+      });
+    },
+
+    async loadCasesBySources(
+      workspaceId: string,
+      sourceIds: readonly string[],
+    ): Promise<Map<string, SpecialistProcurementCardValue>> {
+      const found = new Map<string, SpecialistProcurementCardValue>();
+      if (sourceIds.length === 0) return found;
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              inArray(workspaceProcurements.sourceProcurementId, [...sourceIds]),
+            ),
+          );
+        for (const row of rows) {
+          const parsed = parseCaseRow(row);
+          if (parsed !== undefined) found.set(parsed.sourceProcurementId, parsed);
+        }
+        return found;
+      });
+    },
+
+    async listWatchedCases(
+      workspaceId: string,
+      limit: number,
+    ): Promise<SpecialistProcurementCardValue[]> {
+      if (limit <= 0) return [];
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              eq(workspaceProcurements.archived, false),
+              inArray(workspaceProcurements.triage, ["monitor", "participate"]),
+              sql`${workspaceProcurements.card} ->> 'live' = 'true'`,
+            ),
+          )
+          .orderBy(
+            sql`case when ${workspaceProcurements.watchSnapshot} is null then 0 else 1 end`,
+            asc(sql`${workspaceProcurements.watchSnapshot} ->> 'capturedAt'`),
+            asc(workspaceProcurements.lastSeenAt),
+          )
+          .limit(limit);
+        const items: SpecialistProcurementCardValue[] = [];
+        for (const row of rows) {
+          const parsed = parseCaseRow(row);
+          if (parsed !== undefined) items.push(parsed);
+        }
+        return items;
+      });
+    },
+
+    async listStaleUndecidedIds(
+      workspaceId: string,
+      cutoffIso: string,
+      keepSourceIds: readonly string[],
+    ): Promise<string[]> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const filters = [
+          eq(workspaceProcurements.workspaceId, workspaceId),
+          isNull(workspaceProcurements.triage),
+          sql`${workspaceProcurements.card} ->> 'live' = 'true'`,
+          or(isNull(workspaceProcurements.lastSeenAt), lt(workspaceProcurements.lastSeenAt, cutoffIso)),
+        ];
+        if (keepSourceIds.length > 0) {
+          filters.push(notInArray(workspaceProcurements.sourceProcurementId, [...keepSourceIds]));
+        }
+        const rows = await tx
+          .select({ id: workspaceProcurements.id })
+          .from(workspaceProcurements)
+          .where(and(...filters));
+        return rows.map((row) => row.id);
+      });
+    },
+
+    async findDocument(
+      workspaceId: string,
+      hash: string,
+    ): Promise<SpecialistCaseDocument | undefined> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select({ card: workspaceProcurements.card })
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              sql`exists (
+                select 1
+                from jsonb_array_elements(${workspaceProcurements.card} -> 'documents') as document
+                where document ->> 'hash' = ${hash}
+              )`,
+            ),
+          )
+          .limit(1);
+        const parsed = SpecialistProcurementCard.safeParse(rows[0]?.card);
+        if (!parsed.success) return undefined;
+        return parsed.data.documents.find((item) => item.hash === hash);
       });
     },
 
@@ -476,6 +643,56 @@ export function toIsoDateTime(value: string | Date): string {
     throw new Error(`Invalid timestamp: ${value}`);
   }
   return parsed.toISOString();
+}
+
+type WorkspaceCaseRow = typeof workspaceProcurements.$inferSelect;
+
+function parseCaseRow(row: WorkspaceCaseRow): SpecialistProcurementCardValue | undefined {
+  const parsed = SpecialistProcurementCard.safeParse(row.card);
+  if (!parsed.success) return undefined;
+  return SpecialistProcurementCard.parse({
+    ...parsed.data,
+    id: row.id,
+    canonicalProcurementId: row.procurementId,
+    archived: row.archived,
+    ...(row.triage === null ? {} : { triage: row.triage }),
+    ...(row.foundAs === null ? {} : { foundAs: row.foundAs }),
+    ...(row.lastSeenAt === null ? {} : { lastSeenAt: toIsoDateTime(row.lastSeenAt) }),
+  });
+}
+
+function caseListFilters(workspaceId: string, query: SpecialistCaseListQuery) {
+  const filters = [eq(workspaceProcurements.workspaceId, workspaceId)];
+  const tab = query.tab ?? "listed";
+  if (query.liveOnly === true) {
+    filters.push(sql`${workspaceProcurements.card} ->> 'live' = 'true'`);
+  }
+  const rejected = query.rejectedSourceIds ?? [];
+  if (rejected.length > 0) {
+    filters.push(notInArray(workspaceProcurements.sourceProcurementId, [...rejected]));
+  }
+  const listed = or(
+    isNull(workspaceProcurements.foundAs),
+    ne(workspaceProcurements.foundAs, "review"),
+    isNotNull(workspaceProcurements.triage),
+  );
+  if (tab === "trash") {
+    return [eq(workspaceProcurements.workspaceId, workspaceId), eq(workspaceProcurements.triage, "reject")];
+  }
+  if (listed !== undefined) filters.push(listed);
+  if (tab === "all") {
+    filters.push(eq(workspaceProcurements.archived, false));
+    filters.push(inArray(workspaceProcurements.triage, ["monitor", "participate"]));
+  } else if (tab === "monitor") {
+    filters.push(eq(workspaceProcurements.archived, false));
+    filters.push(eq(workspaceProcurements.triage, "monitor"));
+  } else if (tab === "participate") {
+    filters.push(eq(workspaceProcurements.archived, false));
+    filters.push(eq(workspaceProcurements.triage, "participate"));
+  } else if (tab === "archive") {
+    filters.push(eq(workspaceProcurements.archived, true));
+  }
+  return filters;
 }
 
 /** Drops NUL bytes that PostgreSQL rejects inside jsonb. */

@@ -42,6 +42,12 @@ export function Shell({ children }: { children: ReactNode }) {
             Мои закупки
           </NavLink>
           <NavLink
+            to="/trash"
+            className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
+          >
+            Корзина
+          </NavLink>
+          <NavLink
             to="/profiles"
             className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
           >

@@ -243,6 +243,16 @@ export class SpecialistWorkspace {
     return undefined;
   }
 
+  /** Kind to restore after «Убрать»: last Слежу/Участвую, otherwise Слежу. */
+  lastWorkingKind(sourceProcurementId: string): "monitor" | "participate" {
+    for (let index = this.#decisions.length - 1; index >= 0; index -= 1) {
+      const decision = this.#decisions[index];
+      if (decision?.sourceProcurementId !== sourceProcurementId) continue;
+      if (decision.kind === "monitor" || decision.kind === "participate") return decision.kind;
+    }
+    return "monitor";
+  }
+
   rejectedSourceIds(): Set<string> {
     return sourceIdsWithLatestKind(this.#decisions, "reject");
   }

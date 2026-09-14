@@ -13,7 +13,12 @@ import {
 import type { AuthDirectory } from "./auth/directory.js";
 import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
-import { SpecialistCatalog, SpecialistWorkspace } from "@procurement/domain";
+import {
+  isWatchedTriage,
+  pageListedCases,
+  SpecialistCatalog,
+  SpecialistWorkspace,
+} from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type {
   InboxFixtureItem,
@@ -25,6 +30,7 @@ import {
   createMemoryCabinetRegistry,
   hydrateCabinet,
   TEST_WORKSPACE_ID,
+  watchOrder,
   type CabinetRegistry,
   type SpecialistCabinet,
 } from "./cabinets.js";
@@ -162,7 +168,6 @@ export async function openSpecialistPersistence(options: {
     };
     if (store !== undefined) {
       const fromDb = await store.loadWorkspace(workspaceId);
-      const cases = await store.loadCases(workspaceId);
       let inbox: InboxFixtureItem[] = [];
       try {
         inbox = await store.loadInbox(workspaceId);
@@ -172,7 +177,6 @@ export async function openSpecialistPersistence(options: {
       }
       await hydrateCabinet(cabinet, {
         ...(fromDb === undefined ? {} : { workspace: fromDb }),
-        cases,
         inbox,
       });
     } else {
@@ -221,6 +225,80 @@ export async function openSpecialistPersistence(options: {
     },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);
+    },
+    async listCases(workspaceId, query = {}) {
+      if (store !== undefined) {
+        return store.listCases(workspaceId, {
+          ...(query.tab === undefined ? {} : { tab: query.tab }),
+          ...(query.limit === undefined ? {} : { limit: query.limit }),
+          ...(query.offset === undefined ? {} : { offset: query.offset }),
+          ...(query.liveOnly === undefined ? {} : { liveOnly: query.liveOnly }),
+          ...(query.rejectedSourceIds === undefined
+            ? {}
+            : { rejectedSourceIds: [...query.rejectedSourceIds] }),
+        });
+      }
+      const cabinet = await openCabinet(workspaceId);
+      return pageListedCases(cabinet.catalog.procurements(), query);
+    },
+    async getCase(workspaceId, id) {
+      if (store !== undefined) return store.getCase(workspaceId, id);
+      const cabinet = await openCabinet(workspaceId);
+      return cabinet.catalog.procurements().find((item) => item.id === id);
+    },
+    async findCaseBySource(workspaceId, sourceProcurementId) {
+      if (store !== undefined) return store.findCaseBySource(workspaceId, sourceProcurementId);
+      const cabinet = await openCabinet(workspaceId);
+      return cabinet.catalog
+        .procurements()
+        .find((item) => item.sourceProcurementId === sourceProcurementId);
+    },
+    async loadCasesBySources(workspaceId, sourceIds) {
+      if (store !== undefined) return store.loadCasesBySources(workspaceId, sourceIds);
+      const wanted = new Set(sourceIds);
+      const found = new Map<string, SpecialistProcurementCardValue>();
+      const cabinet = await openCabinet(workspaceId);
+      for (const card of cabinet.catalog.procurements()) {
+        if (wanted.has(card.sourceProcurementId)) found.set(card.sourceProcurementId, card);
+      }
+      return found;
+    },
+    async listWatchedCases(workspaceId, limit) {
+      if (store !== undefined) return store.listWatchedCases(workspaceId, limit);
+      const cabinet = await openCabinet(workspaceId);
+      if (limit <= 0) return [];
+      return cabinet.catalog
+        .procurements()
+        .filter((item) => item.live === true && item.archived !== true && isWatchedTriage(item))
+        .sort((left, right) => watchOrder(left) - watchOrder(right))
+        .slice(0, limit);
+    },
+    async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds) {
+      if (store !== undefined) {
+        return store.listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds);
+      }
+      const cabinet = await openCabinet(workspaceId);
+      const cutoff = Date.parse(cutoffIso);
+      const keep = new Set(keepSourceIds);
+      return cabinet.catalog
+        .procurements()
+        .filter((card) => {
+          if (card.live !== true || card.triage !== undefined) return false;
+          if (keep.has(card.sourceProcurementId)) return false;
+          const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
+          if (Number.isFinite(seen) && seen >= cutoff) return false;
+          return true;
+        })
+        .map((card) => card.id);
+    },
+    async findDocument(workspaceId, hash) {
+      if (store !== undefined) return store.findDocument(workspaceId, hash);
+      const cabinet = await openCabinet(workspaceId);
+      for (const card of cabinet.catalog.procurements()) {
+        const document = card.documents.find((item) => item.hash === hash);
+        if (document !== undefined) return document;
+      }
+      return undefined;
     },
     async hasDocumentHash(workspaceId, hash) {
       if (store === undefined) {

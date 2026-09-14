@@ -1,6 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ProcurementDetailApp } from "./ProcurementDetailApp.js";
 
@@ -72,5 +73,124 @@ describe("ProcurementDetailApp", () => {
     expect(screen.getByText("160 651.42 BYN")).toBeTruthy();
     expect(screen.getByText("Согласно заданию на закупку")).toBeTruthy();
     expect(screen.queryByText("Загрузка с площадки…")).toBeNull();
+  });
+
+  it("loads a case by id when the local list is empty", async () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000402",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "participate",
+      sourceCard: source,
+    });
+    let resolveCard!: (value: SpecialistProcurementCard) => void;
+    const fetchCase = vi.fn(
+      () =>
+        new Promise<SpecialistProcurementCard>((resolve) => {
+          resolveCard = resolve;
+        }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/my-procurements/${card.id}`]}>
+        <Routes>
+          <Route
+            path="/my-procurements/:id"
+            element={<ProcurementDetailApp procurements={[]} fetchCase={fetchCase} />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Загрузка…")).toBeTruthy();
+    resolveCard(card);
+    await waitFor(() => {
+      expect(screen.getByText(/auc0003545600/)).toBeTruthy();
+    });
+  });
+
+  it("lets the specialist switch from watching to participating", async () => {
+    const user = userEvent.setup();
+    const watching = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000403",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "monitor",
+      sourceCard: source,
+    });
+    const decide = vi.fn(async () => [{ ...watching, triage: "participate" as const }]);
+
+    render(
+      <MemoryRouter initialEntries={[`/my-procurements/${watching.id}`]}>
+        <Routes>
+          <Route
+            path="/my-procurements/:id"
+            element={
+              <ProcurementDetailApp
+                procurements={[watching]}
+                decide={decide}
+                onCardLoaded={() => undefined}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "Отслеживать" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Участвовать" }));
+    expect(decide).toHaveBeenCalledWith(watching.id, "participate");
+  });
+
+  it("restores a trashed card back into Мои закупки", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000404",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "reject",
+      sourceCard: source,
+    });
+    const restore = vi.fn(async () => [{ ...trashed, triage: "monitor" as const }]);
+    const onCardLoaded = vi.fn();
+
+    render(
+      <MemoryRouter initialEntries={[`/trash/${trashed.id}`]}>
+        <Routes>
+          <Route
+            path="/trash/:id"
+            element={
+              <ProcurementDetailApp
+                procurements={[trashed]}
+                restore={restore}
+                purge={async () => undefined}
+                onCardLoaded={onCardLoaded}
+              />
+            }
+          />
+          <Route path="/my-procurements/:id" element={<p>Мои закупки</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Корзина" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Отслеживать" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Вернуть в «Мои закупки»" }));
+    expect(restore).toHaveBeenCalledWith(trashed.id);
+    expect(onCardLoaded).toHaveBeenCalledWith(expect.objectContaining({ triage: "monitor" }));
+    await waitFor(() => {
+      expect(screen.getByText("Мои закупки")).toBeTruthy();
+    });
   });
 });

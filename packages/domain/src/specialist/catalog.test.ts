@@ -183,4 +183,22 @@ describe("SpecialistCatalog", () => {
     );
     expect(catalog.urgentInbox()).toEqual([]);
   });
+
+  it("drops a purged case so persist cannot recreate it from the inbox stub", () => {
+    const catalog = SpecialistCatalog.parse(fixture);
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000020",
+      title: "Поставка КТПБ",
+      status: "cancelled",
+      statusLabel: "отменена",
+      url: "https://goszakupki.by/auction/view/001",
+      sourceProcurementId: "auction/001",
+      triage: "reject",
+    });
+    catalog.upsertCase(card);
+    catalog.dropCase(card.id);
+
+    expect(catalog.procurement(card.id)).toBeUndefined();
+    expect(catalog.procurements().some((item) => item.id === card.id)).toBe(false);
+  });
 });

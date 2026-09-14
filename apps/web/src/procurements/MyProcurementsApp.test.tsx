@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -110,5 +110,109 @@ describe("MyProcurementsApp", () => {
 
     await user.click(screen.getByRole("button", { name: "Убрать" }));
     expect(onRemove).not.toHaveBeenCalled();
+  });
+
+  it("asks the API for the active tab instead of filtering a full dump", async () => {
+    const load = vi.fn(async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
+      if (tab === "all") return [card];
+      return [];
+    });
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    expect(load).toHaveBeenCalledWith("all");
+  });
+
+  it("does not keep Корзина among Мои закупки tabs", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[SpecialistProcurementCard.parse({ ...card, triage: "reject" })]}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Мои закупки" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Корзина" })).toBeNull();
+    expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+  });
+
+  it("lists a rejected card on the Корзина page and restores it", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const onRestore = vi.fn(async () => undefined);
+    const onPurge = vi.fn(async () => undefined);
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[trashed]}
+          onRestore={onRestore}
+          onPurge={onPurge}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Корзина" })).toBeTruthy();
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Вернуть" }));
+    expect(onRestore).toHaveBeenCalledWith(trashed.id);
+    expect(onPurge).not.toHaveBeenCalled();
+  });
+
+  it("loads the trash list from the API when opened as a section", async () => {
+    const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const load = vi.fn(async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
+      if (tab === "trash") return [trashed];
+      return [];
+    });
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    expect(load).toHaveBeenCalledWith("trash");
+  });
+
+  it("purges a trash card only after confirmation", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const onPurge = vi.fn(async () => undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[trashed]}
+          onPurge={onPurge}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(onPurge).toHaveBeenCalledWith(trashed.id);
   });
 });

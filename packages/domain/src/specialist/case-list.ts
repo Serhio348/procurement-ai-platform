@@ -1,0 +1,77 @@
+import type { SpecialistProcurementCard } from "@procurement/contracts";
+
+export const SPECIALIST_CASE_LIST_TABS = [
+  "listed",
+  "all",
+  "monitor",
+  "participate",
+  "archive",
+  "trash",
+] as const;
+export type SpecialistCaseListTab = (typeof SPECIALIST_CASE_LIST_TABS)[number];
+
+export const DEFAULT_CASE_LIST_LIMIT = 100;
+
+export interface SpecialistCaseListQuery {
+  tab?: SpecialistCaseListTab;
+  limit?: number;
+  offset?: number;
+  liveOnly?: boolean;
+  rejectedSourceIds?: ReadonlySet<string>;
+}
+
+export interface SpecialistCaseListPage {
+  items: SpecialistProcurementCard[];
+  total: number;
+}
+
+/**
+ * Rows the console may show outside the inbox: not rejected, not a pending
+ * review case. Search hits and decided cases both pass.
+ */
+export function isConsoleListedCase(
+  card: Pick<SpecialistProcurementCard, "sourceProcurementId" | "foundAs" | "triage" | "live">,
+  options: Pick<SpecialistCaseListQuery, "liveOnly" | "rejectedSourceIds"> = {},
+): boolean {
+  if (options.rejectedSourceIds?.has(card.sourceProcurementId) === true) return false;
+  if (options.liveOnly === true && card.live !== true) return false;
+  if (card.foundAs === "review" && card.triage === undefined) return false;
+  return true;
+}
+
+export function caseMatchesListTab(
+  card: Pick<SpecialistProcurementCard, "triage" | "archived">,
+  tab: SpecialistCaseListTab,
+): boolean {
+  switch (tab) {
+    case "listed":
+      return true;
+    case "all":
+      return (card.triage === "monitor" || card.triage === "participate") && card.archived !== true;
+    case "monitor":
+      return card.triage === "monitor" && card.archived !== true;
+    case "participate":
+      return card.triage === "participate" && card.archived !== true;
+    case "archive":
+      return card.archived === true;
+    case "trash":
+      return card.triage === "reject";
+  }
+}
+
+export function pageListedCases(
+  cards: readonly SpecialistProcurementCard[],
+  query: SpecialistCaseListQuery = {},
+): SpecialistCaseListPage {
+  const tab = query.tab ?? "listed";
+  const offset = query.offset ?? 0;
+  const limit = query.limit ?? DEFAULT_CASE_LIST_LIMIT;
+  const visible = cards.filter((card) => {
+    if (tab === "trash") return card.triage === "reject";
+    return isConsoleListedCase(card, query) && caseMatchesListTab(card, tab);
+  });
+  return {
+    items: visible.slice(offset, offset + limit),
+    total: visible.length,
+  };
+}

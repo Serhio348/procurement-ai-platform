@@ -1,6 +1,11 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
+import type {
+  ProcedureCard,
+  SpecialistIngestProgress,
+  SpecialistProcurementCard,
+  SpecialistTriageKind,
+} from "@procurement/contracts";
 import {
   bidsDeadlinePassed,
   isSingleSourceAfterFailedProcedure,
@@ -10,6 +15,7 @@ import {
 } from "@procurement/domain";
 import { fetchProcurementCard } from "../api/specialist.js";
 import { Shell } from "../shell/Shell.js";
+import { DocumentNameLink, ingestProgressCaption, officeDownloadFrame, triageActionClass } from "./ProcurementsApp.js";
 
 function shortId(id: string): string {
   return `${id.slice(0, 8)}…`;
@@ -18,27 +24,71 @@ function shortId(id: string): string {
 export function ProcurementDetailApp({
   procurements,
   onCardLoaded,
+  fetchCase,
+  decide,
+  restore,
+  purge,
+  ingestProgress,
 }: {
   procurements: readonly SpecialistProcurementCard[];
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
+  fetchCase?: (id: string) => Promise<SpecialistProcurementCard>;
+  decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
+  restore?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
+  purge?: (id: string) => Promise<void>;
+  ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
 }): ReactElement {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const stored = procurements.find((item) => item.id === id);
+  const fromList = procurements.find((item) => item.id === id);
+  const [fetched, setFetched] = useState<SpecialistProcurementCard | undefined>(undefined);
+  const [missing, setMissing] = useState(false);
+  const stored = fromList ?? fetched;
   const [live, setLive] = useState<ProcedureCard | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
+  const [trashBusy, setTrashBusy] = useState<"restore" | "purge" | undefined>();
+  const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
+  const ingestGeneration = useRef(0);
+
+  useEffect(() => {
+    setMissing(false);
+    if (id === undefined || fromList !== undefined || fetchCase === undefined) {
+      if (fromList !== undefined) setFetched(undefined);
+      return undefined;
+    }
+    let cancelled = false;
+    setFetched(undefined);
+    void fetchCase(id)
+      .then((card) => {
+        if (cancelled) return;
+        setFetched(card);
+        onCardLoaded?.(card);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFetched(undefined);
+          setMissing(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, fromList, fetchCase, onCardLoaded]);
 
   useEffect(() => {
     setLive(undefined);
     setError(undefined);
     if (id === undefined || stored === undefined) return;
     if (stored.sourceCard !== undefined) return;
-    if (stored.triage !== "monitor" && stored.triage !== "participate") return;
-    void loadCard(id);
+    if (stored.triage !== "monitor" && stored.triage !== "participate" && stored.triage !== "reject") {
+      return;
+    }
+    void loadPlatformCard(id);
   }, [id, stored?.id, stored?.sourceCard, stored?.triage]);
 
-  async function loadCard(procurementId: string): Promise<void> {
+  async function loadPlatformCard(procurementId: string): Promise<void> {
     setLoading(true);
     setError(undefined);
     try {
@@ -54,11 +104,78 @@ export function ProcurementDetailApp({
     }
   }
 
+  async function runDecide(kind: SpecialistTriageKind): Promise<void> {
+    if (decide === undefined || stored === undefined || busyKind !== undefined) return;
+    if (stored.triage === kind) return;
+    setBusyKind(kind);
+    const procurementId = stored.id;
+    const generation = ++ingestGeneration.current;
+    const pullProgress = (): void => {
+      if (ingestProgress === undefined) return;
+      void ingestProgress(procurementId)
+        .then((next) => {
+          if (ingestGeneration.current !== generation) return;
+          setProgress(next);
+        })
+        .catch(() => undefined);
+    };
+    const timer =
+      kind === "participate" && ingestProgress !== undefined
+        ? window.setInterval(pullProgress, 400)
+        : undefined;
+    if (kind === "participate") pullProgress();
+    try {
+      const next = await decide(stored.id, kind);
+      const updated = next.find((item) => item.id === stored.id);
+      if (updated !== undefined) onCardLoaded?.(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить решение");
+    } finally {
+      ingestGeneration.current += 1;
+      if (timer !== undefined) window.clearInterval(timer);
+      setProgress(undefined);
+      setBusyKind(undefined);
+    }
+  }
+
+  async function runRestore(): Promise<void> {
+    if (restore === undefined || stored === undefined || trashBusy !== undefined) return;
+    setTrashBusy("restore");
+    try {
+      const next = await restore(stored.id);
+      const updated = next.find((item) => item.id === stored.id);
+      if (updated !== undefined) onCardLoaded?.(updated);
+      navigate(`/my-procurements/${stored.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось вернуть закупку");
+    } finally {
+      setTrashBusy(undefined);
+    }
+  }
+
+  async function runPurge(): Promise<void> {
+    if (purge === undefined || stored === undefined || trashBusy !== undefined) return;
+    if (
+      !window.confirm("Удалить закупку из корзины безвозвратно? Вернуть её уже будет нельзя.")
+    ) {
+      return;
+    }
+    setTrashBusy("purge");
+    try {
+      await purge(stored.id);
+      navigate("/trash");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить закупку");
+      setTrashBusy(undefined);
+    }
+  }
+
   if (stored === undefined) {
+    const waiting = fetchCase !== undefined && id !== undefined && !missing;
     return (
       <Shell>
         <main className="procurement-detail">
-          <p>Закупка не найдена.</p>
+          <p>{waiting ? "Загрузка…" : "Закупка не найдена."}</p>
         </main>
       </Shell>
     );
@@ -84,7 +201,13 @@ export function ProcurementDetailApp({
           </h1>
           <div className="procurement-detail-badges">
             <span className={`procurement-detail-triage triage-${stored.triage ?? ""}`}>
-              {stored.triage === "monitor" ? "Слежу" : "Участвую"}
+              {stored.triage === "monitor"
+                ? "Слежу"
+                : stored.triage === "participate"
+                  ? "Участвую"
+                  : stored.triage === "reject"
+                    ? "Корзина"
+                    : "Решение"}
             </span>
             <span className="procurement-detail-status">{stored.statusLabel}</span>
             {bidsDeadlinePassed(
@@ -101,6 +224,66 @@ export function ProcurementDetailApp({
           </div>
         </header>
 
+        {stored.triage === "reject" ? (
+          restore === undefined && purge === undefined ? null : (
+            <div className="triage-actions procurement-detail-triage-actions">
+              {restore === undefined ? null : (
+                <button
+                  type="button"
+                  className="search-profile"
+                  disabled={trashBusy !== undefined}
+                  onClick={() => {
+                    void runRestore();
+                  }}
+                >
+                  {trashBusy === "restore" ? "Возвращаем…" : "Вернуть в «Мои закупки»"}
+                </button>
+              )}
+              {purge === undefined ? null : (
+                <button
+                  type="button"
+                  className="search-profile is-pressed-reject"
+                  disabled={trashBusy !== undefined}
+                  onClick={() => {
+                    void runPurge();
+                  }}
+                >
+                  {trashBusy === "purge" ? "Удаляем…" : "Удалить из корзины"}
+                </button>
+              )}
+            </div>
+          )
+        ) : decide === undefined ? null : (
+          <div className="triage-actions procurement-detail-triage-actions">
+            <button
+              type="button"
+              className={triageActionClass("monitor", stored.triage)}
+              aria-pressed={stored.triage === "monitor"}
+              disabled={busyKind !== undefined}
+              onClick={() => {
+                void runDecide("monitor");
+              }}
+            >
+              Отслеживать
+            </button>
+            <button
+              type="button"
+              className={triageActionClass("participate", stored.triage)}
+              aria-pressed={stored.triage === "participate"}
+              disabled={busyKind !== undefined}
+              onClick={() => {
+                void runDecide("participate");
+              }}
+            >
+              {busyKind === "participate"
+                ? (progress === undefined
+                  ? "Скачиваем документы…"
+                  : ingestProgressCaption(progress))
+                : "Участвовать"}
+            </button>
+          </div>
+        )}
+
         <div className="procurement-detail-toolbar">
           <a
             href={stored.url}
@@ -116,7 +299,7 @@ export function ProcurementDetailApp({
               type="button"
               className="procurement-detail-retry"
               onClick={() => {
-                if (id !== undefined) void loadCard(id);
+                if (id !== undefined) void loadPlatformCard(id);
               }}
             >
               Обновить
@@ -195,19 +378,16 @@ export function ProcurementDetailApp({
           {stored.documents.length === 0 ? (
             <p className="procurement-detail-empty">Документы ещё не скачаны.</p>
           ) : (
-            <ul className="procurement-detail-documents">
-              {stored.documents.map((doc) => (
-                <li key={doc.sourceUrl} className="procurement-detail-document">
-                  <a
-                    href={doc.hash === undefined ? doc.downloadUrl ?? doc.sourceUrl : `/api/documents/${doc.hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {doc.name}
-                  </a>
-                </li>
-              ))}
-            </ul>
+            <>
+              <iframe name={officeDownloadFrame} title="Загрузка документа" hidden />
+              <ul className="procurement-detail-documents">
+                {stored.documents.map((doc) => (
+                  <li key={doc.sourceUrl} className="procurement-detail-document">
+                    <DocumentNameLink document={doc} />
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </details>
 

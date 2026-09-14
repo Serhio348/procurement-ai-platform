@@ -50,6 +50,12 @@ export class SpecialistCatalog {
     );
   }
 
+  dropCase(id: string): void {
+    this.#cases.delete(id);
+    this.#pruned.add(id);
+    this.dismissByProcurementId(id);
+  }
+
   inboxItem(id: string): InboxFixtureItemValue | undefined {
     if (this.#dismissed.has(id)) return undefined;
     return this.#byChangeId.get(id);

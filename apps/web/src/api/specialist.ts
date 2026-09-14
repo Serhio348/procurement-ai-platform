@@ -3,6 +3,7 @@ import {
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
+  SpecialistProcurementCard,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistSearchResponse,
@@ -59,13 +60,30 @@ export async function deleteInbox(
 }
 
 export async function fetchProcurements(
+  query: { tab?: string; limit?: number; offset?: number } = {},
   fetcher: typeof fetch = fetch,
 ): Promise<readonly SpecialistProcurementCardValue[]> {
-  const response = await fetcher("/api/procurements", withCredentials());
+  const params = new URLSearchParams();
+  if (query.tab !== undefined) params.set("tab", query.tab);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.offset !== undefined) params.set("offset", String(query.offset));
+  const suffix = params.size === 0 ? "" : `?${params.toString()}`;
+  const response = await fetcher(`/api/procurements${suffix}`, withCredentials());
   if (!response.ok) {
     throw new Error("Не удалось загрузить закупки");
   }
   return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
+export async function fetchProcurement(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistProcurementCardValue> {
+  const response = await fetcher(`/api/procurements/${id}`, withCredentials());
+  if (!response.ok) {
+    throw new Error("Не удалось открыть закупку");
+  }
+  return SpecialistProcurementCard.parse(await response.json());
 }
 
 export async function searchProcurements(
@@ -218,6 +236,30 @@ export async function decideProcurement(
     throw new Error("Не удалось сохранить решение по закупке");
   }
   return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
+export async function restoreProcurement(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<readonly SpecialistProcurementCardValue[]> {
+  const response = await fetcher(
+    `/api/procurements/${id}/restore`,
+    withCredentials({ method: "POST" }),
+  );
+  if (!response.ok) {
+    throw new Error("Не удалось вернуть закупку из корзины");
+  }
+  return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
+export async function purgeProcurement(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetcher(`/api/procurements/${id}`, withCredentials({ method: "DELETE" }));
+  if (!response.ok) {
+    throw new Error("Не удалось удалить закупку из корзины");
+  }
 }
 
 export async function setProcurementArchived(

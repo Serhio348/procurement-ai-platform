@@ -8,9 +8,12 @@ import {
   deleteProfile,
   fetchInbox,
   fetchIngestProgress,
+  fetchProcurement,
   fetchProcurements,
   fetchProfiles,
+  purgeProcurement,
   resolveInbox,
+  restoreProcurement,
   saveProfile,
   searchProcurements,
   setProcurementArchived,
@@ -89,11 +92,11 @@ function LiveConsole() {
   >("loading");
 
   useEffect(() => {
-    void Promise.all([fetchInbox(), fetchProcurements(), fetchProfiles()])
-      .then(([inbox, procurements, listed]) => {
+    void Promise.all([fetchInbox(), fetchProfiles()])
+      .then(([inbox, listed]) => {
         setData({
           inbox,
-          procurements,
+          procurements: [],
           profiles: listed.items,
           activeProfileId: listed.activeProfileId,
         });
@@ -130,9 +133,13 @@ function LiveConsole() {
       setProfileWatch={setProfileWatch}
       decide={decideProcurement}
       archive={setProcurementArchived}
+      restore={restoreProcurement}
+      purge={purgeProcurement}
       ingestProgress={fetchIngestProgress}
       refreshInbox={fetchInbox}
       resolveInbox={resolveInbox}
+      listMine={fetchProcurements}
+      loadCard={fetchProcurement}
     />
   );
 }

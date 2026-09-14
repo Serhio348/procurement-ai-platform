@@ -250,6 +250,26 @@ a {
   margin-top: 16px;
 }
 
+.inbox-open {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 12px;
+  color: #fff;
+  background: #3a5d86;
+  border: 1px solid #314d70;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.inbox-open:hover:not(:disabled) {
+  background: #2f4d70;
+}
+
+.inbox-open:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .detail {
   background: #fafbfc;
 }
@@ -1345,6 +1365,13 @@ h3 {
   border-radius: 8px;
 }
 
+.my-procurements-lead {
+  margin: 0 0 16px;
+  color: #5c6778;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .my-procurements-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -1401,6 +1428,10 @@ h3 {
 
 .my-procurements-card.is-participate::before {
   background: #2d5a3d;
+}
+
+.my-procurements-card.is-reject::before {
+  background: #8a1c1c;
 }
 
 .my-procurements-card:hover {
@@ -1485,6 +1516,11 @@ h3 {
 .my-procurements-card-triage.triage-participate {
   background: #e8f3ec;
   color: #1f5c2e;
+}
+
+.my-procurements-card-triage.triage-reject {
+  background: #fde8e8;
+  color: #8a1c1c;
 }
 
 .my-procurements-card-status {
@@ -1636,6 +1672,11 @@ h3 {
   color: #1f5c2e;
 }
 
+.procurement-detail-triage.triage-reject {
+  background: #fde8e8;
+  color: #8a1c1c;
+}
+
 .procurement-detail-status {
   background: #f4f6f8;
   color: #3a4658;
@@ -1672,6 +1713,10 @@ h3 {
   align-items: center;
   gap: 16px;
   margin-bottom: 20px;
+}
+
+.procurement-detail-triage-actions {
+  margin: 0 0 16px;
 }
 
 .procurement-detail-link {

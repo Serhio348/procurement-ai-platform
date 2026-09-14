@@ -46,7 +46,7 @@ describe("InboxApp", () => {
     ]);
   });
 
-  it("opens a newly found procurement from the row and dismisses it through resolve", async () => {
+  it("opens a newly found procurement from the card button and dismisses it through resolve", async () => {
     const user = userEvent.setup();
     const resolved: string[] = [];
     const catalog = SpecialistCatalog.parse({ items: [] });
@@ -74,7 +74,8 @@ describe("InboxApp", () => {
       </MemoryRouter>,
     );
 
-    await user.click(screen.getByRole("button", { name: /КТПБ 400/ }));
+    expect(screen.getByRole("button", { name: "Открыть карточку" })).toHaveProperty("disabled", false);
+    await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
     expect(resolved[0]?.startsWith("open:")).toBe(true);
   });
 
@@ -88,6 +89,7 @@ describe("InboxApp", () => {
     expect(screen.queryByText("Тревога: есть сообщения, которые нужно разобрать")).toBeNull();
     expect(screen.getAllByText("Новых изменений нет").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Профили" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Корзина" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Задачи/ })).toHaveProperty("disabled", true);
   });
 });

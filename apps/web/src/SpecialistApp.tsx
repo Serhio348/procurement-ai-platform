@@ -12,6 +12,7 @@ import type {
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
+import { isRejectedTriage, isWatchedTriage } from "@procurement/domain";
 import { AdminApp } from "./admin/AdminApp.js";
 import { InboxAlertProvider } from "./inbox/InboxAlert.js";
 import { InboxApp } from "./inbox/InboxApp.js";
@@ -40,12 +41,19 @@ export interface SpecialistAppProps {
     id: string,
     archived: boolean,
   ) => Promise<readonly SpecialistProcurementCard[]>;
+  restore?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
+  purge?: (id: string) => Promise<void>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
   resolveInbox?: (
     id: string,
     action: SpecialistInboxAction,
   ) => Promise<SpecialistInboxResolveResponse>;
+  listMine?: (query?: {
+    tab?: string;
+    limit?: number;
+  }) => Promise<readonly SpecialistProcurementCard[]>;
+  loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
   /** Namespaces last-search ids so two users on one browser do not share them. */
   storageScope?: string;
 }
@@ -60,6 +68,8 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const searchProfile = props.search;
   const decideCase = props.decide;
   const archiveCase = props.archive;
+  const restoreCase = props.restore;
+  const purgeCase = props.purge;
   const activateProfile = props.activateProfile;
   const createProfile = props.createProfile;
   const deleteProfile = props.deleteProfile;
@@ -120,10 +130,11 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
 
   const searchPaneItems =
     searchIds === undefined
-      ? procurements
+      ? procurements.filter((item) => !isWatchedTriage(item) && !isRejectedTriage(item.triage))
       : searchIds
           .map((id) => procurements.find((item) => item.id === id))
-          .filter((item): item is SpecialistProcurementCard => item !== undefined);
+          .filter((item): item is SpecialistProcurementCard => item !== undefined)
+          .filter((item) => !isWatchedTriage(item) && !isRejectedTriage(item.triage));
 
   const decide =
     decideCase === undefined
@@ -133,11 +144,22 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           const updated = items.find((item) => item.id === id);
           setProcurements((current) => {
             if (kind === "reject") {
-              return current.filter((item) => item.id !== id);
+              if (updated === undefined) return current.filter((item) => item.id !== id);
+              return mergeProcurementCards(current, [updated]);
             }
             if (updated === undefined) return current;
             return mergeProcurementCards(current, [updated]);
           });
+          if (kind === "monitor" || kind === "participate" || kind === "reject") {
+            setSearchIdsByProfile((current) => {
+              const previous = current[activeProfileId];
+              if (previous === undefined || !previous.includes(id)) return current;
+              const nextIds = previous.filter((item) => item !== id);
+              const next = { ...current, [activeProfileId]: nextIds };
+              writeStoredSearchIds(next, props.storageScope);
+              return next;
+            });
+          }
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
@@ -156,12 +178,57 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           return updated === undefined ? items : [updated];
         };
 
+  const restore =
+    restoreCase === undefined
+      ? undefined
+      : async (id: string) => {
+          const items = await restoreCase(id);
+          const updated = items.find((item) => item.id === id);
+          if (updated !== undefined) {
+            setProcurements((current) => mergeProcurementCards(current, [updated]));
+          }
+          return updated === undefined ? items : [updated];
+        };
+
+  const purge =
+    purgeCase === undefined
+      ? undefined
+      : async (id: string) => {
+          await purgeCase(id);
+          setProcurements((current) => current.filter((item) => item.id !== id));
+        };
+
+  const loadList =
+    props.listMine === undefined
+      ? undefined
+      : async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
+          const items = await props.listMine?.({ tab, limit: 100 });
+          const next = items ?? [];
+          setProcurements((current) => mergeProcurementCards(current, next));
+          return next;
+        };
+
   function rememberCard(card: SpecialistProcurementCard): void {
     setProcurements((current) => {
       if (current.some((item) => item.id === card.id)) {
         return current.map((item) => (item.id === card.id ? card : item));
       }
       return [...current, card];
+    });
+  }
+
+  function showInSearchPane(card: SpecialistProcurementCard): void {
+    const next =
+      activeProfileId.length > 0 && !card.profileIds.includes(activeProfileId)
+        ? { ...card, profileIds: [...card.profileIds, activeProfileId] }
+        : card;
+    rememberCard(next);
+    setSearchIdsByProfile((current) => {
+      const previous = current[activeProfileId];
+      if (previous === undefined || previous.includes(next.id)) return current;
+      const updated = { ...current, [activeProfileId]: [next.id, ...previous] };
+      writeStoredSearchIds(updated, props.storageScope);
+      return updated;
     });
   }
 
@@ -191,7 +258,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                     resolve: async (id, action) => {
                       const result = await resolveInbox(id, action);
                       setInbox(result.items);
-                      if (result.card !== undefined) rememberCard(result.card);
+                      if (result.card !== undefined) showInSearchPane(result.card);
                       if (action === "documents") {
                         for (const document of result.documents) {
                           window.open(document.url, "_blank", "noopener,noreferrer");
@@ -308,6 +375,19 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(decide === undefined
                 ? {}
                 : { onRemove: async (id: string) => void decide(id, "reject") })}
+              {...(loadList === undefined ? {} : { load: loadList })}
+            />
+          }
+        />
+        <Route
+          path="/trash"
+          element={
+            <MyProcurementsApp
+              section="trash"
+              procurements={procurements}
+              {...(restore === undefined ? {} : { onRestore: restore })}
+              {...(purge === undefined ? {} : { onPurge: purge })}
+              {...(loadList === undefined ? {} : { load: loadList })}
             />
           }
         />
@@ -317,6 +397,25 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             <ProcurementDetailApp
               procurements={procurements}
               onCardLoaded={rememberCard}
+              {...(props.loadCard === undefined ? {} : { fetchCase: props.loadCard })}
+              {...(decide === undefined ? {} : { decide })}
+              {...(restore === undefined ? {} : { restore })}
+              {...(purge === undefined ? {} : { purge })}
+              {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
+            />
+          }
+        />
+        <Route
+          path="/trash/:id"
+          element={
+            <ProcurementDetailApp
+              procurements={procurements}
+              onCardLoaded={rememberCard}
+              {...(props.loadCard === undefined ? {} : { fetchCase: props.loadCard })}
+              {...(decide === undefined ? {} : { decide })}
+              {...(restore === undefined ? {} : { restore })}
+              {...(purge === undefined ? {} : { purge })}
+              {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
             />
           }
         />
@@ -346,7 +445,7 @@ function InboxRoute({
         : {
             onResolve: async (id, action) => {
               const result = await resolve(id, action);
-              if (result.card !== undefined && action !== "dismiss") {
+              if (result.card !== undefined && action === "open") {
                 void navigate(`/procurements/${result.card.id}`);
               }
             },

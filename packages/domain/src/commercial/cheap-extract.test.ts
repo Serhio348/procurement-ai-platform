@@ -236,12 +236,20 @@ describe("cheapExtractCommercialClaims", () => {
     expect(notes.some((note) => note.startsWith("Срок:"))).toBe(false);
   });
 
-  it("keeps the governing clause in the label when the term kind is unknown", () => {
+  it("labels an unknown term by its topic, not by a chopped clause", () => {
     const notes = cheapExtractCommercialNotes({
       text: "Победитель подписывает договор в течение 5 рабочих дней.",
     });
+    expect(notes).toContain("Срок подписания договора: в течение 5 рабочих дней.");
+  });
+
+  it("uses the document's own heading when it is available", () => {
+    const text =
+      "Срок (сроки) поставки товаров (выполнения работ, оказания услуг)\n" +
+      "производится в течение 5 рабочих дней.";
+    const notes = cheapExtractCommercialNotes({ text });
     expect(notes).toContain(
-      "Срок (Победитель подписывает договор): в течение 5 рабочих дней.",
+      "Срок (сроки) поставки товаров (выполнения работ, оказания услуг): в течение 5 рабочих дней.",
     );
   });
 

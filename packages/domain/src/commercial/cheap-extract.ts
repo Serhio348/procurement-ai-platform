@@ -165,7 +165,7 @@ function extractWithinDuration(page: {
     const several = match[1] !== undefined;
     const raw = match[2];
     if (several) {
-      const note = `${withinNoteLabel(kind, nearLeft, nearRight)}: в течение нескольких${severalDayFlavor(phrase)} дней.`;
+      const note = `${withinNoteLabel(kind, left, nearLeft, nearRight)}: в течение нескольких${severalDayFlavor(phrase)} дней.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
@@ -173,7 +173,7 @@ function extractWithinDuration(page: {
     const value = days(raw);
     if (value === undefined) continue;
     if (kind !== "payment" && kind !== "delivery") {
-      const note = `${withinNoteLabel(kind, nearLeft, nearRight)}: ${phrase}.`;
+      const note = `${withinNoteLabel(kind, left, nearLeft, nearRight)}: ${phrase}.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
@@ -224,28 +224,70 @@ function classifyWithinDuration(nearLeft: string, nearRight: string, left: strin
   if (looksLikeDeliveryPeriod(nearLeft) || looksLikeDeliveryPeriod(nearRight)) return "delivery";
   if (looksLikeWorksPeriod(nearLeft) || looksLikeWorksPeriod(nearRight)) return "work";
   if (looksLikeContractStart(nearRight) && !looksLikePaymentDeadline(nearLeft)) return "delivery";
-  const heading = lastDurationHeading(left);
-  if (heading !== undefined) return heading;
+  const heading = durationHeading(left);
+  if (heading !== undefined) return heading.kind;
   if (looksLikePaymentDeadline(left) && !looksLikeDeliveryPeriod(left)) return "payment";
   if (looksLikeDeliveryPeriod(left) && !looksLikePaymentDeadline(left)) return "delivery";
   return "note";
 }
 
-// The specialist sees a bare «Срок:» note as noise, so every unclassified
-// duration carries the governing clause it was found in.
-function withinNoteLabel(kind: WithinKind, nearLeft: string, nearRight: string): string {
+function withinNoteLabel(kind: WithinKind, left: string, nearLeft: string, nearRight: string): string {
   if (kind === "payment") return "Срок оплаты";
   if (kind === "delivery") return "Срок поставки";
+  const heading = durationHeading(left);
+  if (heading !== undefined) return heading.label;
   if (kind === "work") return "Срок выполнения работ/услуг";
   if (kind === "bidValidity") return "Срок действия предложения";
-  const context = noteContext(nearLeft) ?? noteContext(nearRight);
-  return context === undefined ? "Срок" : `Срок (${context})`;
+  const topic = topicLabel(nearLeft, nearRight);
+  return topic ?? "Срок";
 }
 
-function noteContext(clause: string): string | undefined {
-  const cleaned = clause.trim().replace(/[.:;,…\s]+$/u, "").replace(/\s+/gu, " ");
-  if (cleaned.length < 4) return undefined;
-  return cleaned.length > 60 ? `…${cleaned.slice(-60)}` : cleaned;
+function topicLabel(nearLeft: string, nearRight: string): string | undefined {
+  const context = `${nearLeft}\n${nearRight}`.toLocaleLowerCase("ru-BY");
+  if (context.includes("банковск") || context.includes("реквизит")) {
+    return "Срок предоставления банковских реквизитов";
+  }
+  if (context.includes("обеспечени")) return "Срок внесения обеспечения";
+  if (context.includes("подпис") && context.includes("договор")) {
+    return "Срок подписания договора";
+  }
+  if (context.includes("страхов")) return "Срок оформления страхования";
+  if (context.includes("аккредитив")) return "Срок открытия аккредитива";
+  if (context.includes("реестр")) return "Срок внесения в реестр поставщиков";
+  return undefined;
+}
+
+// Tender documents use a fixed left-column heading like
+// «Срок (сроки) поставки товаров (выполнения работ, оказания услуг)».
+// When present, it is much more honest than a chopped clause tail.
+function durationHeading(left: string): { label: string; kind: WithinKind } | undefined {
+  const patterns = [
+    /Срок\s*\(\s*сроки\s*\)\s*поставки\s+товаров\s*\(\s*выполнения\s+работ\s*,?\s*оказания\s+услуг\s*\)/giu,
+    /Срок\s*\(\s*сроки\s*\)\s*поставки\s+товаров/giu,
+    /Срок\s*\(\s*сроки\s*\)\s*поставки\s*\(\s*выполнения\s+работ\s*,?\s*оказания\s+услуг\s*\)/giu,
+    /Срок\s*\(\s*сроки\s*\)\s*(?:выполнения\s+работ\s*,?\s*)?оказания\s+услуг/giu,
+    /Условия\s+оплаты/giu,
+    /Срок\s+оплаты/giu,
+    /Срок\s+действия\s+предложени\p{L}*/giu,
+  ];
+  const matches = patterns.flatMap((pattern) => [...left.matchAll(pattern)]);
+  const last = matches
+    .sort((a, b) => {
+      const ai = a.index ?? 0;
+      const bi = b.index ?? 0;
+      if (ai !== bi) return ai - bi;
+      return (a[0]?.length ?? 0) - (b[0]?.length ?? 0);
+    })
+    .at(-1)?.[0];
+  if (last === undefined) return undefined;
+  const label = last.trim().replace(/[\s.:;]+$/u, "");
+  if (label.length < 3) return undefined;
+  const lower = label.toLocaleLowerCase("ru-BY");
+  if (/оплат|расч/.test(lower)) return { label, kind: "payment" };
+  if (/поставк|изготовлен/.test(lower) && !/выполнени|оказани/.test(lower)) {
+    return { label, kind: "delivery" };
+  }
+  return { label, kind: "work" };
 }
 
 function lastClause(left: string): string {
@@ -290,17 +332,7 @@ function looksLikeBidValidity(text: string): boolean {
   );
 }
 
-function lastDurationHeading(left: string): WithinKind | undefined {
-  const matches = [
-    ...left.matchAll(/срок(?:и)?\s+оплат|порядок\s+расч|условия\s+оплат/giu),
-    ...left.matchAll(/срок(?:и)?\s+поставк|срок(?:и)?\s+изготовлен/giu),
-    ...left.matchAll(/срок(?:и)?\s+выполнени\p{L}*|срок(?:и)?\s+оказани\p{L}*/giu),
-  ];
-  const last = matches.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).at(-1)?.[0];
-  if (last === undefined) return undefined;
-  if (/оплат|расч/iu.test(last)) return "payment";
-  return /поставк|изготовлен/iu.test(last) ? "delivery" : "work";
-}
+
 
 interface CheapPattern {
   key: CommercialClaimValue["key"];

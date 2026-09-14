@@ -12,6 +12,7 @@ import {
   type SearchQuery,
   type SourceProcurementId,
 } from "@procurement/contracts";
+import { listingMatchesAnyKeyword } from "@procurement/domain";
 import type { ParsedGoszakupkiCard } from "./goszakupki-by-parser.js";
 import {
   parseGoszakupkiCard,
@@ -247,18 +248,17 @@ function matchesSearchRow(
   query: SearchQuery,
 ): boolean {
   if (query.kinds.length > 0 && !query.kinds.includes(row.kind)) return false;
-  const haystack = normalise(
-    [row.hit.title, row.hit.buyerName, row.hit.sourceStatus]
-      .filter((value): value is string => value !== undefined)
-      .join(" "),
-  );
-  // Exclusions are deliberately not applied here: this row check is a coarse
-  // bandwidth filter, and dropping by raw substring would over-remove rows the
-  // domain layer would keep. Keywords/exclusions are decided in the domain.
-  if (
-    query.keywords.length > 0 &&
-    !query.keywords.some((keyword) => haystack.includes(normalise(keyword)))
-  ) {
+  const haystack = [
+    row.hit.title,
+    row.hit.buyerName,
+    row.hit.sourceStatus,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
+  // The site's text filter is a substring. Drop rows where the keyword is
+  // only letters inside another word («НКУ» in «конкурс»). Abbreviations and
+  // inflected terms still match via termOccurs.
+  if (query.keywords.length > 0 && !listingMatchesAnyKeyword(haystack, query.keywords)) {
     return false;
   }
   return true;
@@ -267,8 +267,4 @@ function matchesSearchRow(
 function sourceSequence(id: string): number {
   const value = Number(id.split("/").at(-1));
   return Number.isFinite(value) ? value : 0;
-}
-
-function normalise(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("ru-BY").replace(/\s+/g, " ").trim();
 }

@@ -29,6 +29,8 @@
     "db:bootstrap": "npm run db:bootstrap -w @procurement/db",
     "capture:live-case": "npm run capture-case -w @procurement/mcp-procurement",
     "compare:extractors": "npm run compare-extractors -w @procurement/mcp-documents",
+    "evaluate:search": "npm run evaluate-search -w @procurement/domain",
+    "evaluate:search:collect": "npm run collect-eval-hits -w @procurement/mcp-procurement",
     "mcp:procurement": "npm run start -w @procurement/mcp-procurement",
     "mcp:documents": "npm run start -w @procurement/mcp-documents",
     "mcp:notifications": "npm run start -w @procurement/mcp-notifications",

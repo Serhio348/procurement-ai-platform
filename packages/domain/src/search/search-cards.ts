@@ -5,12 +5,15 @@ import {
   SpecialistProcurementCard,
   type ProcedureCard as ProcedureCardValue,
   type SearchHit as SearchHitValue,
+  type SearchIntentPlan,
   type SpecialistFoundAs,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type ProcedureStatus as ProcedureStatusValue,
 } from "@procurement/contracts";
 import { statusLabel, uuidFromHex } from "../specialist/case.js";
 import { cheapClassifyHit, type CheapClassifyProfile } from "./cheap-classify.js";
+import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
+import { termOccurs } from "./query-terms.js";
 import { termMatches } from "./term-match.js";
 
 export interface ProfileSearchSelection {
@@ -31,6 +34,11 @@ export interface SearchSelectionProfile extends CheapClassifyProfile {
   statuses?: readonly ProcedureStatusValue[];
   /** Drop single-source purchases outright. */
   excludeSingleSource?: boolean;
+  /**
+   * When set, a hit is not a match just because one keyword appears. Code
+   * scores object vs action vs excluded action; the model never writes this.
+   */
+  intent?: SearchIntentPlan;
 }
 
 /**
@@ -55,6 +63,18 @@ export function selectRelevantSearchCards(
     seen.add(key);
     if (!hitMatchesProfileStatuses(hit, profile.statuses)) continue;
     if (profile.excludeSingleSource === true && hit.kind === "single_source") continue;
+    if (profile.intent !== undefined) {
+      const ranked = rankHitByIntent(hit, profile);
+      if (ranked === undefined) continue;
+      if (ranked.kind === "match") {
+        cards.push(ranked.card);
+        continue;
+      }
+      if (ambiguousCards.length >= MAX_AMBIGUOUS_PER_SEARCH) continue;
+      ambiguousCards.push(ranked.card);
+      ambiguousHits.push(hit);
+      continue;
+    }
     const classified = cheapClassifyHit(
       {
         title: hit.title,
@@ -75,6 +95,10 @@ export function selectRelevantSearchCards(
         : cardFromAmbiguousHit(hit),
     );
     ambiguousHits.push(hit);
+  }
+  if (profile.intent !== undefined) {
+    cards.sort((left, right) => (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0));
+    if (cards.length > limit) cards.length = limit;
   }
   const discardedCount = hits.length - cards.length - ambiguousCards.length;
   return { cards, ambiguousCards, ambiguousHits, discardedCount };
@@ -151,6 +175,23 @@ export function searchHitFromProcedureCard(card: ProcedureCardValue): SearchHitV
   });
 }
 
+function rankHitByIntent(
+  hit: SearchHitValue,
+  profile: SearchSelectionProfile,
+): { kind: "match" | "review"; card: SpecialistProcurementCardValue } | undefined {
+  if (profile.intent === undefined) return undefined;
+  const haystack = [hit.title, hit.buyerName, hit.sourceStatus]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
+  if (profile.excludeKeywords.some((term) => termOccurs(haystack, term))) return undefined;
+  const scored = scoreSearchIntent({ title: hit.title }, profile.intent);
+  if (scored.decision === "veto" || scored.decision === "discard") return undefined;
+  if (scored.decision === "match" && scored.score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) {
+    return { kind: "match", card: cardFromIntentHit(hit, scored.score, scored.reason, "match") };
+  }
+  return { kind: "review", card: cardFromIntentHit(hit, scored.score, scored.reason, "review") };
+}
+
 export function cardFromRelevantHit(
   hit: SearchHitValue,
   matchedTerms: readonly string[],
@@ -190,6 +231,7 @@ function foundCard(
   hit: SearchHitValue,
   foundAs: SpecialistFoundAs,
   detail: string,
+  extras: { relevanceScore?: number; relevanceReason?: string } = {},
 ): SpecialistProcurementCardValue {
   const label = amountLabel(hit);
   return SpecialistProcurementCard.parse({
@@ -203,8 +245,23 @@ function foundCard(
     foundAs,
     ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
     ...(label === undefined ? {} : { amountLabel: label }),
+    ...(extras.relevanceScore === undefined ? {} : { relevanceScore: extras.relevanceScore }),
+    ...(extras.relevanceReason === undefined ? {} : { relevanceReason: extras.relevanceReason }),
     actions: [{ step: 1, actor: "DomainSearchAgent", status: "done", detail }],
   });
+}
+
+function cardFromIntentHit(
+  hit: SearchHitValue,
+  score: number,
+  reason: string,
+  foundAs: SpecialistFoundAs,
+): SpecialistProcurementCardValue {
+  const prefix =
+    foundAs === "match"
+      ? `procurement.search: найдена «${hit.title}». Оценка ${String(score)}. ${reason}`
+      : `procurement.search: найдена «${hit.title}». Оценка ${String(score)} — на проверку. ${reason}`;
+  return foundCard(hit, foundAs, prefix, { relevanceScore: score, relevanceReason: reason });
 }
 
 function amountLabel(hit: SearchHitValue): string | undefined {

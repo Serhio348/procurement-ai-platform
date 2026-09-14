@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+import {
+  listingMatchesAnyKeyword,
+  stemWord,
+  stemsShareRoot,
+  termOccurs,
+} from "./query-terms.js";
+
+describe("stemWord", () => {
+  it("treats inflected монтаж forms as one stem", () => {
+    expect(stemWord("монтаж")).toBe(stemWord("монтажа"));
+    expect(stemWord("монтаж")).toBe(stemWord("монтажу"));
+    expect(stemsShareRoot(stemWord("монтаж"), stemWord("монтажные"))).toBe(true);
+  });
+
+  it("joins hyphen and concatenated пусконаладка", () => {
+    expect(termOccurs("пуско-наладочные работы насоса", "пусконаладка")).toBe(true);
+    expect(termOccurs("пусконаладочные работы", "пуско-наладка")).toBe(true);
+  });
+});
+
+describe("поставка vs поставщик", () => {
+  it("treats supply verbs as the same action", () => {
+    expect(termOccurs("Поставка НКУ", "поставка")).toBe(true);
+    expect(termOccurs("поставить НКУ", "поставка")).toBe(true);
+    expect(termOccurs("НКУ поставляется комплектом", "поставка")).toBe(true);
+  });
+
+  it("does not treat a supplier person as the supply action", () => {
+    expect(termOccurs("Выбор поставщика оборудования", "поставка")).toBe(false);
+    expect(termOccurs("договор с поставщика шкафа", "поставка")).toBe(false);
+    expect(termOccurs("извещение поставщику", "поставка")).toBe(false);
+    expect(termOccurs("перечень поставщики", "поставка")).toBe(false);
+    expect(stemsShareRoot(stemWord("поставка"), stemWord("поставщика"))).toBe(false);
+  });
+});
+
+describe("termOccurs", () => {
+  it("does not treat НКУ as a hit inside банку", () => {
+    expect(termOccurs("услуги банку и охрана", "НКУ")).toBe(false);
+    expect(termOccurs("НКУ-0,4 кВ", "НКУ")).toBe(true);
+  });
+
+  it("does not treat НКУ as a hit inside конкурс, инкубатор or Янкувер", () => {
+    expect(termOccurs("Открытый конкурс по закупке аудиторских услуг", "НКУ")).toBe(false);
+    expect(termOccurs("СО2-инкубатор (термостат электронный)", "НКУ")).toBe(false);
+    expect(termOccurs("Набор аспирационный хирургический тип Янкувер", "НКУ")).toBe(false);
+    expect(termOccurs("Закупка НКУ (УКН) 0,4 кВ", "НКУ")).toBe(true);
+  });
+});
+
+describe("listingMatchesAnyKeyword", () => {
+  it("keeps a real NCU token and drops substring noise", () => {
+    expect(listingMatchesAnyKeyword("Закупка НКУ 0,4 кВ", ["НКУ"])).toBe(true);
+    expect(listingMatchesAnyKeyword("Открытый конкурс", ["НКУ"])).toBe(false);
+    expect(listingMatchesAnyKeyword("инкубатор", ["НКУ"])).toBe(false);
+  });
+
+  it("keeps abbreviations КИП and МТР as whole terms", () => {
+    expect(listingMatchesAnyKeyword("Поставка КИП для насосной", ["КИП"])).toBe(true);
+    expect(listingMatchesAnyKeyword("закупка материалов МТР", ["МТР"])).toBe(true);
+    expect(listingMatchesAnyKeyword("экипировка персонала", ["КИП"])).toBe(false);
+  });
+});

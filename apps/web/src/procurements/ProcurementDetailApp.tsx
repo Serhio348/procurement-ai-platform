@@ -17,6 +17,7 @@ import { fetchProcurementCard } from "../api/specialist.js";
 import { ConfirmToast, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { DocumentNameLink, ingestProgressCaption, officeDownloadFrame, triageActionClass } from "./ProcurementsApp.js";
+import { RelevanceNote } from "./RelevanceNote.js";
 import { TermsEvidenceList } from "./TermsEvidenceList.js";
 
 function shortId(id: string): string {
@@ -326,6 +327,8 @@ export function ProcurementDetailApp({
         ) : null}
 
         {error ? <p className="procurement-detail-error">{error}</p> : null}
+
+        <RelevanceNote card={stored} />
 
         <section className="procurement-detail-section">
           <h2 className="procurement-detail-section-title">Заказчик</h2>

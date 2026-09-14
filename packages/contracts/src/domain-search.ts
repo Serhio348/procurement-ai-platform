@@ -70,3 +70,38 @@ export const SearchClassifierInput = z.object({
     .optional(),
 });
 export type SearchClassifierInput = z.infer<typeof SearchClassifierInput>;
+
+/**
+ * How a specialist phrase breaks into search axes. Produced by a model or a
+ * cheap parser; the 0–100 score is never in this object and is never set by
+ * a model.
+ */
+export const SearchIntentPlan = z.object({
+  /** Equipment / goods the specialist wants, not the type of work. */
+  objects: z.array(z.string().min(1).max(120)).max(20).default([]),
+  /**
+   * Required purpose of that equipment. Empty means the profile did not
+   * name a purpose.
+   */
+  required_context: z.array(z.string().min(1).max(120)).max(20).default([]),
+  /**
+   * Purposes the profile explicitly does not want. Empty means none were
+   * stated. Scoring must not invent a domain list here.
+   */
+  excluded_context: z.array(z.string().min(1).max(120)).max(20).default([]),
+  /** Supply-side verbs: поставка, изготовление. */
+  desired_actions: z.array(z.string().min(1).max(80)).max(20).default([]),
+  /** Work verbs that should not win on their own: монтаж, ремонт, … */
+  excluded_actions: z.array(z.string().min(1).max(80)).max(20).default([]),
+  /** Free label for logs; scoring keys off the arrays, not this string. */
+  intent: z.string().min(1).max(64).default("equipment_purchase"),
+});
+export type SearchIntentPlan = z.infer<typeof SearchIntentPlan>;
+
+/** Profile slice the intent parser may see. No scores. */
+export const SearchIntentParserInput = z.object({
+  name: z.string(),
+  keywords: z.array(z.string()),
+  excludeKeywords: z.array(z.string()),
+});
+export type SearchIntentParserInput = z.infer<typeof SearchIntentParserInput>;

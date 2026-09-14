@@ -966,6 +966,15 @@ h3 {
   color: #5c6778;
 }
 
+.relevance-note {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: #eef3f8;
+  border: 1px solid #c5d0dc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
 .profile-chips {
   display: flex;
   flex-wrap: wrap;

@@ -13,7 +13,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "evaluate-search": "tsx src/search/evaluate-cli.ts"
   },
   "dependencies": {
     "@procurement/contracts": "*"

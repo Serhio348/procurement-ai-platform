@@ -63,6 +63,9 @@ describe("termMatchStrength", () => {
 
   it("returns none for abbreviations inside ordinary words", () => {
     expect(termMatchStrength("СО2-инкубатор (термостат электронный)", "НКУ")).toBe("none");
+    expect(termMatchStrength("Открытый конкурс по закупке", "НКУ")).toBe("none");
+    expect(termMatchStrength("тип Янкувер", "НКУ")).toBe("none");
     expect(termMatchStrength("услуги круглосуточной охраны", "КРУ")).toBe("none");
+    expect(termMatchStrength("Закупка НКУ (УКН) 0,4 кВ", "НКУ")).toBe("exact");
   });
 });

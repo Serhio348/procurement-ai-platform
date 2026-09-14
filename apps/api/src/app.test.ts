@@ -355,13 +355,13 @@ describe("specialist API", () => {
         sourceId: "goszakupki_by",
         sourceProcurementId: "auction/exact-1",
         url: "https://goszakupki.by/auction/view/exact-1",
-        title: "Поставка КТПБ-250",
+        title: "Поставка НКУ для насосов",
       }),
       SearchHit.parse({
         sourceId: "goszakupki_by",
-        sourceProcurementId: "etrade/weak-1",
-        url: "https://goszakupki.by/etrade/view/weak-1",
-        title: "Реконструкция ВЛ-0,4 кВ от БКТПБ-746",
+        sourceProcurementId: "etrade/review-1",
+        url: "https://goszakupki.by/etrade/view/review-1",
+        title: "Поставка НКУ 0,4 кВ",
       }),
       SearchHit.parse({
         sourceId: "goszakupki_by",
@@ -379,9 +379,8 @@ describe("specialist API", () => {
     await app.inject({
       method: "PUT",
       url: "/api/profile",
-      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-
     const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const listedAfterFirst = await app.inject({ method: "GET", url: "/api/procurements" });
     const inboxAfterFirst = await app.inject({ method: "GET", url: "/api/inbox" });
@@ -389,31 +388,29 @@ describe("specialist API", () => {
       (JSON.parse(body).items as Array<{ title: string }>).map((item) => item.title);
 
     expect(first.statusCode).toBe(200);
-    expect(titles(first.body)).toEqual(["Поставка КТПБ-250"]);
-    // Review cases live in the inbox only; the list shows confident matches.
-    expect(titles(listedAfterFirst.body)).toEqual(["Поставка КТПБ-250"]);
-    expect(titles(inboxAfterFirst.body).sort()).toEqual(
-      ["Реконструкция ВЛ-0,4 кВ от БКТПБ-746", "СО2-инкубатор (термостат электронный)"].sort(),
-    );
+    expect(titles(first.body)).toEqual(["Поставка НКУ для насосов"]);
+    // Review is missing purpose, not substring noise. The incubator is discarded.
+    expect(titles(listedAfterFirst.body)).toEqual(["Поставка НКУ для насосов"]);
+    expect(titles(inboxAfterFirst.body)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
-    // Opening the weak one from the inbox takes it on: it joins the list.
-    const weakRow = (JSON.parse(inboxAfterFirst.body).items as Array<{ id: string; title: string }>)
-      .find((item) => item.title.includes("БКТПБ-746"));
+    // Opening the review case from the inbox takes it on: it joins the list.
+    const reviewRow = (JSON.parse(inboxAfterFirst.body).items as Array<{ id: string; title: string }>)
+      .find((item) => item.title.includes("0,4"));
     const opened = await app.inject({
       method: "POST",
-      url: `/api/inbox/${weakRow?.id ?? ""}/resolve`,
+      url: `/api/inbox/${reviewRow?.id ?? ""}/resolve`,
       payload: { action: "open" },
     });
     expect(opened.statusCode).toBe(200);
     expect(JSON.parse(opened.body).card?.foundAs).toBe("match");
     const listedAfterOpen = await app.inject({ method: "GET", url: "/api/procurements" });
     expect(titles(listedAfterOpen.body).sort()).toEqual(
-      ["Поставка КТПБ-250", "Реконструкция ВЛ-0,4 кВ от БКТПБ-746"].sort(),
+      ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
     );
 
     // Eight days later the source no longer returns anything. Untouched cases
     // vanish from the catalog and the database; the opened one is still untouched
-    // by a decision, so it goes too. The inbox row of the incubator goes with it.
+    // by a decision, so it goes too. The incubator was never stored.
     now = "2026-09-09T10:00:00.000Z";
     hits = [];
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
@@ -422,7 +419,7 @@ describe("specialist API", () => {
     expect(titles(listedAfterPrune.body)).toEqual([]);
     expect(titles(inboxAfterPrune.body)).toEqual([]);
     expect(removeCases).toHaveBeenCalledTimes(1);
-    expect(removeCases.mock.calls[0]?.[0]).toHaveLength(3);
+    expect(removeCases.mock.calls[0]?.[0]).toHaveLength(2);
 
     await app.close();
   });
@@ -433,7 +430,19 @@ describe("specialist API", () => {
         sourceId: "goszakupki_by",
         sourceProcurementId: "auction/lot-1",
         url: "https://goszakupki.by/auction/view/lot-1",
-        title: "Поставка электрооборудования для подстанции №3",
+        title: "Поставка НКУ 0,4 кВ",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/drop-1",
+        url: "https://goszakupki.by/auction/view/drop-1",
+        title: "НКУ щитовое",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/unclear-1",
+        url: "https://goszakupki.by/auction/view/unclear-1",
+        title: "Закупка НКУ",
       }),
       SearchHit.parse({
         sourceId: "goszakupki_by",
@@ -441,25 +450,19 @@ describe("specialist API", () => {
         url: "https://goszakupki.by/auction/view/incubator-1",
         title: "СО2-инкубатор (термостат электронный)",
       }),
-      SearchHit.parse({
-        sourceId: "goszakupki_by",
-        sourceProcurementId: "auction/unclear-1",
-        url: "https://goszakupki.by/auction/view/unclear-1",
-        title: "Электромонтажные работы",
-      }),
     ];
     const verdicts: Record<string, ReviewOutcome> = {
       "auction/lot-1": {
         verdict: "relevant",
         decidedBy: "card",
-        reason: "В лотах есть НКУ-0,4.",
-        matchedTerms: ["НКУ"],
+        reason: "В лотах есть насосная станция.",
+        matchedTerms: ["насос"],
         confidence: 1,
       },
-      "auction/incubator-1": {
+      "auction/drop-1": {
         verdict: "irrelevant",
         decidedBy: "model",
-        reason: "Лабораторный инкубатор, не электрооборудование.",
+        reason: "Щит не для насосов.",
         matchedTerms: [],
         confidence: 0.95,
       },
@@ -483,7 +486,7 @@ describe("specialist API", () => {
     await app.inject({
       method: "PUT",
       url: "/api/profile",
-      payload: { name: "НКУ", keywords: ["НКУ"] },
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
     const searched = await app.inject({
@@ -502,20 +505,16 @@ describe("specialist API", () => {
       (item) => item.title,
     );
 
-    // The keyword never appeared in a title, so all three went to review.
+    // Missing purpose goes to the review port. Substring noise is discarded first.
     expect(review).toHaveBeenCalledTimes(1);
     expect(review.mock.calls[0]?.[0]).toHaveLength(3);
-    // Only the checked one is a confident case; the incubator is gone for good.
-    expect(body.items.map((item) => item.title)).toEqual([
-      "Поставка электрооборудования для подстанции №3",
-    ]);
+    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
     expect(body.items[0]?.foundAs).toBe("match");
-    expect(body.items[0]?.actions.at(-1)?.detail).toContain("НКУ-0,4");
+    expect(body.items[0]?.actions.at(-1)?.detail).toContain("насосная");
     expect(body.relevantCount).toBe(1);
-    expect(body.discardedCount).toBe(1);
+    expect(body.discardedCount).toBe(2);
     expect(body.ambiguousCount).toBe(1);
-    // The unresolved one waits for a specialist, the discarded one does not.
-    expect(inboxTitles).toEqual(["Электромонтажные работы"]);
+    expect(inboxTitles).toEqual(["Закупка НКУ"]);
 
     await app.close();
   });
@@ -526,7 +525,7 @@ describe("specialist API", () => {
         sourceId: "goszakupki_by",
         sourceProcurementId: "auction/night-1",
         url: "https://goszakupki.by/auction/view/night-1",
-        title: "Поставка электрооборудования",
+        title: "Поставка НКУ 0,4 кВ",
       }),
       SearchHit.parse({
         sourceId: "goszakupki_by",
@@ -545,8 +544,8 @@ describe("specialist API", () => {
               ? {
                   verdict: "relevant" as const,
                   decidedBy: "card" as const,
-                  reason: "В лотах есть НКУ-0,4.",
-                  matchedTerms: ["НКУ"],
+                  reason: "В лотах есть насосная станция.",
+                  matchedTerms: ["насос"],
                   confidence: 1,
                 }
               : {
@@ -562,7 +561,7 @@ describe("specialist API", () => {
     await app.inject({
       method: "PUT",
       url: "/api/profile",
-      payload: { name: "НКУ", keywords: ["НКУ"] },
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
     await app.inject({
       method: "POST",
@@ -579,7 +578,7 @@ describe("specialist API", () => {
 
     expect(body.ran).toBe(true);
     expect(body.addedCount).toBe(1);
-    expect(body.items.map((item) => item.title)).toEqual(["Поставка электрооборудования"]);
+    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
     await app.close();
   });
@@ -680,16 +679,22 @@ describe("specialist API", () => {
       }),
       SearchHit.parse({
         sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/drop-2",
+        url: "https://goszakupki.by/auction/view/drop-2",
+        title: "НКУ щитовое",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
         sourceProcurementId: "auction/unclear-2",
         url: "https://goszakupki.by/auction/view/unclear-2",
-        title: "Электромонтажные работы",
+        title: "Поставка НКУ 0,4 кВ",
       }),
     ];
     const review = vi.fn(async (reviewed: readonly SearchHit[]) =>
       reviewed.map(
         (item): ReviewOutcome =>
-          item.sourceProcurementId === "auction/incubator-2"
-            ? { verdict: "irrelevant", decidedBy: "model", reason: "Инкубатор.", matchedTerms: [], confidence: 0.95 }
+          item.sourceProcurementId === "auction/drop-2"
+            ? { verdict: "irrelevant", decidedBy: "model", reason: "Щит не для насосов.", matchedTerms: [], confidence: 0.95 }
             : { verdict: "needs_human", decidedBy: "model", reason: "Неясно.", matchedTerms: [], confidence: 0.5 },
       ),
     );
@@ -698,24 +703,35 @@ describe("specialist API", () => {
       searchHits: { search: async () => hits },
       searchReview: { review },
     });
-    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "НКУ", keywords: ["НКУ"] } });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
 
     const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
 
     expect(review).toHaveBeenCalledTimes(1);
-    expect(review.mock.calls[0]?.[0]).toHaveLength(2);
-    // Second pass: the incubator is remembered as irrelevant, the unclear one
-    // already waits in the inbox. Counts still describe the pass honestly.
-    expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 1 });
-    expect(JSON.parse(second.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 1 });
+    expect(review.mock.calls[0]?.[0].map((item) => item.sourceProcurementId).sort()).toEqual([
+      "auction/drop-2",
+      "auction/unclear-2",
+    ]);
+    // Incubator is discarded before the port. The dropped shield is remembered;
+    // missing purpose waits in the inbox.
+    expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
+    expect(JSON.parse(second.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
     expect((JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
-      "Электромонтажные работы",
+      "Поставка НКУ 0,4 кВ",
     ]);
 
-    // Changing the phrases forgets the verdict: the next search asks again.
-    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "НКУ", keywords: ["НКУ", "ЩО"] } });
+    // Changing the phrases forgets the irrelevant verdict: the next search asks again.
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ", "ЩО"] },
+    });
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     expect(review).toHaveBeenCalledTimes(2);
 
@@ -728,7 +744,7 @@ describe("specialist API", () => {
         sourceId: "goszakupki_by",
         sourceProcurementId: "auction/restart-1",
         url: "https://goszakupki.by/auction/view/restart-1",
-        title: "Электромонтажные работы",
+        title: "Поставка НКУ 0,4 кВ",
       }),
     ];
     let storedCases: readonly SpecialistProcurementCard[] = [];
@@ -743,7 +759,11 @@ describe("specialist API", () => {
         storedInbox = items;
       },
     });
-    await first.inject({ method: "PUT", url: "/api/profile", payload: { name: "НКУ", keywords: ["НКУ"] } });
+    await first.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
     await first.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const workspaceState = JSON.parse(
       (await first.inject({ method: "GET", url: "/api/profile" })).body,
@@ -760,7 +780,7 @@ describe("specialist API", () => {
     const second = await buildSpecialistApi({
       catalog,
       workspace: SpecialistWorkspace.parse({
-        profiles: [{ id: workspaceState.id, name: "НКУ", keywords: ["НКУ"] }],
+        profiles: [{ id: workspaceState.id, name: "НКУ для управления насосами", keywords: ["НКУ"] }],
         activeProfileId: workspaceState.id,
       }),
       searchHits: { search: async () => hits },
@@ -770,7 +790,7 @@ describe("specialist API", () => {
 
     // The review case is reachable again through the inbox and still out of the list.
     expect((JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
-      "Электромонтажные работы",
+      "Поставка НКУ 0,4 кВ",
     ]);
     expect(JSON.parse(listed.body).items).toEqual([]);
 
@@ -864,20 +884,18 @@ describe("specialist API", () => {
     expect(response.statusCode).toBe(200);
     expect(body.profileName).toBe("Электротехническое оборудование");
     expect(body.relevantCount).toBe(1);
-    // Only the status-less "Кабель силовой" survives: finished or announced
-    // hits are dropped by the default status filter before human review.
-    expect(body.ambiguousCount).toBe(1);
-    expect(body.discardedCount).toBe(2);
+    // Cable has no profile object, so it is discarded rather than sent to review.
+    // Finished or announced hits are dropped by the default status filter.
+    expect(body.ambiguousCount).toBe(0);
+    expect(body.discardedCount).toBe(3);
     expect(body.items.map((item) => item.title)).toEqual([
       "Комплектная трансформаторная подстанция",
     ]);
-    // Non-matching hits are not dropped silently: they wait in the inbox as
-    // ambiguous cases for a human look, but are not listed as confident matches.
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
       (item) => item.title,
     );
-    expect(inboxTitles).toContain("Кабель силовой");
+    expect(inboxTitles).not.toContain("Кабель силовой");
 
     const listed = await app.inject({ method: "GET", url: "/api/procurements" });
     const titles = (JSON.parse(listed.body).items as Array<{ title: string }>).map(
@@ -933,7 +951,7 @@ describe("specialist API", () => {
     expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
     expect(JSON.parse(saved.body).keywords).toEqual(["кабель"]);
     expect(searched.statusCode).toBe(200);
-    // A keyword-miss goes to the inbox for review, not into the confident list.
+    // A keyword-miss is discarded: it is not a match and not an inbox review.
     expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
       false,
     );
@@ -942,7 +960,7 @@ describe("specialist API", () => {
       (JSON.parse(inbox.body).items as Array<{ title: string }>).some(
         (item) => item.title === "Комплектная трансформаторная подстанция",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(cable).toBeDefined();
     expect(rejected.statusCode).toBe(200);
     expect(remaining.some((item) => item.title === "Кабель силовой")).toBe(false);

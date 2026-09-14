@@ -253,3 +253,51 @@ describe("isSingleSourceAfterFailedProcedure", () => {
     ).toBe(false);
   });
 });
+
+describe("selectRelevantSearchCards with intent", () => {
+  const intent = {
+    objects: ["НКУ", "шкаф управления"],
+    required_context: ["насос", "насосное оборудование"],
+    excluded_context: [],
+    desired_actions: ["поставка", "изготовление"],
+    excluded_actions: ["монтаж", "ремонт", "обслуживание", "проектирование", "пусконаладка"],
+    intent: "equipment_purchase" as const,
+  };
+  const profile = { keywords: ["НКУ"], excludeKeywords: [], intent };
+
+  it("keeps supply and fabrication and drops installation and repair", () => {
+    const selected = selectRelevantSearchCards(
+      [
+        hit("a", "Поставка НКУ для насосной станции"),
+        hit("b", "Изготовление шкафа управления насосами"),
+        hit("c", "Монтаж НКУ"),
+        hit("d", "Ремонт НКУ"),
+        hit("e", "Пусконаладка НКУ"),
+        hit("f", "Поставка НКУ для насосов с последующим монтажом силами заказчика"),
+      ],
+      profile,
+      20,
+    );
+    expect(selected.cards.map((card) => card.sourceProcurementId).sort()).toEqual(["a", "b", "f"]);
+    expect(selected.cards.every((card) => (card.relevanceScore ?? 0) >= 55)).toBe(true);
+    expect(selected.cards[0]?.relevanceReason).toBeDefined();
+    expect(selected.ambiguousCards.some((card) => card.sourceProcurementId === "c")).toBe(false);
+  });
+
+  it("discards a listing when excluded_context matches, and noise without an object", () => {
+    const selected = selectRelevantSearchCards(
+      [
+        hit("light", "Закупка шкаф управления наружным освещением"),
+        hit("contest", "Открытый конкурс по закупке аудиторских услуг"),
+      ],
+      {
+        ...profile,
+        intent: { ...intent, excluded_context: ["освещение"] },
+      },
+      20,
+    );
+    expect(selected.cards).toEqual([]);
+    expect(selected.ambiguousCards).toEqual([]);
+    expect(selected.discardedCount).toBe(2);
+  });
+});

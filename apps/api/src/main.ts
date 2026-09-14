@@ -17,6 +17,7 @@ import { openSpecialistPersistence } from "./persist.js";
 import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
 import { createSearchClassifierFromEnv } from "./search-classifier.js";
+import { createSearchIntentFromEnv } from "./search-intent.js";
 import { createProcurementSearchReview } from "./search-review.js";
 import { createDiscoveryController } from "./discovery-control.js";
 import { createProcurementCardWatch } from "./card-watch.js";
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
           logger,
         });
   const classifier = createSearchClassifierFromEnv(process.env);
+  const searchIntent = createSearchIntentFromEnv(process.env);
   const searchReview =
     mcp === undefined
       ? undefined
@@ -67,6 +69,7 @@ async function main(): Promise<void> {
           logger,
         });
   const commercialReader = createCommercialReaderFromEnv(process.env);
+  logger.info("Search intent configured", { model: searchIntent !== undefined });
   if (mcp !== undefined) {
     logger.info("Search review configured", { model: classifier !== undefined });
     logger.info("Commercial reader configured", { model: commercialReader !== undefined });
@@ -119,6 +122,7 @@ async function main(): Promise<void> {
       : { internalApiToken: process.env["INTERNAL_API_TOKEN"] }),
     ...(searchHits === undefined ? {} : { searchHits }),
     ...(searchReview === undefined ? {} : { searchReview }),
+    ...(searchIntent === undefined ? {} : { searchIntent }),
     ...(cardWatch === undefined ? {} : { cardWatch }),
     ...(watchLimit === undefined ? {} : { watchLimit }),
     ...(mcp === undefined

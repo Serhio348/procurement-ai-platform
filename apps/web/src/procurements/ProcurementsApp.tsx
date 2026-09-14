@@ -19,6 +19,7 @@ import {
 } from "@procurement/domain";
 import { ConfirmToast, TRASH_MOVE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
+import { RelevanceNote } from "./RelevanceNote.js";
 import { TermsEvidenceList } from "./TermsEvidenceList.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
@@ -505,6 +506,7 @@ export function ProcurementsApp({
                   </div>
                 )}
               </dl>
+              <RelevanceNote card={selected} />
               {decide === undefined ? null : (
                 <div className="triage-actions">
                   <button

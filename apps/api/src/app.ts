@@ -25,6 +25,7 @@ import {
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistWorkspaceState,
+  type SearchIntentPlan,
 } from "@procurement/contracts";
 import {
   applyInboxChangeToCard,
@@ -38,8 +39,10 @@ import {
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inboxTopic,
+  inferSearchIntentPlan,
   isConsoleListedCase,
   partitionHitsByDecision,
+  platformSearchTerms,
   profileDisplayName,
   selectRelevantSearchCards,
   shouldRunDiscovery,
@@ -81,6 +84,7 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 import type { SpecialistReviewPort } from "./search-review.js";
+import type { SearchIntentPort } from "./search-intent.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createMemoryCabinetRegistry,
@@ -120,6 +124,11 @@ export interface BuildApiOptions {
   searchHits?: SpecialistSearchHitsPort;
   /** Second look at weak / keyword-less hits. Absent: they all wait in the inbox. */
   searchReview?: SpecialistReviewPort;
+  /**
+   * Turns a profile phrase into objects/actions. Absent: a cheap parser in
+   * domain still builds a plan so scoring does not wait on the model.
+   */
+  searchIntent?: SearchIntentPort;
   /** Re-reads cases the specialist follows. Absent: monitoring stays off. */
   cardWatch?: SpecialistCardWatchPort;
   /** Decided cases one pass may re-read. */
@@ -170,6 +179,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
   const searchReview = options.searchReview;
+  const searchIntent = options.searchIntent;
   const cardWatch = options.cardWatch;
   const watchLimit = options.watchLimit ?? DEFAULT_WATCH_LIMIT;
   const documentIngest = options.documentIngest;
@@ -339,6 +349,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     limit: number,
     offset: number,
     publishedFrom?: string,
+    searchKeywords?: readonly string[],
   ): Omit<SearchQuery, "sourceId"> {
     const { filters } = profile;
     const fromDate = [filters.publishedFrom, publishedFrom]
@@ -346,7 +357,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       .sort()
       .at(-1);
     return {
-      keywords: [...profile.keywords],
+      keywords: [...(searchKeywords ?? profile.keywords)],
       excludeKeywords: [...profile.excludeKeywords],
       buyerUnp: filters.buyerUnp ?? "",
       buyerText: filters.buyerText ?? "",
@@ -366,6 +377,28 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       limit,
       offset,
     };
+  }
+
+  async function resolveSearchPlan(profile: SpecialistWorkingProfile): Promise<SearchIntentPlan> {
+    const inferred = inferSearchIntentPlan({
+      name: profileDisplayName(profile),
+      keywords: profile.keywords,
+      excludeKeywords: profile.excludeKeywords,
+    });
+    if (searchIntent === undefined) return inferred;
+    try {
+      return await searchIntent.plan({
+        name: profileDisplayName(profile),
+        keywords: profile.keywords,
+        excludeKeywords: profile.excludeKeywords,
+      });
+    } catch (error) {
+      logger.warn("Search intent parser failed; using the cheap plan", {
+        profileName: profileDisplayName(profile),
+        err: error instanceof Error ? error.message : String(error),
+      });
+      return inferred;
+    }
   }
 
   /**
@@ -399,6 +432,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             ...(card.buyerName === undefined ? {} : { buyerName: card.buyerName }),
             ...(card.amountLabel === undefined ? {} : { amountLabel: card.amountLabel }),
             ...(foundAs === undefined ? {} : { foundAs }),
+            ...(card.relevanceScore === undefined ? {} : { relevanceScore: card.relevanceScore }),
+            ...(card.relevanceReason === undefined ? {} : { relevanceReason: card.relevanceReason }),
             lastSeenAt: now,
           };
     const owned = withTriage(attachProfileToCard(merged, profileId), workspace());
@@ -407,13 +442,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   /**
-   * Weak and keyword-less hits get a second look when a review port is
-   * configured: the card first, then the model. A confident "relevant" joins
-   * the list as a match; a confident "irrelevant" is discarded and remembered
-   * for the profile; everything else waits in the inbox with the reason
-   * attached to the card. A hit already remembered as irrelevant, or already
-   * waiting in the inbox as a review case, is not looked at again: the source
-   * returning it once more is not new information.
+   * Hits the intent scorer marked review (missing purpose, weak score) get a
+   * second look when a review port is configured: the card first, then the
+   * model. Listing noise without an object is already discarded and never
+   * reaches this port. A confident "relevant" joins the list as a match; a
+   * confident "irrelevant" is discarded and remembered for the profile;
+   * everything else waits in the inbox with the reason attached to the card.
+   * A hit already remembered as irrelevant, or already waiting in the inbox
+   * as a review case, is not looked at again: the source returning it once
+   * more is not new information.
    */
   async function reviewAmbiguous(
     selected: ReturnType<typeof selectRelevantSearchCards>,
@@ -584,7 +621,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace().profile();
-    const hits = await searchHits.search(buildSearchQuery(profile, limit, offset));
+    const plan = await resolveSearchPlan(profile);
+    const hits = await searchHits.search(
+      buildSearchQuery(profile, limit, offset, undefined, platformSearchTerms(plan, profile.keywords)),
+    );
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -592,6 +632,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         excludeKeywords: profile.excludeKeywords,
         statuses: profile.statuses,
         excludeSingleSource: profile.excludeSingleSource,
+        intent: plan,
       },
       limit,
     );
@@ -674,11 +715,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         // One profile's failure must not cost the others their pass, nor lose
         // what earlier profiles already found: the loop goes on and persists.
         let hits: readonly SearchHit[];
+        let plan: SearchIntentPlan;
         const startedAt = clock();
         try {
           await discoveryController.beforeRequest(new Date());
+          plan = await resolveSearchPlan(profile);
           hits = await searchHits.search(
-            buildSearchQuery(profile, limit, 0, discoveryPublishedFrom(profile)),
+            buildSearchQuery(
+              profile,
+              limit,
+              0,
+              discoveryPublishedFrom(profile),
+              platformSearchTerms(plan, profile.keywords),
+            ),
           );
         } catch (error) {
           logger.error("Specialist discovery search failed", error, {
@@ -702,6 +751,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             excludeKeywords: profile.excludeKeywords,
             statuses: profile.statuses,
             excludeSingleSource: profile.excludeSingleSource,
+            intent: plan,
           },
           limit,
         );

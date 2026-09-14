@@ -57,6 +57,10 @@
 - [`docs/architecture/STAGE-45.md`](docs/architecture/STAGE-45.md) — кабинеты специалистов в админке
 - [`docs/architecture/STAGE-46.md`](docs/architecture/STAGE-46.md) — админ снимает ошибки в журнале
 - [`docs/architecture/STAGE-47.md`](docs/architecture/STAGE-47.md) — модель дочитывает условия, код проверяет цитату
+- [`docs/architecture/STAGE-48.md`](docs/architecture/STAGE-48.md) — план поиска из фразы, оценку 0–100 считает код
+- [`docs/architecture/STAGE-49.md`](docs/architecture/STAGE-49.md) — evaluation harness: Precision/Recall старого и нового поиска
+- [`docs/architecture/STAGE-50.md`](docs/architecture/STAGE-50.md) — живой dump goszakupki.by, baseline «НКУ для управления насосами»
+- [`docs/architecture/STAGE-51.md`](docs/architecture/STAGE-51.md) — фильтр выдачи, discard vs review, required_context
 
 ---
 
@@ -218,6 +222,14 @@ docs/architecture/ Документы этапов
 - Этап 46 — админ снимает разобранные ошибки, метка «ошибки N» гаснет
 - Этап 47 — модель дочитывает пропущенные условия из документов; цитата, файл и
   страница видны специалисту, число без цитаты в карточку не попадает
+- Этап 48 — поиск: модель разбирает фразу на объект и тип закупки, код считает
+  оценку 0–100; одно слово больше не делает закупку подходящей
+- Этап 49 — измеримый baseline поиска: `npm run evaluate:search`, метки
+  relevant / irrelevant / uncertain, Precision / Recall / F1 без LLM
+- Этап 50 — живой dump goszakupki.by по профилю «НКУ для управления насосами»:
+  44 карточки площадки + 7 seed, Old vs New без подгонки весов
+- Этап 51 — поиск: term-match по выдаче площадки, score 0 без объекта не
+  review, поставщик ≠ поставка, `required_context` считает код
 
 Не начато: документы на «Отслеживать» (только хеши),
 PostgreSQL outbox для inbox, входящий Telegram-бот.

@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/main.ts",
-    "capture-case": "tsx src/capture-specialist-case.ts"
+    "capture-case": "tsx src/capture-specialist-case.ts",
+    "collect-eval-hits": "tsx src/collect-eval-hits.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

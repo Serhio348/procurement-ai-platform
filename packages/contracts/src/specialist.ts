@@ -215,6 +215,13 @@ export const SpecialistProcurementCard = z.object({
    */
   foundAs: z.enum(["match", "review"]).optional(),
   /**
+   * 0–100 listing score from code, never from a model. Absent on cards found
+   * before intent scoring existed.
+   */
+  relevanceScore: z.number().int().min(0).max(100).optional(),
+  /** Plain-language why the score came out this way. Written by code. */
+  relevanceReason: z.string().max(500).optional(),
+  /**
    * The specialist moved the case to the archive: done participating, kept for
    * the record. Archived cases stay listed but leave "Мои закупки" and stop
    * being re-read by monitoring.

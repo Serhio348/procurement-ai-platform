@@ -118,6 +118,7 @@ export const SpecialistDocumentExtraction = z.object({
     "sparse_drawing",
     "empty",
     "non_pdf",
+    "archive",
   ]),
   pageCount: z.number().int().nonnegative(),
   letterCount: z.number().int().nonnegative(),

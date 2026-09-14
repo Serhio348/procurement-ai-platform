@@ -62,5 +62,6 @@ export function contentTypeForName(name: string): string {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
   if (lower.endsWith(".doc")) return "application/msword";
+  if (lower.endsWith(".zip")) return "application/zip";
   return "application/octet-stream";
 }

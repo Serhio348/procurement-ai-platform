@@ -1,6 +1,45 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 export function unzipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
+  const fromCentral = unzipFromCentralDirectory(bytes);
+  if (fromCentral !== undefined) return fromCentral;
+  return unzipFromLocalHeaders(bytes);
+}
+
+/**
+ * Central directory carries sizes even when local headers use a data
+ * descriptor (flag 0x08). Windows-made contest zips almost always do that.
+ */
+function unzipFromCentralDirectory(bytes: Uint8Array): Map<string, Uint8Array> | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findEocdOffset(view, bytes.length);
+  if (eocd === undefined) return undefined;
+  const count = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  const files = new Map<string, Uint8Array>();
+  for (let index = 0; index < count; index += 1) {
+    if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) return undefined;
+    const flags = view.getUint16(offset + 8, true);
+    const method = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = decodeZipName(bytes.subarray(offset + 46, offset + 46 + nameLength), flags);
+    offset += 46 + nameLength + extraLength + commentLength;
+    if ((flags & 0x01) !== 0 || compressedSize === 0xffff_ffff || localOffset === 0xffff_ffff) {
+      continue;
+    }
+    const inflated = inflateZipMember(bytes, view, localOffset, compressedSize, method, flags);
+    if (inflated !== undefined && !name.endsWith("/")) {
+      files.set(name.replaceAll("\\", "/"), inflated);
+    }
+  }
+  return files;
+}
+
+function unzipFromLocalHeaders(bytes: Uint8Array): Map<string, Uint8Array> {
   const files = new Map<string, Uint8Array>();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = 0;
@@ -14,18 +53,62 @@ export function unzipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
     const nameLength = view.getUint16(offset + 26, true);
     const extraLength = view.getUint16(offset + 28, true);
     const nameStart = offset + 30;
-    const name = decoder.decode(bytes.subarray(nameStart, nameStart + nameLength));
+    const name = decodeZipName(bytes.subarray(nameStart, nameStart + nameLength), flags);
     const dataStart = nameStart + nameLength + extraLength;
-    if ((flags & 0x08) !== 0) {
-      throw new Error("zip data descriptor is not supported");
+    if ((flags & 0x08) !== 0 || (flags & 0x01) !== 0) {
+      break;
     }
-    const compressed = bytes.subarray(dataStart, dataStart + compressedSize);
-    const raw =
-      method === 0 ? compressed.slice() : new Uint8Array(inflateRawSync(Buffer.from(compressed)));
-    if (!name.endsWith("/")) files.set(name.replaceAll("\\", "/"), raw);
+    const inflated = inflateZipPayload(
+      bytes.subarray(dataStart, dataStart + compressedSize),
+      method,
+    );
+    if (inflated !== undefined && !name.endsWith("/")) {
+      files.set(name.replaceAll("\\", "/"), inflated);
+    }
     offset = dataStart + compressedSize;
   }
   return files;
+}
+
+function inflateZipMember(
+  bytes: Uint8Array,
+  view: DataView,
+  localOffset: number,
+  compressedSize: number,
+  method: number,
+  flags: number,
+): Uint8Array | undefined {
+  if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
+    return undefined;
+  }
+  const localNameLength = view.getUint16(localOffset + 26, true);
+  const localExtraLength = view.getUint16(localOffset + 28, true);
+  const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+  void flags;
+  return inflateZipPayload(bytes.subarray(dataStart, dataStart + compressedSize), method);
+}
+
+function inflateZipPayload(compressed: Uint8Array, method: number): Uint8Array | undefined {
+  if (method === 0) return compressed.slice();
+  if (method !== 8) return undefined;
+  try {
+    return new Uint8Array(inflateRawSync(Buffer.from(compressed)));
+  } catch {
+    return undefined;
+  }
+}
+
+function findEocdOffset(view: DataView, length: number): number | undefined {
+  const min = Math.max(0, length - 22 - 65_535);
+  for (let index = length - 22; index >= min; index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) return index;
+  }
+  return undefined;
+}
+
+function decodeZipName(bytes: Uint8Array, flags: number): string {
+  void flags;
+  return decoder.decode(bytes);
 }
 
 export function zipEntries(files: Readonly<Record<string, string | Uint8Array>>): Uint8Array {

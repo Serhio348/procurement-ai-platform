@@ -13,18 +13,21 @@ import {
   type SourceProcurementId,
 } from "@procurement/contracts";
 import { listingMatchesAnyKeyword } from "@procurement/domain";
+import { expandPublicDocumentation } from "./documentation-expand.js";
 import type { ParsedGoszakupkiCard } from "./goszakupki-by-parser.js";
 import {
   parseGoszakupkiCard,
   parseGoszakupkiSearchPage,
 } from "./goszakupki-by-parser.js";
 import type { GoszakupkiPageClient } from "./goszakupki-by-http.js";
+import { downloadPublicDocumentation, type PublicDocumentationFetch } from "./public-download.js";
 import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.js";
 
 export interface GoszakupkiBySourceOptions {
   client: GoszakupkiPageClient;
   cacheTtlMs?: number;
   now?: () => Date;
+  publicFetch?: PublicDocumentationFetch;
 }
 
 interface CacheEntry {
@@ -37,12 +40,14 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   readonly #client: GoszakupkiPageClient;
   readonly #cacheTtlMs: number;
   readonly #now: () => Date;
+  readonly #publicFetch: PublicDocumentationFetch;
   readonly #cache = new Map<string, CacheEntry>();
 
   constructor(options: GoszakupkiBySourceOptions) {
     this.#client = options.client;
     this.#cacheTtlMs = options.cacheTtlMs ?? 30_000;
     this.#now = options.now ?? (() => new Date());
+    this.#publicFetch = options.publicFetch ?? fetch;
   }
 
   async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
@@ -107,9 +112,13 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   }
 
   async getDocuments(id: SourceProcurementId): Promise<ProcurementGetDocumentsResponse> {
-    return ProcurementGetDocumentsResponse.parse({
-      documents: (await this.#load(id)).documents,
-    });
+    const parsed = await this.#load(id);
+    const documents = await expandPublicDocumentation(
+      parsed.documents,
+      this.#publicFetch,
+      () => parsed.card.fetchedAt,
+    );
+    return ProcurementGetDocumentsResponse.parse({ documents });
   }
 
   async getHistory(id: SourceProcurementId): Promise<ProcurementGetHistoryResponse> {
@@ -133,23 +142,24 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     } catch {
       throw new SourceAccessError(this.sourceId, "document URL is not valid");
     }
-    if (parsed.hostname !== "goszakupki.by") {
-      throw new SourceAccessError(this.sourceId, "document URL is outside goszakupki.by");
+    const host = parsed.hostname.toLocaleLowerCase("en-US");
+    if (host === "goszakupki.by" || host.endsWith(".goszakupki.by")) {
+      if (this.#client.download === undefined) {
+        throw new SourceAccessError(this.sourceId, "this client cannot download files");
+      }
+      const file = await this.#client.download(`${parsed.pathname}${parsed.search}`);
+      if (file.status < 200 || file.status >= 300) {
+        throw new SourceAccessError(
+          this.sourceId,
+          `document download returned unexpected HTTP ${String(file.status)}`,
+        );
+      }
+      return {
+        bytes: file.bytes,
+        contentType: file.contentType ?? "application/octet-stream",
+      };
     }
-    if (this.#client.download === undefined) {
-      throw new SourceAccessError(this.sourceId, "this client cannot download files");
-    }
-    const file = await this.#client.download(`${parsed.pathname}${parsed.search}`);
-    if (file.status < 200 || file.status >= 300) {
-      throw new SourceAccessError(
-        this.sourceId,
-        `document download returned unexpected HTTP ${String(file.status)}`,
-      );
-    }
-    return {
-      bytes: file.bytes,
-      contentType: file.contentType ?? "application/octet-stream",
-    };
+    return downloadPublicDocumentation(downloadUrl, this.#publicFetch);
   }
 
   async #load(id: SourceProcurementId): Promise<ParsedGoszakupkiCard> {

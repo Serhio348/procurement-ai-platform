@@ -74,6 +74,8 @@ export function documentStatusLabel(document: SpecialistCaseDocument): string {
       return "пустой файл";
     case "non_pdf":
       return "формат не прочитан";
+    case "archive":
+      return "архив, файлы внутри разобраны";
   }
 }
 

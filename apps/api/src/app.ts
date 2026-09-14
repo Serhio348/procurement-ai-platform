@@ -257,37 +257,58 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    * that owned the request.
    */
   const ingestJobs = new Set<string>();
-  const startParticipateIngest = (card: SpecialistProcurementCardValue): void => {
-    const ingest = documentIngest;
-    if (ingest === undefined || ingestJobs.has(card.id)) return;
+  const startDocumentJob = (
+    card: SpecialistProcurementCardValue,
+    run: (next: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>,
+    failedMessage: string,
+  ): void => {
+    if (ingestJobs.has(card.id)) return;
     ingestJobs.add(card.id);
     ingestProgress.begin(card.id);
     const cabinet = currentCabinet();
     void cabinetAls.run(cabinet, async () => {
       try {
-        const ingested = withTriage(await ingest.ingest(card), workspace());
+        const ingested = withTriage(await run(card), workspace());
         ingestProgress.done(card.id);
         catalog().upsertCase(ingested);
         await persist(cabinet);
-        logger.info("Specialist participate document ingest finished", {
+        logger.info("Specialist document job finished", {
           sourceProcurementId: card.sourceProcurementId,
           documentCount: ingested.documents.length,
         });
       } catch (error) {
         ingestProgress.fail(card.id);
-        logger.error("Specialist participate document ingest failed", error, {
+        logger.error("Specialist document job failed", error, {
           sourceProcurementId: card.sourceProcurementId,
         });
         await recordJournal(journal, {
           kind: "documents",
           level: "error",
-          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
+          message: `${failedMessage}: ${card.sourceProcurementId}`,
           sourceProcurementId: card.sourceProcurementId,
         });
       } finally {
         ingestJobs.delete(card.id);
       }
     });
+  };
+  const startParticipateIngest = (card: SpecialistProcurementCardValue): void => {
+    const ingest = documentIngest;
+    if (ingest === undefined) return;
+    startDocumentJob(card, (next) => ingest.ingest(next), "Не удалось скачать документы");
+  };
+  const startReindex = (card: SpecialistProcurementCardValue): void => {
+    const ingest = documentIngest;
+    const reindex = ingest?.reindex;
+    if (ingest === undefined || reindex === undefined) return;
+    const hashed = card.documents.filter(
+      (document) => document.hash !== undefined && document.status === "hashed",
+    );
+    if (hashed.length === 0) {
+      startParticipateIngest(card);
+      return;
+    }
+    startDocumentJob(card, (next) => reindex(next), "Не удалось перечитать документы");
   };
 
   const listPage = async (
@@ -1407,6 +1428,34 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
     }
     return ProcedureCard.parse(live);
+  });
+
+  /**
+   * Refresh the platform page, then re-read already downloaded files so a
+   * new extractor can fill terms without hitting goszakupki.by again.
+   */
+  app.post("/api/procurements/:id/reindex", async (request, reply) => {
+    const params = request.params as { id: string };
+    const card = await resolveCase(params.id);
+    if (card === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    let next = withTriage(card, workspace());
+    next = await hydrateSourceCard(next);
+    if (next.live !== true) {
+      next = SpecialistProcurementCard.parse({ ...next, live: true });
+    }
+    catalog().upsertCase(next);
+    await persist();
+    if (next.triage === "participate") {
+      startReindex(next);
+    }
+    logger.info("Specialist case refresh recorded", {
+      sourceProcurementId: card.sourceProcurementId,
+      triage: next.triage,
+      documentCount: next.documents.length,
+    });
+    return SpecialistProcurementListResponse.parse({ items: [next] });
   });
 
   app.get("/api/documents/:hash", async (request, reply) => {

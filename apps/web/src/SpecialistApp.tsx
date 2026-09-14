@@ -44,6 +44,7 @@ export interface SpecialistAppProps {
   restore?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
   purge?: (id: string) => Promise<void>;
   emptyTrash?: () => Promise<void>;
+  reindex?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
   resolveInbox?: (
@@ -72,6 +73,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const restoreCase = props.restore;
   const purgeCase = props.purge;
   const emptyTrashCase = props.emptyTrash;
+  const reindexCase = props.reindex;
   const activateProfile = props.activateProfile;
   const createProfile = props.createProfile;
   const deleteProfile = props.deleteProfile;
@@ -215,6 +217,24 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       : async () => {
           await emptyTrashCase();
           setProcurements((current) => current.filter((item) => item.triage !== "reject"));
+        };
+
+  const reindex =
+    reindexCase === undefined
+      ? undefined
+      : async (id: string) => {
+          ingestingIds.current.add(id);
+          try {
+            const items = await reindexCase(id);
+            const updated = items.find((item) => item.id === id);
+            if (updated !== undefined) {
+              setProcurements((current) => mergeProcurementCards(current, [updated]));
+            }
+            return updated === undefined ? items : [updated];
+          } catch (error) {
+            ingestingIds.current.delete(id);
+            throw error;
+          }
         };
 
   const listMine = props.listMine;
@@ -463,6 +483,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(purge === undefined ? {} : { purge })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               activeIngest={ingestById}
+              {...(reindex === undefined ? {} : { reindex })}
             />
           }
         />
@@ -478,6 +499,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(purge === undefined ? {} : { purge })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               activeIngest={ingestById}
+              {...(reindex === undefined ? {} : { reindex })}
             />
           }
         />

@@ -166,6 +166,35 @@ describe("parseGoszakupkiCard", () => {
     expect(parsed.history[0]?.sourceUrl).toBe("https://goszakupki.by/questions/9001");
   });
 
+  it("lists a documentation storage link from the documents panel", () => {
+    const parsed = parseGoszakupkiCard({
+      html: `
+        <div id="print-area">
+          <div class="page-header"><h1>Карточка auc0009000098</h1></div>
+          <div class="panel">
+            <div class="panel-heading">Общая информация</div>
+            <table><tr><th>Название</th><td>Поставка щита</td></tr></table>
+          </div>
+          <div class="panel panel-default">
+            <div class="panel-heading"><b>Документы</b></div>
+            <table class="table">
+              <tr><td><a href="https://disk.yandex.ru/d/ContestPack">Документация закупки</a></td></tr>
+            </table>
+          </div>
+        </div>`,
+      url: "https://goszakupki.by/request/view/9000098",
+      fetchedAt,
+    });
+
+    expect(parsed.documents).toEqual([
+      expect.objectContaining({
+        name: "Документация закупки",
+        sourceUrl: "https://disk.yandex.ru/d/ContestPack",
+        downloadUrl: "https://disk.yandex.ru/d/ContestPack",
+      }),
+    ]);
+  });
+
   it("maps buying-organisation labels and an indicative amount", async () => {
     const html = await readFile(
       fileURLToPath(new URL("request-buying-org.html", fixtureDirectory)),

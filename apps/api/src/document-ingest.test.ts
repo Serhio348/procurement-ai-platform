@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { RequestId, SourceId, SpecialistProcurementCard } from "@procurement/contracts";
 import type { McpToolCaller } from "@procurement/mcp-client";
+import { zipEntries } from "@procurement/mcp-documents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { putBlob } from "./blobs.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
@@ -91,6 +92,114 @@ describe("createProcurementDocumentIngest", () => {
     });
     expect(RequestId.parse(String(callTool.mock.calls[0]?.[2]?.requestId)).length).toBeGreaterThan(0);
     expect(blobStore.put).toHaveBeenCalledWith(hash, expect.any(Uint8Array));
+  });
+
+  it("unpacks a downloaded zip and reads the Word file inside", async () => {
+    const inner = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>оплата в течение 30 календарных дней после акта</w:t></w:r></w:p></w:document>',
+    });
+    const pack = zipEntries({ "ТЗ.docx": inner });
+    const hash = createHash("sha256").update(pack).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-zip-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, hash, pack);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "Комплект.zip",
+                sourceUrl: "https://goszakupki.by/files/1",
+                downloadUrl: "https://goszakupki.by/files/1?download=1",
+                mimeType: "application/zip",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        return {
+          structuredContent: {
+            hash,
+            storageKey: `blobs/${hash}`,
+            sizeBytes: pack.byteLength,
+            contentType: "application/zip",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    const next = await port.ingest(card);
+
+    expect(next.documents.map((item) => item.name)).toEqual([
+      "Комплект.zip",
+      "Комплект.zip / ТЗ.docx",
+    ]);
+    expect(next.documents[0]?.extraction?.kind).toBe("archive");
+    expect(next.documents[1]?.extraction?.kind).toBe("office_text");
+    expect(next.documents[1]?.extraction?.textPreview).toContain("30 календарных дней");
+  });
+
+  it("reindexes hashed blobs without listing or downloading from the platform", async () => {
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "reindex-blobs-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, hash, bytes);
+    const callTool = vi.fn<McpToolCaller["callTool"]>().mockImplementation(fakeCaller(hash));
+    const progress = createIngestProgressHub();
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+      progress,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+      triage: "participate",
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/1",
+          hash,
+          status: "hashed",
+        },
+      ],
+    });
+
+    progress.begin(card.id);
+    const reindex = port.reindex;
+    if (reindex === undefined) {
+      throw new Error("reindex is required");
+    }
+    const next = await reindex(card);
+    progress.done(card.id);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(next.documents[0]?.status).toBe("hashed");
+    expect(next.documents[0]?.hash).toBe(hash);
   });
 
   it("does not report a download as hashed when the blob cannot be read back", async () => {

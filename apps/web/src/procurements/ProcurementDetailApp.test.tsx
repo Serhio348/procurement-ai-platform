@@ -75,6 +75,45 @@ describe("ProcurementDetailApp", () => {
     expect(screen.queryByText("Загрузка с площадки…")).toBeNull();
   });
 
+  it("reindexes downloaded files when the specialist refreshes a participate card", async () => {
+    const user = userEvent.setup();
+    const card = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000401",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "participate",
+      sourceCard: source,
+      documents: [
+        {
+          name: "ТЗ.docx",
+          sourceUrl: "https://goszakupki.by/files/1",
+          hash: "a".repeat(64),
+          status: "hashed",
+        },
+      ],
+    });
+    const reindex = vi.fn(async () => [card]);
+
+    render(
+      <MemoryRouter initialEntries={[`/my-procurements/${card.id}`]}>
+        <Routes>
+          <Route
+            path="/my-procurements/:id"
+            element={<ProcurementDetailApp procurements={[card]} reindex={reindex} />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Обновить" }));
+    await waitFor(() => {
+      expect(reindex).toHaveBeenCalledWith(card.id);
+    });
+  });
+
   it("loads a case by id when the local list is empty", async () => {
     const card = SpecialistProcurementCard.parse({
       id: "92b439f2-0000-4000-8000-000000000402",

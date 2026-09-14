@@ -62,6 +62,9 @@
 - [`docs/architecture/STAGE-50.md`](docs/architecture/STAGE-50.md) — живой dump goszakupki.by, baseline «НКУ для управления насосами»
 - [`docs/architecture/STAGE-51.md`](docs/architecture/STAGE-51.md) — фильтр выдачи, discard vs review, required_context
 - [`docs/architecture/STAGE-52.md`](docs/architecture/STAGE-52.md) — «Участвовать» качает файлы после смены вкладки
+- [`docs/architecture/STAGE-53.md`](docs/architecture/STAGE-53.md) — срок оплаты с «после чего» из документа
+- [`docs/architecture/STAGE-54.md`](docs/architecture/STAGE-54.md) — «Обновить» перечитывает скачанные файлы
+- [`docs/architecture/STAGE-55.md`](docs/architecture/STAGE-55.md) — ZIP и ссылка на хранилище документации
 
 ---
 
@@ -232,6 +235,9 @@ docs/architecture/ Документы этапов
 - Этап 51 — поиск: term-match по выдаче площадки, score 0 без объекта не
   review, поставщик ≠ поставка, `required_context` считает код
 - Этап 52 — «Участвовать»: ingest в фоне, смена вкладки не отменяет скачивание
+- Этап 53 — срок оплаты: период и событие из цитаты («после подписания акта»)
+- Этап 54 — «Обновить» в «Моих закупках»: карточка площадки + переиндексация blobs
+- Этап 55 — ZIP распаковывается; ссылка на Яндекс.Диск / файл вместо вложения качается
 
 Не начато: документы на «Отслеживать» (только хеши),
 PostgreSQL outbox для inbox, входящий Telegram-бот.

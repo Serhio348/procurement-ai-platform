@@ -18,6 +18,7 @@ describe("detectDocumentFormat", () => {
     expect(detectDocumentFormat({ bytes: zip, name: "file.bin", zipFamily: "xlsx" })).toBe("xlsx");
     expect(detectDocumentFormat({ bytes: zip, name: "tz.docx" })).toBe("docx");
     expect(detectDocumentFormat({ bytes: zip, name: "auction.pptx" })).toBe("pptx");
+    expect(detectDocumentFormat({ bytes: zip, name: "pack.zip" })).toBe("zip");
   });
 
   it("picks JPEG/PNG from magic, not from Content-Type", () => {

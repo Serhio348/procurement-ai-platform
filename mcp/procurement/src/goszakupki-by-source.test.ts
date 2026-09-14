@@ -78,9 +78,41 @@ describe("GoszakupkiBySource", () => {
     expect(file.contentType).toBe("application/pdf");
     expect(file.bytes).toEqual(new Uint8Array([1, 2, 3]));
     expect(download).toHaveBeenCalledWith("/files/get?id=1&download=1");
-    await expect(source.download("https://example.test/files/1")).rejects.toThrow(
-      /outside goszakupki.by/,
+    await expect(source.download("http://127.0.0.1/tz.pdf")).rejects.toThrow(
+      /public documentation host/,
     );
+  });
+
+  it("downloads a public storage URL without the goszakupki session", async () => {
+    const publicFetch = vi.fn(async (url: string | URL) => {
+      const href = String(url);
+      if (href.includes("cloud-api.yandex.net") && href.includes("download")) {
+        return new Response(JSON.stringify({ href: "https://downloader.disk.yandex.ru/zip/1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (href === "https://downloader.disk.yandex.ru/zip/1") {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "content-type": "application/zip" },
+        });
+      }
+      throw new Error(`unexpected fetch ${href}`);
+    });
+    const source = new GoszakupkiBySource({
+      client: {
+        get: async () => {
+          throw new Error("must not fetch the card");
+        },
+      },
+      publicFetch,
+    });
+
+    const file = await source.download("https://disk.yandex.ru/d/abc");
+    expect(file.contentType).toContain("zip");
+    expect(file.bytes[0]).toBe(0x50);
+    expect(publicFetch).toHaveBeenCalled();
   });
 
   it("keeps the HTTP client bound so private fields stay readable", async () => {

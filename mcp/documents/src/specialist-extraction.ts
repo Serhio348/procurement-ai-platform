@@ -48,6 +48,26 @@ export function toSpecialistExtraction(
   });
 }
 
+export function archiveContainerExtraction(
+  memberCount: number,
+): ReturnType<typeof SpecialistDocumentExtraction.parse> {
+  return SpecialistDocumentExtraction.parse({
+    status: "extracted",
+    kind: "archive",
+    pageCount: 0,
+    letterCount: 0,
+    confidence: 1,
+    ocrApplied: false,
+    textPreview: "",
+    pages: [],
+    notes: [
+      memberCount === 0
+        ? "ZIP-архив скачан, внутри не удалось разобрать файлы."
+        : `Архив: внутри ${String(memberCount)} файл(ов), разобраны отдельно.`,
+    ],
+  });
+}
+
 export function skippedProjectExtraction(
   reason: string,
 ): ReturnType<typeof SpecialistDocumentExtraction.parse> {

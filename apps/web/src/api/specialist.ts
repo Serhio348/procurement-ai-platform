@@ -238,6 +238,20 @@ export async function decideProcurement(
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }
 
+export async function reindexProcurement(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<readonly SpecialistProcurementCardValue[]> {
+  const response = await fetcher(
+    `/api/procurements/${id}/reindex`,
+    withCredentials({ method: "POST" }),
+  );
+  if (!response.ok) {
+    throw new Error("Не удалось обновить документы закупки");
+  }
+  return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
 export async function restoreProcurement(
   id: string,
   fetcher: typeof fetch = fetch,

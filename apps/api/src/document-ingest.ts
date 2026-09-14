@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   CommercialExtractorInput,
   CommercialExtractorOutput,
@@ -6,14 +6,19 @@ import {
   SourceId,
   SourceProcurementId,
   SpecialistCaseDocument,
+  Sha256,
   type CommercialClaim,
   type SpecialistCaseDocument as SpecialistCaseDocumentValue,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
 import {
   applyParticipateDocuments,
+  archiveMemberDisplayName,
+  archiveMemberSourceUrl,
   ingestFileFinishState,
+  isArchiveMemberSourceUrl,
   keepTrustedClaims,
+  MAX_ARCHIVE_UNPACK_DEPTH,
   missingCommercialKeys,
   participateReadablePages,
   participateRuleClaims,
@@ -26,18 +31,23 @@ import {
   type McpToolCaller,
 } from "@procurement/mcp-client";
 import {
+  archiveContainerExtraction,
   createDocumentScanEngine,
   recognizeSpecialistDocument,
+  resolveDocumentFormat,
   RoutingDocumentExtractor,
+  unpackZipArchive,
 } from "@procurement/mcp-documents";
 import { silentLogger, type Logger } from "@procurement/observability";
-import { getBlob } from "./blobs.js";
+import { contentTypeForName, getBlob, putBlob } from "./blobs.js";
 import type { CommercialReaderPort } from "./commercial-reader.js";
 import type { IngestProgressHub } from "./ingest-progress.js";
 import type { BlobStore } from "./object-store.js";
 
 export interface SpecialistDocumentIngestPort {
   ingest: (card: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>;
+  /** Re-reads blobs already on the case. Does not call the platform. */
+  reindex?: (card: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>;
 }
 
 export interface ProcurementDocumentIngestOptions {
@@ -91,7 +101,7 @@ export function createProcurementDocumentIngest(
       try {
         for (const source of listed.documents) {
           documents.push(
-            await ingestOne({
+            ...(await ingestOne({
               name: source.name,
               sourceUrl: source.sourceUrl,
               fetchUrl: source.downloadUrl ?? source.sourceUrl,
@@ -107,24 +117,71 @@ export function createProcurementDocumentIngest(
               logger,
               ...(options.progress === undefined ? {} : { progress: options.progress }),
               procurementId: card.id,
-            }),
+            })),
           );
         }
       } finally {
         await scan.close();
       }
-      const modelClaims = await readCommercialClaims({
-        documents,
-        ...(options.commercialReader === undefined
-          ? {}
-          : { reader: options.commercialReader }),
-        pageLimit: options.commercialReaderPageLimit ?? DEFAULT_COMMERCIAL_READER_PAGE_LIMIT,
-        logger,
-        sourceProcurementId: card.sourceProcurementId,
+      return finishCommercialRead(card, documents, options, logger);
+    },
+    async reindex(card: SpecialistProcurementCardValue): Promise<SpecialistProcurementCardValue> {
+      const stored = card.documents.filter(
+        (document) =>
+          document.hash !== undefined &&
+          document.status === "hashed" &&
+          !isArchiveMemberSourceUrl(document.sourceUrl),
+      );
+      options.progress?.listed(
+        card.id,
+        stored.map((document) => ({ name: document.name, sourceUrl: document.sourceUrl })),
+      );
+      if (stored.length === 0) return card;
+      const scan = createDocumentScanEngine();
+      const nativeExtractor = new RoutingDocumentExtractor();
+      const scanExtractor = new RoutingDocumentExtractor({
+        ocr: scan.ocr,
+        maxOcrPages: Number.parseInt(process.env["DOCUMENT_OCR_MAX_PAGES"] ?? "50", 10),
       });
-      return applyParticipateDocuments(card, documents, { modelClaims });
+      const documents: SpecialistCaseDocumentValue[] = [];
+      try {
+        for (const document of stored) {
+          documents.push(
+            ...(await reindexOne({
+              document,
+              blobDirectory: options.blobDirectory,
+              ...(options.blobStore === undefined ? {} : { blobStore: options.blobStore }),
+              nativeExtractor,
+              scanExtractor,
+              usesVision: scan.usesVision,
+              logger,
+              ...(options.progress === undefined ? {} : { progress: options.progress }),
+              procurementId: card.id,
+            })),
+          );
+        }
+      } finally {
+        await scan.close();
+      }
+      return finishCommercialRead(card, documents, options, logger);
     },
   };
+}
+
+async function finishCommercialRead(
+  card: SpecialistProcurementCardValue,
+  documents: readonly SpecialistCaseDocumentValue[],
+  options: ProcurementDocumentIngestOptions,
+  logger: Logger,
+): Promise<SpecialistProcurementCardValue> {
+  const modelClaims = await readCommercialClaims({
+    documents,
+    ...(options.commercialReader === undefined ? {} : { reader: options.commercialReader }),
+    pageLimit: options.commercialReaderPageLimit ?? DEFAULT_COMMERCIAL_READER_PAGE_LIMIT,
+    logger,
+    sourceProcurementId: card.sourceProcurementId,
+  });
+  return applyParticipateDocuments(card, documents, { modelClaims });
 }
 
 /**
@@ -208,7 +265,7 @@ async function ingestOne(input: {
   logger: Logger;
   progress?: IngestProgressHub;
   procurementId: string;
-}): Promise<SpecialistCaseDocumentValue> {
+}): Promise<SpecialistCaseDocumentValue[]> {
   const listed = {
     name: input.name,
     sourceUrl: input.sourceUrl,
@@ -240,57 +297,228 @@ async function ingestOne(input: {
           blobDirectory: input.blobDirectory,
         },
       );
-      return finish(
-        SpecialistCaseDocument.parse({
-          ...listed,
-          hash: downloaded.hash,
-          sizeBytes: downloaded.sizeBytes,
-          status: "download_failed",
-          note: "Файл скачан, но не найден в хранилище.",
-        }),
-      );
+      return [
+        finish(
+          SpecialistCaseDocument.parse({
+            ...listed,
+            hash: downloaded.hash,
+            sizeBytes: downloaded.sizeBytes,
+            status: "download_failed",
+            note: "Файл скачан, но не найден в хранилище.",
+          }),
+        ),
+      ];
     }
     if (input.blobStore !== undefined) {
       await input.blobStore.put(downloaded.hash, bytes);
     }
     input.progress?.fileIndexing(input.procurementId, input.sourceUrl, 0, downloaded.hash);
-    let extraction;
-    try {
-      extraction = await recognizeSpecialistDocument({
-        name: input.name,
-        hash: downloaded.hash,
-        bytes,
-        contentType: downloaded.contentType,
-        nativeExtractor: input.nativeExtractor,
-        scanExtractor: input.scanExtractor,
-        usesVision: input.usesVision,
-      });
-    } catch (error) {
-      input.logger.error("Participate document recognition failed", error, {
-        name: input.name,
-        hash: downloaded.hash,
-      });
-    }
-    return finish(
-      SpecialistCaseDocument.parse({
-        ...listed,
-        hash: downloaded.hash,
-        sizeBytes: downloaded.sizeBytes,
-        status: "hashed",
-        note: downloaded.contentType,
-        ...(extraction === undefined ? {} : { extraction }),
-      }),
-    );
+    return indexStoredFile({
+      name: input.name,
+      sourceUrl: input.sourceUrl,
+      listed,
+      hash: downloaded.hash,
+      sizeBytes: downloaded.sizeBytes,
+      bytes,
+      contentType: downloaded.contentType,
+      blobDirectory: input.blobDirectory,
+      ...(input.blobStore === undefined ? {} : { blobStore: input.blobStore }),
+      nativeExtractor: input.nativeExtractor,
+      scanExtractor: input.scanExtractor,
+      usesVision: input.usesVision,
+      logger: input.logger,
+      ...(input.progress === undefined ? {} : { progress: input.progress }),
+      procurementId: input.procurementId,
+      depth: 0,
+    });
   } catch (error) {
     input.logger.error("Participate document download failed", error, {
       name: input.name,
     });
-    return finish(
-      SpecialistCaseDocument.parse({
-        ...listed,
-        status: "download_failed",
-        note: error instanceof McpToolCallError ? error.message : String(error),
-      }),
-    );
+    return [
+      finish(
+        SpecialistCaseDocument.parse({
+          ...listed,
+          status: "download_failed",
+          note: error instanceof McpToolCallError ? error.message : String(error),
+        }),
+      ),
+    ];
   }
 }
+
+async function reindexOne(input: {
+  document: SpecialistCaseDocumentValue;
+  blobDirectory: string;
+  blobStore?: BlobStore;
+  nativeExtractor: RoutingDocumentExtractor;
+  scanExtractor: RoutingDocumentExtractor;
+  usesVision: boolean;
+  logger: Logger;
+  progress?: IngestProgressHub;
+  procurementId: string;
+}): Promise<SpecialistCaseDocumentValue[]> {
+  const hash = input.document.hash;
+  if (hash === undefined) return [input.document];
+  input.progress?.fileIndexing(input.procurementId, input.document.sourceUrl, 0, hash);
+  const bytes = await loadStoredBytes(hash, input.blobDirectory, input.blobStore);
+  if (bytes === undefined) {
+    input.progress?.fileFinished(input.procurementId, input.document.sourceUrl, "skipped", hash);
+    return [input.document];
+  }
+  return indexStoredFile({
+    name: input.document.name,
+    sourceUrl: input.document.sourceUrl,
+    listed: {
+      name: input.document.name,
+      sourceUrl: input.document.sourceUrl,
+      ...(input.document.downloadUrl === undefined ? {} : { downloadUrl: input.document.downloadUrl }),
+    },
+    hash,
+    ...(input.document.sizeBytes === undefined ? {} : { sizeBytes: input.document.sizeBytes }),
+    bytes,
+    contentType: contentTypeOf(input.document),
+    blobDirectory: input.blobDirectory,
+    ...(input.blobStore === undefined ? {} : { blobStore: input.blobStore }),
+    nativeExtractor: input.nativeExtractor,
+    scanExtractor: input.scanExtractor,
+    usesVision: input.usesVision,
+    logger: input.logger,
+    ...(input.progress === undefined ? {} : { progress: input.progress }),
+    procurementId: input.procurementId,
+    depth: 0,
+  });
+}
+
+async function indexStoredFile(input: {
+  name: string;
+  sourceUrl: string;
+  listed: { name: string; sourceUrl: string; downloadUrl?: string };
+  hash: string;
+  sizeBytes?: number;
+  bytes: Uint8Array;
+  contentType: string;
+  blobDirectory: string;
+  blobStore?: BlobStore;
+  nativeExtractor: RoutingDocumentExtractor;
+  scanExtractor: RoutingDocumentExtractor;
+  usesVision: boolean;
+  logger: Logger;
+  progress?: IngestProgressHub;
+  procurementId: string;
+  depth: number;
+}): Promise<SpecialistCaseDocumentValue[]> {
+  const format = resolveDocumentFormat(input.bytes, input.name, input.contentType);
+  if (format === "zip" && input.depth < MAX_ARCHIVE_UNPACK_DEPTH) {
+    const members = unpackZipArchive(input.bytes);
+    const parent = finishIndexed(
+      input,
+      SpecialistCaseDocument.parse({
+        ...input.listed,
+        hash: input.hash,
+        ...(input.sizeBytes === undefined ? {} : { sizeBytes: input.sizeBytes }),
+        status: "hashed",
+        note: input.contentType,
+        extraction: archiveContainerExtraction(members.length),
+      }),
+    );
+    const children: SpecialistCaseDocumentValue[] = [];
+    for (const member of members) {
+      const memberHash = Sha256.parse(createHash("sha256").update(member.bytes).digest("hex"));
+      await putBlob(input.blobDirectory, memberHash, member.bytes);
+      if (input.blobStore !== undefined) {
+        await input.blobStore.put(memberHash, member.bytes);
+      }
+      children.push(
+        ...(await indexStoredFile({
+          name: archiveMemberDisplayName(input.name, member.path),
+          sourceUrl: archiveMemberSourceUrl(input.sourceUrl, member.path),
+          listed: {
+            name: archiveMemberDisplayName(input.name, member.path),
+            sourceUrl: archiveMemberSourceUrl(input.sourceUrl, member.path),
+          },
+          hash: memberHash,
+          sizeBytes: member.bytes.byteLength,
+          bytes: member.bytes,
+          contentType: contentTypeForName(member.path),
+          blobDirectory: input.blobDirectory,
+          ...(input.blobStore === undefined ? {} : { blobStore: input.blobStore }),
+          nativeExtractor: input.nativeExtractor,
+          scanExtractor: input.scanExtractor,
+          usesVision: input.usesVision,
+          logger: input.logger,
+          ...(input.progress === undefined ? {} : { progress: input.progress }),
+          procurementId: input.procurementId,
+          depth: input.depth + 1,
+        })),
+      );
+    }
+    return [parent, ...children];
+  }
+
+  let extraction;
+  try {
+    extraction = await recognizeSpecialistDocument({
+      name: input.name,
+      hash: input.hash,
+      bytes: input.bytes,
+      contentType: input.contentType,
+      nativeExtractor: input.nativeExtractor,
+      scanExtractor: input.scanExtractor,
+      usesVision: input.usesVision,
+    });
+  } catch (error) {
+    input.logger.error("Participate document recognition failed", error, {
+      name: input.name,
+      hash: input.hash,
+    });
+  }
+  return [
+    finishIndexed(
+      input,
+      SpecialistCaseDocument.parse({
+        ...input.listed,
+        hash: input.hash,
+        ...(input.sizeBytes === undefined ? {} : { sizeBytes: input.sizeBytes }),
+        status: "hashed",
+        note: input.contentType,
+        ...(extraction === undefined ? {} : { extraction }),
+      }),
+    ),
+  ];
+}
+
+function finishIndexed(
+  input: {
+    progress?: IngestProgressHub;
+    procurementId: string;
+    sourceUrl: string;
+  },
+  document: SpecialistCaseDocumentValue,
+): SpecialistCaseDocumentValue {
+  input.progress?.fileFinished(
+    input.procurementId,
+    input.sourceUrl,
+    ingestFileFinishState(document),
+    document.hash,
+  );
+  return document;
+}
+
+async function loadStoredBytes(
+  hash: string,
+  blobDirectory: string,
+  blobStore: BlobStore | undefined,
+): Promise<Uint8Array | undefined> {
+  const fromDisk = await getBlob(blobDirectory, hash);
+  if (fromDisk !== undefined) return fromDisk;
+  if (blobStore === undefined) return undefined;
+  return blobStore.get(hash);
+}
+
+function contentTypeOf(document: SpecialistCaseDocumentValue): string {
+  const note = document.note ?? "";
+  if (note.includes("/")) return note;
+  return contentTypeForName(document.name);
+}
+

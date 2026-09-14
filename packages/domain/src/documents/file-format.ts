@@ -10,6 +10,7 @@ export const DOCUMENT_FILE_FORMATS = [
   "png",
   "tiff",
   "rtf",
+  "zip",
   "unknown",
 ] as const;
 
@@ -69,6 +70,7 @@ export function formatFromFileName(name: string): DocumentFileFormat | undefined
     tif: "tiff",
     tiff: "tiff",
     rtf: "rtf",
+    zip: "zip",
   };
   return mapped[extension];
 }
@@ -86,6 +88,7 @@ export function formatFromContentType(contentType: string): DocumentFileFormat |
   if (type === "image/png") return "png";
   if (type === "image/tiff") return "tiff";
   if (type === "application/rtf" || type === "text/rtf") return "rtf";
+  if (type === "application/zip" || type === "application/x-zip-compressed") return "zip";
   return undefined;
 }
 
@@ -103,7 +106,7 @@ export function detectDocumentFormat(input: DetectDocumentFormatInput): Document
   if (container === "zip") {
     if (input.zipFamily !== undefined) return input.zipFamily;
     const named = namedOfficeXml(input);
-    return named ?? "unknown";
+    return named ?? "zip";
   }
   if (container === "ole") {
     const named = formatFromFileName(input.name ?? "") ?? formatFromContentType(input.contentType ?? "");

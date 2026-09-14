@@ -14,3 +14,5 @@ export * from "./server.js";
 export * from "./specialist-extraction.js";
 export * from "./recognize-specialist-document.js";
 export * from "./tesseract-ocr.js";
+export * from "./unpack-archive.js";
+export * from "./zip-entries.js";

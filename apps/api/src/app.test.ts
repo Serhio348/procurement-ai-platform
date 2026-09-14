@@ -1280,6 +1280,151 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("reindexes stored files on refresh without downloading again", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+      triage: "participate",
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/401",
+          hash: "a".repeat(64),
+          status: "hashed",
+        },
+      ],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    const ingest = vi.fn(async (card: typeof found) => card);
+    const reindex = vi.fn(async (card: typeof found) =>
+      SpecialistProcurementCard.parse({
+        ...card,
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/401",
+            hash: "a".repeat(64),
+            status: "hashed",
+            note: "reindexed",
+          },
+        ],
+      }),
+    );
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest, reindex },
+    });
+
+    const refreshed = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/reindex`,
+    });
+    await waitForCase(app, found.id, (body) => {
+      expect(body["documents"]).toEqual([
+        expect.objectContaining({ name: "ТЗ.pdf", note: "reindexed" }),
+      ]);
+    });
+
+    expect(refreshed.statusCode).toBe(200);
+    expect(ingest).not.toHaveBeenCalled();
+    expect(reindex).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
+  it("downloads files on refresh when the participate case has none hashed", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+      triage: "participate",
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    const ingest = vi.fn(async (card: typeof found) =>
+      SpecialistProcurementCard.parse({
+        ...card,
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/401",
+            hash: "a".repeat(64),
+            status: "hashed",
+          },
+        ],
+      }),
+    );
+    const reindex = vi.fn(async (card: typeof found) => card);
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest, reindex },
+    });
+
+    const refreshed = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/reindex`,
+    });
+    await waitForCase(app, found.id, (body) => {
+      expect(body["documents"]).toEqual([expect.objectContaining({ name: "ТЗ.pdf" })]);
+    });
+
+    expect(refreshed.statusCode).toBe(200);
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(reindex).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it("does not reindex files when refreshing a watched case", async () => {
+    const found = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+      triage: "monitor",
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/401",
+          hash: "a".repeat(64),
+          status: "hashed",
+        },
+      ],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(found);
+    const ingest = vi.fn(async (card: typeof found) => card);
+    const reindex = vi.fn(async (card: typeof found) => card);
+    const app = await buildSpecialistApi({
+      catalog,
+      documentIngest: { ingest, reindex },
+    });
+
+    const refreshed = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${found.id}/reindex`,
+    });
+
+    expect(refreshed.statusCode).toBe(200);
+    expect(ingest).not.toHaveBeenCalled();
+    expect(reindex).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it("starts with an empty profile and can add a second empty direction", async () => {
     const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
 

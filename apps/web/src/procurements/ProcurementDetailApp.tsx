@@ -34,6 +34,7 @@ export function ProcurementDetailApp({
   purge,
   ingestProgress,
   activeIngest = {},
+  reindex,
 }: {
   procurements: readonly SpecialistProcurementCard[];
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
@@ -43,6 +44,7 @@ export function ProcurementDetailApp({
   purge?: (id: string) => Promise<void>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   activeIngest?: Record<string, SpecialistIngestProgress>;
+  reindex?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
 }): ReactElement {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -154,6 +156,29 @@ export function ProcurementDetailApp({
     } finally {
       setLoading(false);
     }
+  }
+
+  async function refreshCase(): Promise<void> {
+    if (id === undefined) return;
+    if (stored?.triage === "participate" && reindex !== undefined) {
+      setLoading(true);
+      setError(undefined);
+      try {
+        const items = await reindex(id);
+        const updated = items.find((item) => item.id === id);
+        if (updated !== undefined) {
+          setFetched(updated);
+          onCardLoaded?.(updated);
+          if (updated.sourceCard !== undefined) setLive(updated.sourceCard);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Не удалось обновить документы");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    await loadPlatformCard(id);
   }
 
   async function runDecide(kind: SpecialistTriageKind): Promise<void> {
@@ -353,13 +378,19 @@ export function ProcurementDetailApp({
           >
             Открыть на goszakupki.by
           </a>
-          {loading ? <span className="procurement-detail-loading">Загрузка с площадки…</span> : null}
-          {!loading ? (
+          {loading ? (
+            <span className="procurement-detail-loading">
+              {stored.triage === "participate" && reindex !== undefined
+                ? "Перечитываем документы…"
+                : "Загрузка с площадки…"}
+            </span>
+          ) : null}
+          {!loading && shownProgress === undefined ? (
             <button
               type="button"
               className="procurement-detail-retry"
               onClick={() => {
-                if (id !== undefined) void loadPlatformCard(id);
+                void refreshCase();
               }}
             >
               Обновить

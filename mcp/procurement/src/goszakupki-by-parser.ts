@@ -12,6 +12,13 @@ import {
   type ProcedureStatus,
   type SourceLot,
 } from "@procurement/contracts";
+import {
+  isGiasHost,
+  isGoszakupkiHost,
+  isPublicDocumentationUrl,
+  isYandexDiskHost,
+  looksLikeDocumentationFileName,
+} from "@procurement/domain";
 import * as cheerio from "cheerio";
 import type { Cheerio, CheerioAPI } from "cheerio";
 import type { AnyNode } from "domhandler";
@@ -456,28 +463,98 @@ function parseDocuments(
   cardUrl: string,
   discoveredAt: IsoDateTime,
 ): SourceDocument[] {
-  return $("a.modal-link")
-    .toArray()
-    .map((element) => {
-      const link = $(element);
-      const name = text(link);
-      const href = link.attr("href");
-      if (name.length === 0 || href === undefined) return undefined;
-      const metadataUrl = new URL(href, cardUrl);
-      const sourceFileKey = metadataUrl.searchParams.get("f") ?? undefined;
-      const downloadUrl = new URL(metadataUrl);
-      downloadUrl.searchParams.set("download", "1");
-      return SourceDocument.parse({
-        name,
-        sourceUrl: metadataUrl.href,
-        metadataUrl: metadataUrl.href,
-        downloadUrl: downloadUrl.href,
-        mimeType: mimeTypeFromName(name),
-        ...(sourceFileKey === undefined ? {} : { sourceFileKey }),
-        discoveredAt,
+  const documents: SourceDocument[] = [];
+  const seen = new Set<string>();
+  const add = (document: SourceDocument): void => {
+    if (seen.has(document.sourceUrl)) return;
+    seen.add(document.sourceUrl);
+    documents.push(document);
+  };
+
+  $("a.modal-link[href]").each((_index, element) => {
+    const parsed = documentFromAnchor($(element), cardUrl, discoveredAt);
+    if (parsed !== undefined) add(parsed);
+  });
+
+  $("#print-area .panel-heading").each((_index, heading) => {
+    if (!text($(heading)).toLocaleLowerCase("ru-RU").includes("документ")) return;
+    $(heading)
+      .closest(".panel")
+      .find("a[href]")
+      .each((_linkIndex, element) => {
+        const parsed = documentFromAnchor($(element), cardUrl, discoveredAt);
+        if (parsed !== undefined) add(parsed);
       });
-    })
-    .filter((document) => document !== undefined);
+  });
+
+  $("#print-area a[href]").each((_index, element) => {
+    const href = $(element).attr("href");
+    if (href === undefined) return;
+    let absolute: URL;
+    try {
+      absolute = new URL(href, cardUrl);
+    } catch {
+      return;
+    }
+    if (isGoszakupkiHost(absolute.hostname) || isGiasHost(absolute.hostname)) return;
+    if (!isPublicDocumentationUrl(absolute)) return;
+    const label = text($(element));
+    if (
+      !isYandexDiskHost(absolute.hostname) &&
+      !looksLikeDocumentationFileName(absolute.pathname) &&
+      !looksLikeDocumentationFileName(label)
+    ) {
+      return;
+    }
+    const parsed = documentFromAnchor($(element), cardUrl, discoveredAt);
+    if (parsed !== undefined) add(parsed);
+  });
+
+  return documents;
+}
+
+function documentFromAnchor(
+  link: Cheerio<AnyNode>,
+  cardUrl: string,
+  discoveredAt: IsoDateTime,
+): SourceDocument | undefined {
+  const href = link.attr("href");
+  if (href === undefined) return undefined;
+  let absolute: URL;
+  try {
+    absolute = new URL(href, cardUrl);
+  } catch {
+    return undefined;
+  }
+  const label = text(link);
+  if (isGoszakupkiHost(absolute.hostname)) {
+    const name = label.length > 0 ? label : (absolute.pathname.split("/").at(-1) ?? "document");
+    if (name.length === 0) return undefined;
+    const sourceFileKey = absolute.searchParams.get("f") ?? undefined;
+    const downloadUrl = new URL(absolute);
+    downloadUrl.searchParams.set("download", "1");
+    return SourceDocument.parse({
+      name,
+      sourceUrl: absolute.href,
+      metadataUrl: absolute.href,
+      downloadUrl: downloadUrl.href,
+      mimeType: mimeTypeFromName(name),
+      ...(sourceFileKey === undefined ? {} : { sourceFileKey }),
+      discoveredAt,
+    });
+  }
+  if (!isPublicDocumentationUrl(absolute) || isGiasHost(absolute.hostname)) return undefined;
+  const name =
+    label.length > 0
+      ? label
+      : (absolute.pathname.split("/").filter(Boolean).at(-1) ?? absolute.hostname);
+  return SourceDocument.parse({
+    name,
+    sourceUrl: absolute.href,
+    downloadUrl: absolute.href,
+    mimeType: mimeTypeFromName(name),
+    discoveredAt,
+  });
 }
 
 function parseHistory($: CheerioAPI, cardUrl: string) {
@@ -579,6 +656,8 @@ function mimeTypeFromName(name: string): string {
     jpg: "image/jpeg",
     png: "image/png",
     zip: "application/zip",
+    rar: "application/vnd.rar",
+    "7z": "application/x-7z-compressed",
   };
   return extension === undefined ? "application/octet-stream" : (known[extension] ?? "application/octet-stream");
 }

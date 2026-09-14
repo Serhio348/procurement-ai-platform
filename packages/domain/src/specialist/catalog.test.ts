@@ -201,6 +201,12 @@ describe("SpecialistCatalog", () => {
     expect(catalog.procurement(card.id)).toBeUndefined();
     expect(catalog.procurements().some((item) => item.id === card.id)).toBe(false);
     expect(catalog.storedCases()).toEqual([]);
+
+    // A later upsert of the same id must not put the purged case back into
+    // persist: the specialist would find it in trash again after a reload.
+    catalog.upsertCase(card);
+    expect(catalog.storedCases()).toEqual([]);
+    expect(catalog.procurement(card.id)).toBeUndefined();
   });
 
   it("does not treat inbox stubs as stored cases for persist", () => {

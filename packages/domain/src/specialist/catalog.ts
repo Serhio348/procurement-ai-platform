@@ -39,6 +39,10 @@ export class SpecialistCatalog {
   }
 
   upsertCase(card: SpecialistProcurementCardValue): void {
+    // A case purged in this process must not come back through a later upsert:
+    // persist would write it again and the specialist would find it in trash
+    // after a reload. A genuinely re-found procedure arrives with a new id.
+    if (this.#pruned.has(card.id)) return;
     const previous = this.#cases.get(card.id);
     const parsed = SpecialistProcurementCard.parse(card);
     this.#cases.set(

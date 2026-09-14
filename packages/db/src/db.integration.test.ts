@@ -212,6 +212,9 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(loadedCases.map((item) => item.sourceProcurementId)).toContain("auction/901-persist");
     expect(listed.items.some((item) => item.id === card.id)).toBe(true);
     expect(mine.items.some((item) => item.id === card.id)).toBe(false);
+    // A tile page must not carry the TOASTed parts of the card.
+    expect(listed.items.find((item) => item.id === card.id)?.documents).toEqual([]);
+    expect(byId?.documents.map((item) => item.name)).toEqual(["ТЗ.pdf"]);
     expect(byId?.sourceProcurementId).toBe(card.sourceProcurementId);
     expect(versions[0]?.hash).toBe(hash);
     expect(versions[0]?.storageKey).toBe(blobStorageKey(hash));

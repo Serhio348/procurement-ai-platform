@@ -415,7 +415,15 @@ export function createSpecialistStore(db: Database) {
           .from(workspaceProcurements)
           .where(and(...filters));
         const rows = await tx
-          .select()
+          .select({
+            id: workspaceProcurements.id,
+            procurementId: workspaceProcurements.procurementId,
+            triage: workspaceProcurements.triage,
+            foundAs: workspaceProcurements.foundAs,
+            archived: workspaceProcurements.archived,
+            lastSeenAt: workspaceProcurements.lastSeenAt,
+            card: tileCardExpression(),
+          })
           .from(workspaceProcurements)
           .where(and(...filters))
           .orderBy(desc(workspaceProcurements.updatedAt), asc(workspaceProcurements.id))
@@ -624,6 +632,22 @@ export function createSpecialistStore(db: Database) {
               inArray(workspaceProcurements.id, idList),
             ),
           );
+        // A policy that hides the row makes DELETE a silent no-op: Postgres
+        // reports success, the API answers 204 and the card returns on reload.
+        const left = await tx
+          .select({ id: workspaceProcurements.id })
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              inArray(workspaceProcurements.id, idList),
+            ),
+          );
+        if (left.length > 0) {
+          throw new Error(
+            `workspace_procurements delete removed nothing: ${left.map((row) => row.id).join(", ")}`,
+          );
+        }
       });
     },
 
@@ -725,7 +749,21 @@ export function toIsoDateTime(value: string | Date): string {
   return parsed.toISOString();
 }
 
-type WorkspaceCaseRow = typeof workspaceProcurements.$inferSelect;
+type WorkspaceCaseRow = Pick<
+  typeof workspaceProcurements.$inferSelect,
+  "id" | "procurementId" | "triage" | "foundAs" | "archived" | "lastSeenAt"
+> & { card: unknown };
+
+/**
+ * Tile lists must not pull the TOASTed parts of `card`: a page of 100 archived
+ * cases carries whole ТЗ extracts and raw platform dumps. The detail route
+ * reads the row in full.
+ */
+function tileCardExpression() {
+  return sql<unknown>`${workspaceProcurements.card} #- '{documents}'::text[] #- '{actions}'::text[] #- '{missing}'::text[] #- '{extractNotes}'::text[] #- '{extractPreview}'::text[] #- '{reportMarkdown}'::text[] #- '{termsDetail}'::text[] #- '{paymentQuote}'::text[] #- '{sourceCard,parties}'::text[] #- '{sourceCard,lots}'::text[] #- '{sourceCard,rawFields}'::text[] #- '{sourceCard,externalIds}'::text[]`.as(
+    "card",
+  );
+}
 
 function parseCaseRow(row: WorkspaceCaseRow): SpecialistProcurementCardValue | undefined {
   const parsed = SpecialistProcurementCard.safeParse(row.card);

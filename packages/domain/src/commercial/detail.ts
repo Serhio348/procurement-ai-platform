@@ -38,11 +38,19 @@ export function formatCommercialDetailLines(
   if (kinds.length === 1 && kind !== undefined && isPaymentKind(kind)) {
     lines.push(paymentKindLabel(kind));
   }
-  if (paymentDays.length === 1) {
-    lines.push(`Срок оплаты: ${formatDayCount(paymentDays[0]!, unitForNumber(claims, "commercial.payment_deadline_days", paymentDays[0]!))}`);
+  if (paymentDays.length >= 1) {
+    lines.push(
+      `Срок оплаты: ${paymentDays
+        .map((value) => formatDayCount(value, unitForNumber(claims, "commercial.payment_deadline_days", value)))
+        .join("; ")}`,
+    );
   }
-  if (deliveryDays.length === 1) {
-    lines.push(`Срок поставки: ${formatDayCount(deliveryDays[0]!, unitForNumber(claims, "commercial.delivery_period_days", deliveryDays[0]!))}`);
+  if (deliveryDays.length >= 1) {
+    lines.push(
+      `Срок поставки: ${deliveryDays
+        .map((value) => formatDayCount(value, unitForNumber(claims, "commercial.delivery_period_days", value)))
+        .join("; ")}`,
+    );
   }
   if (warranty.length === 1) {
     lines.push(`Гарантия: ${String(warranty[0])} мес.`);
@@ -100,6 +108,9 @@ function isPaymentKind(value: string): value is PaymentKind {
 
 function lineCoversNote(line: string, note: string): boolean {
   const folded = note.toLowerCase();
+  // A note that carries the document's own heading or a «– detail» tail is
+  // more informative than the compact claim line — keep it.
+  if (/дн\p{L}*\s*[–—]/u.test(folded) || folded.startsWith("срок (")) return false;
   const hasDuration = /в\s+течени|нескольк|\d+\s*дн/u.test(folded);
   if (line.startsWith("Оплата:") && /по факту поставк|условия оплаты/u.test(folded) && !hasDuration) {
     return true;

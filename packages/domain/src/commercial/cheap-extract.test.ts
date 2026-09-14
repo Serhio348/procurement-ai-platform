@@ -226,30 +226,43 @@ describe("cheapExtractCommercialClaims", () => {
     expect(cheapExtractCommercialNotes({ text }).some((note) => note.startsWith("Срок:"))).toBe(false);
   });
 
-  it("labels works and bid-validity «в течение N дней» instead of a bare «Срок»", () => {
+  it("keeps works terms and drops bid-validity and unrelated «в течение N дней»", () => {
     const text =
       "Подрядчик выполняет работы в течение 5 рабочих дней.\n" +
-      "Предложение участника должно быть действительным в течение 3 рабочих дней.";
+      "Предложение участника должно быть действительным в течение 3 рабочих дней.\n" +
+      "Победитель подписывает договор в течение 4 рабочих дней.";
     const notes = cheapExtractCommercialNotes({ text });
     expect(notes).toContain("Срок выполнения работ/услуг: в течение 5 рабочих дней.");
-    expect(notes).toContain("Срок действия предложения: в течение 3 рабочих дней.");
-    expect(notes.some((note) => note.startsWith("Срок:"))).toBe(false);
+    expect(notes.some((note) => note.includes("3 рабочих дней"))).toBe(false);
+    expect(notes.some((note) => note.includes("4 рабочих дней"))).toBe(false);
   });
 
-  it("labels an unknown term by its topic, not by a chopped clause", () => {
-    const notes = cheapExtractCommercialNotes({
-      text: "Победитель подписывает договор в течение 5 рабочих дней.",
+  it("reads «со дня заключения договора» as a supply anchor, not contract signing", () => {
+    const claims = cheapExtractCommercialClaims({
+      hash,
+      page: 1,
+      text: "Срок поставки товара (оборудования):\nв течение 30 рабочих дней со дня заключения (подписания) настоящего договора.",
     });
-    expect(notes).toContain("Срок подписания договора: в течение 5 рабочих дней.");
+    expect(claims).toEqual([
+      expect.objectContaining({
+        key: "commercial.delivery_period_days",
+        value: 30,
+        unit: "working_days",
+      }),
+    ]);
   });
 
-  it("uses the document's own heading when it is available", () => {
+  it("reads bare «N дней» values from a tender table cell under the heading", () => {
     const text =
       "Срок (сроки) поставки товаров (выполнения работ, оказания услуг)\n" +
-      "производится в течение 5 рабочих дней.";
+      "30 рабочих дней – изготовление, доставка и разгрузка средствами Поставщика.\n" +
+      "10 рабочих дней – монтаж и окончательная сборка оборудования.";
     const notes = cheapExtractCommercialNotes({ text });
     expect(notes).toContain(
-      "Срок (сроки) поставки товаров (выполнения работ, оказания услуг): в течение 5 рабочих дней.",
+      "Срок (сроки) поставки товаров (выполнения работ, оказания услуг): 30 рабочих дней – изготовление, доставка и разгрузка средствами Поставщика.",
+    );
+    expect(notes).toContain(
+      "Срок (сроки) поставки товаров (выполнения работ, оказания услуг): 10 рабочих дней – монтаж и окончательная сборка оборудования.",
     );
   });
 

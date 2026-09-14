@@ -54,6 +54,7 @@ export function cheapExtractCommercialClaims(page: {
     ...extractZeroAdvance(page),
     ...extractOnDelivery(page),
     ...extractWithinDuration(page).claims,
+    ...extractHeadingDurations(page).claims,
   ]);
 }
 
@@ -73,15 +74,22 @@ const commercialNoteSource =
   "(?:срок(?:и)?\\s+поставки|условия оплаты|условия доставки|место поставки|срок(?:и)?\\s+выполнения\\p{L}*|срок(?:и)?\\s+оказания\\p{L}*|срок\\s+действия\\s+(?:предложени|заявк)\\p{L}*)\\s*:\\s*[^\\n;]{3,160}";
 
 /** Labeled lines from TZ/request text. The match is the quote; no numbers invented. */
-export function cheapExtractCommercialNotes(page: { text: string }): string[] {
+export function cheapExtractCommercialNotes(pageText: { text: string }): string[] {
   const regex = new RegExp(commercialNoteSource, "giu");
   const notes: string[] = [];
-  for (const match of page.text.matchAll(regex)) {
+  for (const match of pageText.text.matchAll(regex)) {
     const quote = match[0]?.trim().replace(/\s+/g, " ");
     if (quote === undefined || quote.length === 0 || notes.includes(quote)) continue;
     notes.push(quote);
   }
-  for (const note of extractWithinDuration({ hash: "a".repeat(64), page: 1, text: page.text }).notes) {
+  const page = { hash: "a".repeat(64), page: 1, text: pageText.text };
+  for (const note of extractWithinDuration(page).notes) {
+    if (!notes.includes(note)) notes.push(note);
+  }
+  for (const note of extractHeadingDurations(page).notes) {
+    if (!notes.includes(note)) notes.push(note);
+  }
+  for (const note of extractInstallmentNotes(pageText)) {
     if (!notes.includes(note)) notes.push(note);
   }
   return notes;
@@ -162,18 +170,22 @@ function extractWithinDuration(page: {
     const nearLeft = lastClause(left);
     const nearRight = firstClause(right);
     const kind = classifyWithinDuration(nearLeft, nearRight, left);
+    // The specialist asked for supply and payment terms only — bid validity,
+    // bank details, contract signing and unlabeled durations are noise.
+    if (kind === "note" || kind === "bidValidity") continue;
+    const label = durationHeading(left)?.label ?? withinTermLabel(kind);
     const several = match[1] !== undefined;
     const raw = match[2];
     if (several) {
-      const note = `${withinNoteLabel(kind, left, nearLeft, nearRight)}: в течение нескольких${severalDayFlavor(phrase)} дней.`;
+      const note = `${label}: в течение нескольких${severalDayFlavor(phrase)} дней.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
     if (raw === undefined) continue;
     const value = days(raw);
     if (value === undefined) continue;
-    if (kind !== "payment" && kind !== "delivery") {
-      const note = `${withinNoteLabel(kind, left, nearLeft, nearRight)}: ${phrase}.`;
+    if (kind === "work") {
+      const note = `${label}: ${phrase}.`;
       if (!notes.includes(note)) notes.push(note);
       continue;
     }
@@ -190,6 +202,81 @@ function extractWithinDuration(page: {
     );
   }
   return { claims, notes };
+}
+
+function withinTermLabel(kind: WithinKind): string {
+  if (kind === "payment") return "Срок оплаты";
+  if (kind === "delivery") return "Срок поставки";
+  return "Срок выполнения работ/услуг";
+}
+
+// Tender tables put the value right after the heading without «в течение»:
+// «Срок (сроки) поставки …» then «30 рабочих дней – изготовление, доставка…».
+const bareDaysSource =
+  "(\\d{1,3})(?:\\s*\\([^)]{0,40}\\))?\\s*(?:рабоч|календарн|банковск)\\p{L}*\\s*дн\\p{L}*";
+
+function extractHeadingDurations(page: {
+  hash: string;
+  page: number;
+  text: string;
+}): { claims: CommercialClaimValue[]; notes: string[] } {
+  const claims: CommercialClaimValue[] = [];
+  const notes: string[] = [];
+  const regex = new RegExp(bareDaysSource, "giu");
+  for (const heading of allDurationHeadings(page.text)) {
+    const segment = page.text.slice(heading.end, heading.end + 350);
+    for (const match of segment.matchAll(regex)) {
+      const index = match.index ?? 0;
+      // «в течение N дней» is already handled by extractWithinDuration.
+      if (/течени\p{L}*\s*$/iu.test(segment.slice(Math.max(0, index - 12), index))) continue;
+      const raw = match[1];
+      if (raw === undefined) continue;
+      const value = days(raw);
+      if (value === undefined) continue;
+      const tail = segment
+        .slice(index + match[0].length)
+        .match(/^\s*[–—-][^\n]{0,110}/u)?.[0];
+      const phrase = `${match[0].trim()}${tail === undefined ? "" : ` ${tail.trim()}`}`.replace(
+        /[.\s]+$/u,
+        "",
+      );
+      const note = `${heading.label}: ${phrase}.`;
+      if (!notes.includes(note)) notes.push(note);
+      if (heading.kind === "payment" || heading.kind === "delivery") {
+        claims.push(
+          CommercialClaim.parse({
+            key:
+              heading.kind === "delivery"
+                ? "commercial.delivery_period_days"
+                : "commercial.payment_deadline_days",
+            value,
+            unit: dayCountUnitFromQuote(match[0]),
+            confidence: 0.9,
+            hash: page.hash,
+            page: page.page,
+            quote: phrase,
+          }),
+        );
+      }
+    }
+  }
+  return { claims, notes };
+}
+
+const installmentSource =
+  "(?:поставк\\p{L}*|оплат\\p{L}*)\\s+(?:частями|этапами|по\\s+этапам|по\\s+графику)|рассрочк\\p{L}*|оплат\\p{L}*\\s+в\\s+рассрочку";
+
+/** «Поставка частями» / «оплата по этапам» — kept as a verbatim quote. */
+function extractInstallmentNotes(page: { text: string }): string[] {
+  const regex = new RegExp(installmentSource, "giu");
+  const notes: string[] = [];
+  for (const match of page.text.matchAll(regex)) {
+    const quote = match[0]?.trim().replace(/\s+/g, " ");
+    if (quote === undefined || quote.length === 0) continue;
+    const note = `${quote[0]?.toLocaleUpperCase("ru-BY")}${quote.slice(1)}.`;
+    if (!notes.includes(note)) notes.push(note);
+  }
+  return notes;
 }
 
 export function dayCountUnitFromQuote(quote: string): string {
@@ -223,7 +310,8 @@ function classifyWithinDuration(nearLeft: string, nearRight: string, left: strin
   if (looksLikePaymentDeadline(nearLeft) || looksLikePaymentDeadline(nearRight)) return "payment";
   if (looksLikeDeliveryPeriod(nearLeft) || looksLikeDeliveryPeriod(nearRight)) return "delivery";
   if (looksLikeWorksPeriod(nearLeft) || looksLikeWorksPeriod(nearRight)) return "work";
-  if (looksLikeContractStart(nearRight) && !looksLikePaymentDeadline(nearLeft)) return "delivery";
+  // «со дня заключения/поставки» is the anchor of a supply term, not a topic.
+  if (looksLikeTermAnchor(nearRight) && !looksLikePaymentDeadline(nearLeft)) return "delivery";
   const heading = durationHeading(left);
   if (heading !== undefined) return heading.kind;
   if (looksLikePaymentDeadline(left) && !looksLikeDeliveryPeriod(left)) return "payment";
@@ -231,63 +319,53 @@ function classifyWithinDuration(nearLeft: string, nearRight: string, left: strin
   return "note";
 }
 
-function withinNoteLabel(kind: WithinKind, left: string, nearLeft: string, nearRight: string): string {
-  if (kind === "payment") return "Срок оплаты";
-  if (kind === "delivery") return "Срок поставки";
-  const heading = durationHeading(left);
-  if (heading !== undefined) return heading.label;
-  if (kind === "work") return "Срок выполнения работ/услуг";
-  if (kind === "bidValidity") return "Срок действия предложения";
-  const topic = topicLabel(nearLeft, nearRight);
-  return topic ?? "Срок";
-}
-
-function topicLabel(nearLeft: string, nearRight: string): string | undefined {
-  const context = `${nearLeft}\n${nearRight}`.toLocaleLowerCase("ru-BY");
-  if (context.includes("банковск") || context.includes("реквизит")) {
-    return "Срок предоставления банковских реквизитов";
-  }
-  if (context.includes("обеспечени")) return "Срок внесения обеспечения";
-  if (context.includes("подпис") && context.includes("договор")) {
-    return "Срок подписания договора";
-  }
-  if (context.includes("страхов")) return "Срок оформления страхования";
-  if (context.includes("аккредитив")) return "Срок открытия аккредитива";
-  if (context.includes("реестр")) return "Срок внесения в реестр поставщиков";
-  return undefined;
-}
-
 // Tender documents use a fixed left-column heading like
 // «Срок (сроки) поставки товаров (выполнения работ, оказания услуг)».
 // When present, it is much more honest than a chopped clause tail.
-function durationHeading(left: string): { label: string; kind: WithinKind } | undefined {
-  const patterns = [
-    /Срок\s*\(\s*сроки\s*\)\s*поставки\s+товаров\s*\(\s*выполнения\s+работ\s*,?\s*оказания\s+услуг\s*\)/giu,
-    /Срок\s*\(\s*сроки\s*\)\s*поставки\s+товаров/giu,
-    /Срок\s*\(\s*сроки\s*\)\s*поставки\s*\(\s*выполнения\s+работ\s*,?\s*оказания\s+услуг\s*\)/giu,
-    /Срок\s*\(\s*сроки\s*\)\s*(?:выполнения\s+работ\s*,?\s*)?оказания\s+услуг/giu,
-    /Условия\s+оплаты/giu,
-    /Срок\s+оплаты/giu,
-    /Срок\s+действия\s+предложени\p{L}*/giu,
-  ];
-  const matches = patterns.flatMap((pattern) => [...left.matchAll(pattern)]);
-  const last = matches
-    .sort((a, b) => {
-      const ai = a.index ?? 0;
-      const bi = b.index ?? 0;
-      if (ai !== bi) return ai - bi;
-      return (a[0]?.length ?? 0) - (b[0]?.length ?? 0);
-    })
-    .at(-1)?.[0];
-  if (last === undefined) return undefined;
-  const label = last.trim().replace(/[\s.:;]+$/u, "");
-  if (label.length < 3) return undefined;
+const durationHeadingPatterns = [
+  /Срок\s*\(\s*сроки\s*\)\s*поставки\s+товаров\s*\(\s*выполнения\s+работ\s*,?\s*оказания\s+услуг\s*\)/giu,
+  /Срок\s*\(\s*сроки\s*\)\s*поставки\s+товаров/giu,
+  /Срок\s*\(\s*сроки\s*\)\s*поставки\s*\(\s*выполнения\s+работ\s*,?\s*оказания\s+услуг\s*\)/giu,
+  /Срок\s*\(\s*сроки\s*\)\s*(?:выполнения\s+работ\s*,?\s*)?оказания\s+услуг/giu,
+  /Срок\s+поставки\s+товар\p{L}*\s*\([^)]{0,60}\)/giu,
+  /Условия\s+оплаты/giu,
+  /Срок\s+оплаты/giu,
+  /Срок\s+поставки/giu,
+];
+
+function headingKindFor(label: string): WithinKind {
   const lower = label.toLocaleLowerCase("ru-BY");
-  if (/оплат|расч/.test(lower)) return { label, kind: "payment" };
+  if (/оплат|расч/.test(lower)) return "payment";
   if (/поставк|изготовлен/.test(lower) && !/выполнени|оказани/.test(lower)) {
-    return { label, kind: "delivery" };
+    return "delivery";
   }
-  return { label, kind: "work" };
+  return "work";
+}
+
+function allDurationHeadings(
+  text: string,
+): { index: number; end: number; label: string; kind: WithinKind }[] {
+  const byIndex = new Map<number, { index: number; end: number; label: string; kind: WithinKind }>();
+  for (const pattern of durationHeadingPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const index = match.index ?? 0;
+      const label = match[0].trim().replace(/[\s.:;]+$/u, "");
+      if (label.length < 3) continue;
+      const previous = byIndex.get(index);
+      if (previous !== undefined && previous.label.length >= label.length) continue;
+      byIndex.set(index, {
+        index,
+        end: index + match[0].length,
+        label,
+        kind: headingKindFor(label),
+      });
+    }
+  }
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+}
+
+function durationHeading(left: string): { label: string; kind: WithinKind } | undefined {
+  return allDurationHeadings(left).at(-1);
 }
 
 function lastClause(left: string): string {
@@ -316,12 +394,14 @@ function looksLikeDeliveryPeriod(text: string): boolean {
   );
 }
 
-function looksLikeContractStart(text: string): boolean {
-  return /с\s+(?:даты|момента)\s+(?:заключен|подписания\s+договор)/iu.test(text);
+function looksLikeTermAnchor(text: string): boolean {
+  return /с[о]?\s+(?:даты|дня|момента)\s+(?:заключени|подписани|передачи|получени|поставк|отгрузк)/iu.test(
+    text,
+  );
 }
 
 function looksLikeWorksPeriod(text: string): boolean {
-  return /выполнени|выполнить|оказани|оказать|работ|услуг|монтаж|пусконалад|ввод\s+в\s+эксплуатац/iu.test(
+  return /выполнени|выполнить|оказани|оказать|работ|услуг|монтаж|сборк|пусконалад|ввод\s+в\s+эксплуатац/iu.test(
     text,
   );
 }

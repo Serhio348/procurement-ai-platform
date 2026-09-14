@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
 import { buildSpecialistApi } from "./app.js";
 import { putBlob } from "./blobs.js";
+import { createMemoryCabinetRegistry } from "./cabinets.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
 
 const tmpDirs: string[] = [];
@@ -1681,6 +1682,45 @@ describe("specialist API", () => {
     expect(purged.statusCode).toBe(204);
     expect(persistCases).not.toHaveBeenCalled();
     expect(persistInbox).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("does not hide a trash purge when the store cannot delete the row", async () => {
+    const cabinets = createMemoryCabinetRegistry();
+    cabinets.removeCases = async () => {
+      throw new Error("RLS blocked cascade");
+    };
+    const app = await buildSpecialistApi({
+      cabinets,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/purge-fail-1",
+            url: "https://goszakupki.by/auction/view/purge-fail-1",
+            title: "Кабель не удалился",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "reject" },
+    });
+    const purged = await app.inject({ method: "DELETE", url: `/api/procurements/${id}` });
+    expect(purged.statusCode).toBe(500);
     await app.close();
   });
 

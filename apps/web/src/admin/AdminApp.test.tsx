@@ -47,13 +47,28 @@ describe("AdminApp", () => {
     expect(screen.queryByText("Иван")).toBeNull();
     expect(screen.queryByRole("button", { name: "Одобрить" })).toBeNull();
   });
+
+  it("opens another specialist cabinet as a read-only list", async () => {
+    const user = userEvent.setup();
+    stubAdminFetch([]);
+    renderAdmin("/admin/access");
+
+    expect(await screen.findByText("Иван")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "Кабинеты" }));
+    expect(await screen.findByText(/Мои закупки 1/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Одобрить" })).toBeNull();
+    await user.click(screen.getByRole("link", { name: "Открыть" }));
+    expect(await screen.findByRole("link", { name: "Кабель для кабинета" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Участвовать" })).toBeNull();
+    expect(screen.getByRole("link", { name: /Все кабинеты/ })).toBeTruthy();
+  });
 });
 
 function renderAdmin(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/admin/:pane?" element={<AdminApp />} />
+        <Route path="/admin/:pane?/:userId?" element={<AdminApp />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -90,6 +105,42 @@ function stubAdminFetch(approvals: unknown[]) {
     }
     if (String(url) === "/api/admin/users") {
       return json({ items: [pending], pendingCount: 1 });
+    }
+    if (String(url) === "/api/admin/cabinets") {
+      return json({
+        items: [
+          {
+            userId: "user-2",
+            email: "ivan@example.com",
+            name: "Иван",
+            role: "specialist",
+            accessStatus: "active",
+            workspaceId: "00000000-0000-4000-8000-000000000501",
+            profileCount: 1,
+            mineCount: 1,
+            archiveCount: 0,
+            trashCount: 0,
+          },
+        ],
+      });
+    }
+    if (String(url).startsWith("/api/admin/users/user-2/procurements")) {
+      return json({
+        items: [
+          {
+            id: "00000000-0000-4000-8000-000000000502",
+            title: "Кабель для кабинета",
+            status: "accepting_bids",
+            statusLabel: "приём предложений",
+            url: "https://goszakupki.by/auction/view/admin-view-1",
+            sourceProcurementId: "auction/admin-view-1",
+            triage: "participate",
+          },
+        ],
+        total: 1,
+        tab: "all",
+        hasMore: false,
+      });
     }
     if (String(url) === "/api/admin/journal") {
       return json({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AuthSignUpWrite, AuthSessionUser } from "./auth.js";
+import { AdminCabinetSummary, AuthSignUpWrite, AuthSessionUser } from "./auth.js";
 
 describe("AuthSignUpWrite", () => {
   it("keeps email, name and password and drops a client-supplied role", () => {
@@ -34,5 +34,23 @@ describe("AuthSessionUser", () => {
     expect(user.role).toBeNull();
     expect(user.accessStatus).toBe("pending");
     expect(user.pendingUserCount).toBeUndefined();
+  });
+});
+
+describe("AdminCabinetSummary", () => {
+  it("keeps a cabinet readable without a live session or workspace id", () => {
+    const summary = AdminCabinetSummary.parse({
+      userId: "user-1",
+      email: "user@example.com",
+      name: "Иван",
+      role: "specialist",
+      accessStatus: "active",
+      profileCount: 1,
+      mineCount: 2,
+      archiveCount: 0,
+      trashCount: 3,
+    });
+    expect(summary.workspaceId).toBeUndefined();
+    expect(summary.lastActiveAt).toBeUndefined();
   });
 });

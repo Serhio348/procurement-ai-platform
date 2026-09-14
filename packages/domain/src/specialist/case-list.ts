@@ -59,6 +59,26 @@ export function caseMatchesListTab(
   }
 }
 
+export interface CabinetCaseCounts {
+  mineCount: number;
+  archiveCount: number;
+  trashCount: number;
+}
+
+export function countCabinetCases(
+  cards: readonly Pick<SpecialistProcurementCard, "triage" | "archived">[],
+): CabinetCaseCounts {
+  let mineCount = 0;
+  let archiveCount = 0;
+  let trashCount = 0;
+  for (const card of cards) {
+    if (caseMatchesListTab(card, "all")) mineCount += 1;
+    if (caseMatchesListTab(card, "archive")) archiveCount += 1;
+    if (caseMatchesListTab(card, "trash")) trashCount += 1;
+  }
+  return { mineCount, archiveCount, trashCount };
+}
+
 export function pageListedCases(
   cards: readonly SpecialistProcurementCard[],
   query: SpecialistCaseListQuery = {},

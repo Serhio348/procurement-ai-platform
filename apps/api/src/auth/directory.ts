@@ -31,6 +31,8 @@ export interface AuthDirectory {
   countUsers: () => Promise<number>;
   bootstrapAdmin: (email: string, password: string, name: string) => Promise<AuthRecord | undefined>;
   listUsers: () => Promise<AuthRecord[]>;
+  /** Latest `last_seen_at` among sessions that are still open. */
+  listLatestSeen: () => Promise<ReadonlyMap<string, string>>;
   pendingCount: () => Promise<number>;
   approve: (id: string, role: SpecialistRole) => Promise<AuthRecord | undefined>;
   reject: (id: string) => Promise<AuthRecord | undefined>;

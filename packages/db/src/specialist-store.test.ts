@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blobStorageKey,
+  caseListTimeShouldBump,
   jsonbSafe,
   postgresErrorMessage,
   toIsoDateTime,
@@ -77,6 +78,24 @@ describe("uniqueBySource", () => {
     });
     expect(uniqueBySource([stub, rejected])).toEqual([rejected]);
     expect(uniqueBySource([rejected, stub])).toEqual([rejected]);
+  });
+});
+
+describe("caseListTimeShouldBump", () => {
+  it("does not reshuffle the SQL list when persist only rewrites the same decision", () => {
+    const previous = { triage: "participate", archived: false, foundAs: "search" };
+    expect(caseListTimeShouldBump(previous, { triage: "participate", foundAs: "search" })).toBe(
+      false,
+    );
+    expect(caseListTimeShouldBump(previous, { triage: "monitor", foundAs: "search" })).toBe(true);
+    expect(
+      caseListTimeShouldBump(previous, {
+        triage: "participate",
+        archived: true,
+        foundAs: "search",
+      }),
+    ).toBe(true);
+    expect(caseListTimeShouldBump(undefined, { triage: "participate" })).toBe(true);
   });
 });
 

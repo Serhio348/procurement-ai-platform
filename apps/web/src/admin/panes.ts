@@ -1,6 +1,6 @@
 import type { AdminJournalEntry } from "@procurement/contracts";
 
-export const ADMIN_PANES = ["access", "presence", "discovery", "errors", "journal"] as const;
+export const ADMIN_PANES = ["access", "cabinets", "presence", "discovery", "errors", "journal"] as const;
 
 export type AdminPane = (typeof ADMIN_PANES)[number];
 
@@ -10,12 +10,16 @@ export function parseAdminPane(value: string | undefined): AdminPane | undefined
   return ADMIN_PANES.find((pane) => pane === value);
 }
 
-export function adminPanePath(pane: AdminPane): string {
+export function adminPanePath(pane: AdminPane, userId?: string): string {
+  if (pane === "cabinets" && userId !== undefined && userId.length > 0) {
+    return `/admin/cabinets/${userId}`;
+  }
   return `/admin/${pane}`;
 }
 
 export function adminPaneLabel(pane: AdminPane): string {
   if (pane === "access") return "Доступ";
+  if (pane === "cabinets") return "Кабинеты";
   if (pane === "presence") return "Входы";
   if (pane === "discovery") return "Слежение";
   if (pane === "errors") return "Ошибки";
@@ -24,6 +28,9 @@ export function adminPaneLabel(pane: AdminPane): string {
 
 export function adminPaneLead(pane: AdminPane): string {
   if (pane === "access") return "Заявки на вход и роли. Кто был в системе — во вкладке «Входы».";
+  if (pane === "cabinets") {
+    return "Сводка чужих кабинетов: профили и закупки. Только чтение, решения специалиста не меняются.";
+  }
   if (pane === "presence") {
     return "Кто вошёл и сколько был в системе. Время — до последнего запроса, не до закрытия вкладки.";
   }
@@ -42,7 +49,7 @@ export function journalForPane(
   items: readonly AdminJournalEntry[],
   pane: AdminPane,
 ): readonly AdminJournalEntry[] {
-  if (pane === "access") return [];
+  if (pane === "access" || pane === "cabinets") return [];
   if (pane === "presence") return items.filter(isPresenceEntry);
   if (pane === "discovery") return items.filter((item) => item.kind === "discovery");
   if (pane === "errors") return items.filter((item) => item.level === "error");

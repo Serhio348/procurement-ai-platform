@@ -1148,6 +1148,16 @@ h3 {
   padding: 6px 8px;
 }
 
+.admin-actions a.profile-fill {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.admin-workspace .profile-section > p > a {
+  color: #2f3a4a;
+}
+
 .admin-danger {
   font: inherit;
   padding: 6px 10px;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SpecialistProcurementCard } from "@procurement/contracts";
 import { bidsDeadlinePassed, isSingleSourceAfterFailedProcedure } from "@procurement/domain";
@@ -62,35 +62,58 @@ export function MyProcurementsApp({
     { kind: "empty" } | { kind: "purge" | "remove"; id: string } | undefined
   >();
   const [remote, setRemote] = useState<readonly SpecialistProcurementCard[] | undefined>(undefined);
+  const [loadedTab, setLoadedTab] = useState<ListTab | undefined>(undefined);
   const activeTab: ListTab = isTrash ? "trash" : filter;
+  const hasLoad = load !== undefined;
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
-    if (load === undefined) {
+    const loader = loadRef.current;
+    if (loader === undefined) {
       setRemote(undefined);
+      setLoadedTab(undefined);
       return undefined;
     }
     let cancelled = false;
-    void load(activeTab).then((items) => {
-      if (!cancelled) setRemote(items);
-    });
+    void loader(activeTab)
+      .then((items) => {
+        if (!cancelled) {
+          setRemote(items);
+          setLoadedTab(activeTab);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRemote([]);
+          setLoadedTab(activeTab);
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [activeTab, load]);
+  }, [activeTab, hasLoad]);
 
-  const source = remote ?? procurements;
+  // When load() is set, paint only that tab page. Falling back to the parent
+  // catalog mixes archive and search hits into «Все» and reshuffles cards.
+  const waiting = hasLoad && loadedTab !== activeTab;
+  const source = hasLoad
+    ? waiting
+      ? []
+      : (remote ?? [])
+    : (remote ?? procurements);
   const decided = source.filter((item) => isDecided(item) && item.archived !== true);
   const archived = source.filter(
     (item) => item.archived === true && item.triage !== "reject",
   );
   const trashed = source.filter((item) => item.triage === "reject");
-  // When load() is set it already returns the active tab. Filtering that page
-  // again (e.g. Архив against a «Все» response) emptied the list. Still drop
-  // reject so trash cannot leak into Мои закупки.
   const visible = isTrash
     ? trashed
-    : load !== undefined
-      ? source.filter((item) => item.triage !== "reject")
+    : hasLoad
+      ? source.filter((item) =>
+          item.triage !== "reject" &&
+          (filter === "archive" ? item.archived === true : item.archived !== true),
+        )
       : filter === "archive"
         ? archived
         : filter === "all"
@@ -207,7 +230,9 @@ export function MyProcurementsApp({
             ))}
           </div>
         )}
-        {visible.length === 0 ? (
+        {waiting ? (
+          <p className="my-procurements-empty">Загрузка…</p>
+        ) : visible.length === 0 ? (
           <p className="my-procurements-empty">{isTrash ? "Корзина пуста." : EMPTY_TEXT[filter]}</p>
         ) : (
           <ul className="my-procurements-grid">

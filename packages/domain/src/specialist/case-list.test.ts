@@ -1,6 +1,6 @@
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { isConsoleListedCase, pageListedCases } from "./case-list.js";
+import { countCabinetCases, isConsoleListedCase, pageListedCases } from "./case-list.js";
 
 function card(input: {
   id: string;
@@ -93,5 +93,19 @@ describe("pageListedCases", () => {
         (item) => item.id,
       ),
     ).toEqual([trashed.id]);
+  });
+
+  it("counts mine, archive and trash without mixing tabs", () => {
+    const trashed = card({
+      id: "00000000-0000-4000-8000-000000000007",
+      sourceProcurementId: "auction/7",
+      triage: "reject",
+      archived: true,
+    });
+    expect(countCabinetCases([match, watching, archived, trashed])).toEqual({
+      mineCount: 1,
+      archiveCount: 1,
+      trashCount: 1,
+    });
   });
 });

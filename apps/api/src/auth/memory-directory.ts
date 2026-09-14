@@ -182,6 +182,18 @@ export function createMemoryAuthDirectory(now: () => Date = () => new Date()): A
       return listRecords();
     },
 
+    async listLatestSeen() {
+      const latest = new Map<string, string>();
+      const current = now().getTime();
+      for (const session of sessions.values()) {
+        if (session.expiresAt <= current) continue;
+        const at = new Date(session.lastSeenAt).toISOString();
+        const previous = latest.get(session.userId);
+        if (previous === undefined || at > previous) latest.set(session.userId, at);
+      }
+      return latest;
+    },
+
     async pendingCount() {
       return [...users.values()].filter((user) => user.accessStatus === "pending").length;
     },

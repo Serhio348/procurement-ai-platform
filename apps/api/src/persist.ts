@@ -14,6 +14,7 @@ import type { AuthDirectory } from "./auth/directory.js";
 import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
 import {
+  countCabinetCases,
   isWatchedTriage,
   pageListedCases,
   SpecialistCatalog,
@@ -32,6 +33,7 @@ import {
   TEST_WORKSPACE_ID,
   watchOrder,
   type CabinetRegistry,
+  type CabinetSummaryCounts,
   type SpecialistCabinet,
 } from "./cabinets.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -145,17 +147,28 @@ export async function openSpecialistPersistence(options: {
     ids: readonly string[],
     workspaceId = defaultWorkspaceId,
   ): Promise<void> => {
-    if (store === undefined) return;
-    try {
-      await store.removeCases(ids, workspaceId);
-    } catch (error) {
-      options.logger.error("PostgreSQL case removal failed", error);
-      await recordJournal(journal, {
-        kind: "platform",
-        level: "error",
-        message: "Не удалось удалить устаревшие карточки из PostgreSQL.",
-      });
+    if (store !== undefined) {
+      try {
+        await store.removeCases(ids, workspaceId);
+      } catch (error) {
+        options.logger.error("PostgreSQL case removal failed", error);
+        await recordJournal(journal, {
+          kind: "platform",
+          level: "error",
+          message: "Не удалось удалить устаревшие карточки из PostgreSQL.",
+        });
+        throw error;
+      }
     }
+    const wanted = new Set(ids);
+    const cards = await readJson<SpecialistProcurementCardValue[]>(
+      casesFilePath(options.workspacePath, workspaceId),
+      [],
+    );
+    await writeJson(
+      casesFilePath(options.workspacePath, workspaceId),
+      cards.filter((card) => !wanted.has(card.id)),
+    );
   };
 
   const openCabinet = async (workspaceId: string): Promise<SpecialistCabinet> => {
@@ -206,6 +219,10 @@ export async function openSpecialistPersistence(options: {
       if (existing !== undefined) return existing;
       return store.ensurePersonalWorkspace(userId);
     },
+    async findWorkspaceId(userId) {
+      if (store === undefined) return memoryCabinets.findWorkspaceId(userId);
+      return store.personalWorkspaceId(userId);
+    },
     async ensurePersonalWorkspace(userId, name) {
       if (store === undefined) return memoryCabinets.ensurePersonalWorkspace(userId, name);
       return store.ensurePersonalWorkspace(userId, name);
@@ -252,6 +269,18 @@ export async function openSpecialistPersistence(options: {
       }
       const cabinet = await openCabinet(workspaceId);
       return pageListedCases(cabinet.catalog.procurements(), query);
+    },
+    async summarizeCabinets(workspaceIds) {
+      if (store !== undefined) return store.summarizeCabinets(workspaceIds);
+      const summaries = new Map<string, CabinetSummaryCounts>();
+      for (const workspaceId of workspaceIds) {
+        const cabinet = await openCabinet(workspaceId);
+        summaries.set(workspaceId, {
+          profileCount: cabinet.workspace.profiles().length,
+          ...countCabinetCases(cabinet.catalog.storedCases()),
+        });
+      }
+      return summaries;
     },
     async getCase(workspaceId, id) {
       if (store !== undefined) return store.getCase(workspaceId, id);

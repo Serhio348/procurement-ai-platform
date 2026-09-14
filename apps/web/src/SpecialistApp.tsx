@@ -211,9 +211,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const listMine = props.listMine;
   const loadList = useCallback(
     async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
-      const items = (await listMine?.({ tab, limit: 100 })) ?? [];
-      setProcurements((current) => mergeProcurementCards(current, items));
-      return items;
+      return (await listMine?.({ tab, limit: 100 })) ?? [];
     },
     [listMine],
   );
@@ -430,7 +428,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             />
           }
         />
-        <Route path="/admin/:pane?" element={<AdminApp />} />
+        <Route path="/admin/:pane?/:userId?" element={<AdminApp />} />
       </Routes>
     </BrowserRouter>
     </InboxAlertProvider>

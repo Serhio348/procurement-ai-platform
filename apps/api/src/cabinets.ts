@@ -1,4 +1,5 @@
 import {
+  countCabinetCases,
   isWatchedTriage,
   pageListedCases,
   SpecialistCatalog,
@@ -34,8 +35,24 @@ export interface SpecialistCaseListPage {
   total: number;
 }
 
+export interface CabinetSummaryCounts {
+  profileCount: number;
+  mineCount: number;
+  archiveCount: number;
+  trashCount: number;
+}
+
+export const EMPTY_CABINET_COUNTS: CabinetSummaryCounts = {
+  profileCount: 0,
+  mineCount: 0,
+  archiveCount: 0,
+  trashCount: 0,
+};
+
 export interface CabinetRegistry {
   workspaceIdFor: (userId: string) => Promise<string>;
+  /** Looks up a personal workspace without creating one. */
+  findWorkspaceId: (userId: string) => Promise<string | undefined>;
   ensurePersonalWorkspace: (userId: string, name?: string) => Promise<string>;
   open: (workspaceId: string) => Promise<SpecialistCabinet>;
   listIds: () => Promise<string[]>;
@@ -44,6 +61,9 @@ export interface CabinetRegistry {
   removeCases: (workspaceId: string, ids: readonly string[]) => Promise<void>;
   listTrashIds: (workspaceId: string) => Promise<string[]>;
   listCases: (workspaceId: string, query?: SpecialistCaseListQuery) => Promise<SpecialistCaseListPage>;
+  summarizeCabinets: (
+    workspaceIds: readonly string[],
+  ) => Promise<Map<string, CabinetSummaryCounts>>;
   getCase: (workspaceId: string, id: string) => Promise<SpecialistProcurementCardValue | undefined>;
   findCaseBySource: (
     workspaceId: string,
@@ -98,6 +118,10 @@ export function createMemoryCabinetRegistry(options: {
       if (existing !== undefined) return existing;
       return this.ensurePersonalWorkspace(userId);
     },
+    async findWorkspaceId(userId) {
+      if (singleton && options.defaultCabinet !== undefined) return options.defaultCabinet.workspaceId;
+      return byUser.get(userId);
+    },
     async ensurePersonalWorkspace(userId) {
       const existing = byUser.get(userId);
       if (existing !== undefined) return existing;
@@ -133,6 +157,18 @@ export function createMemoryCabinetRegistry(options: {
     },
     async listCases(workspaceId, query = {}) {
       return pageListedCases(casesOf(workspaceId), query);
+    },
+    async summarizeCabinets(workspaceIds) {
+      const summaries = new Map<string, CabinetSummaryCounts>();
+      for (const workspaceId of workspaceIds) {
+        const cabinet = openFresh(workspaceId);
+        const counted = countCabinetCases(cabinet.catalog.storedCases());
+        summaries.set(workspaceId, {
+          profileCount: cabinet.workspace.profiles().length,
+          ...counted,
+        });
+      }
+      return summaries;
     },
     async getCase(workspaceId, id) {
       return casesOf(workspaceId).find((item) => item.id === id);

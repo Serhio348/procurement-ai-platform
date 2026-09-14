@@ -117,6 +117,41 @@ describe("MyProcurementsApp", () => {
     expect(onRemove).not.toHaveBeenCalled();
   });
 
+  it("does not paint the parent catalog while the tab page is loading", async () => {
+    const archived = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000013",
+      title: "Архивная из памяти",
+      archived: true,
+    });
+    let resolveLoad: (items: readonly SpecialistProcurementCard[]) => void = () => undefined;
+    const load = vi.fn(
+      () =>
+        new Promise<readonly SpecialistProcurementCard[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[card, archived]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Загрузка…")).toBeTruthy();
+    expect(screen.queryByText("Архивная из памяти")).toBeNull();
+    expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+    resolveLoad([card]);
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    expect(screen.queryByText("Архивная из памяти")).toBeNull();
+    expect(screen.queryByText("Загрузка…")).toBeNull();
+  });
+
   it("asks the API for the active tab instead of filtering a full dump", async () => {
     const load = vi.fn(async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
       if (tab === "all") return [card];
@@ -176,8 +211,8 @@ describe("MyProcurementsApp", () => {
     await user.click(screen.getByRole("tab", { name: "Слежу" }));
     await waitFor(() => {
       expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+      expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
     });
-    expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
     expect(load).toHaveBeenCalledWith("monitor");
 
     await user.click(screen.getByRole("tab", { name: "Архив" }));

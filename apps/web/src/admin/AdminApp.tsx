@@ -20,6 +20,7 @@ import { fetchProfiles } from "../api/specialist.js";
 import { accessMessage, journalKindLabel, roleLabel } from "../auth/labels.js";
 import { useAuthSession } from "../auth/AuthSession.js";
 import { Shell } from "../shell/Shell.js";
+import { CabinetsPane } from "./CabinetsPane.js";
 import {
   ADMIN_PANES,
   adminPaneLabel,
@@ -33,7 +34,7 @@ import {
 const ROLES: SpecialistRole[] = ["specialist", "viewer", "admin"];
 
 export function AdminApp() {
-  const { pane: rawPane } = useParams();
+  const { pane: rawPane, userId } = useParams();
   const pane = parseAdminPane(rawPane);
   const { refresh } = useAuthSession();
   const [listed, setListed] = useState<AdminUserListResponse | undefined>();
@@ -158,6 +159,8 @@ export function AdminApp() {
               )}
             </section>
           </>
+        ) : pane === "cabinets" ? (
+          <CabinetsPane {...(userId === undefined ? {} : { userId })} onError={setError} />
         ) : pane === "access" ? (
           <>
             <section className="profile-section">

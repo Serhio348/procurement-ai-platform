@@ -223,6 +223,37 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(inboxAfterRemove.some((item) => item.change.procurementId === card.id)).toBe(false);
   });
 
+  it("deletes a rejected case that still has profile links so trash cannot return after reload", async () => {
+    const store = createSpecialistStore(db);
+    const userId = "00000000-0000-4000-8000-000000000913";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values (${userId}, 'purge-rls@test.local', 'Purge', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceId = await store.ensurePersonalWorkspace(userId, "Purge");
+    const profileId = (await store.loadWorkspace(workspaceId))?.profiles[0]?.id;
+    if (profileId === undefined) throw new Error("workspace profile missing");
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000923",
+      title: "Кабель удалить из корзины",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/purge-rls",
+      sourceProcurementId: "auction/purge-rls",
+      live: true,
+      triage: "reject",
+      profileIds: [profileId],
+    });
+    await store.saveCases([card], workspaceId);
+    expect((await store.listCases(workspaceId, { tab: "trash" })).items.map((item) => item.id)).toEqual([
+      card.id,
+    ]);
+    await store.removeCases([card.id], workspaceId);
+    expect((await store.listCases(workspaceId, { tab: "trash" })).items).toEqual([]);
+    expect(await store.getCase(workspaceId, card.id)).toBeUndefined();
+  });
+
   it("keeps two users' cases isolated while sharing one canonical procurement", async () => {
     const store = createSpecialistStore(db);
     const userA = "00000000-0000-4000-8000-000000000911";
@@ -264,10 +295,18 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(canonical).toHaveLength(1);
     const mineA = await store.listCases(workspaceA, { tab: "all" });
     const mineB = await store.listCases(workspaceB, { tab: "participate" });
+    const counts = await store.summarizeCabinets([workspaceA, workspaceB]);
     expect(loadedA[0]?.triage).toBe("monitor");
     expect(loadedB[0]?.triage).toBe("participate");
     expect(mineA.items.map((item) => item.id)).toEqual([cardA.id]);
     expect(mineB.items.map((item) => item.id)).toEqual([cardB.id]);
+    expect(counts.get(workspaceA)).toEqual({
+      profileCount: 1,
+      mineCount: 1,
+      archiveCount: 0,
+      trashCount: 0,
+    });
+    expect(counts.get(workspaceB)?.mineCount).toBe(1);
     expect((await store.findCaseBySource(workspaceA, source))?.triage).toBe("monitor");
     expect(loadedA[0]?.id).not.toBe(loadedB[0]?.id);
     expect(loadedA[0]?.canonicalProcurementId).toBe(canonical[0]?.id);

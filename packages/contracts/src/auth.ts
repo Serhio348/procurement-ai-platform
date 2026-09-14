@@ -62,6 +62,27 @@ export const AdminUserListResponse = z.object({
 });
 export type AdminUserListResponse = z.infer<typeof AdminUserListResponse>;
 
+/** Read-only snapshot of another specialist's workspace for the admin pane. */
+export const AdminCabinetSummary = z.object({
+  userId: z.string().min(1),
+  email: z.string().email(),
+  name: z.string().min(1),
+  role: SpecialistRole.nullable(),
+  accessStatus: AccessStatus,
+  workspaceId: z.string().uuid().optional(),
+  profileCount: z.number().int().nonnegative(),
+  mineCount: z.number().int().nonnegative(),
+  archiveCount: z.number().int().nonnegative(),
+  trashCount: z.number().int().nonnegative(),
+  lastActiveAt: IsoDateTime.optional(),
+});
+export type AdminCabinetSummary = z.infer<typeof AdminCabinetSummary>;
+
+export const AdminCabinetListResponse = z.object({
+  items: z.array(AdminCabinetSummary),
+});
+export type AdminCabinetListResponse = z.infer<typeof AdminCabinetListResponse>;
+
 export const AdminApproveWrite = z.object({
   role: SpecialistRole,
 });

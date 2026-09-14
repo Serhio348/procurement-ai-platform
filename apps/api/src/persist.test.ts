@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SpecialistCatalog, SpecialistWorkspace } from "@procurement/domain";
+import { SpecialistProcurementCard } from "@procurement/contracts";
 import { silentLogger } from "@procurement/observability";
 import { afterEach, describe, expect, it } from "vitest";
 import { openSpecialistPersistence } from "./persist.js";
@@ -46,6 +47,32 @@ describe("openSpecialistPersistence", () => {
     expect(catalog.procurements()).toEqual([]);
     expect(saved.profiles[0]?.name).toBe("Кабель");
 
+    await persistence.close();
+  });
+
+  it("drops a purged case from the disk copy so a restart cannot restore trash", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const workspacePath = path.join(directory, "specialist-workspace.json");
+    const persistence = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      title: "Кабель из корзины",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/901",
+      sourceProcurementId: "auction/901",
+      triage: "reject",
+    });
+    await persistence.persistCases([card]);
+    await persistence.removeCases([card.id]);
+    const catalog = new SpecialistCatalog();
+    await persistence.hydrateCatalog(catalog);
+    expect(catalog.storedCases()).toEqual([]);
     await persistence.close();
   });
 });

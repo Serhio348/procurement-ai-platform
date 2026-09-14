@@ -28,8 +28,11 @@ discovery не предлагали процедуру снова.
 не качает. Архивный флаг снимается.
 
 `DELETE /api/procurements/:id` только из корзины. `catalog.dropCase` помечает id
-как pruned, затем `persist`, затем `removeCases`, чтобы upsert inbox-заглушки не
-создал карточку снова. Решение `reject` в workspace остаётся — поиск молчит.
+как pruned, затем `persistWorkspaceOnly`, затем `removeCases`. Дочерние строки
+`workspace_procurement_profiles` удаляются **до** кейса: CASCADE + RLS, которая
+смотрит на родителя, иначе PostgreSQL откатывает delete, API раньше отвечал 204
+и карточка возвращалась после перезагрузки. Решение `reject` в workspace
+остаётся — поиск молчит.
 
 ## Почему так
 

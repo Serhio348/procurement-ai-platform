@@ -45,6 +45,13 @@ export interface SpecialistCaseListPage {
   total: number;
 }
 
+export interface SpecialistCabinetCounts {
+  profileCount: number;
+  mineCount: number;
+  archiveCount: number;
+  trashCount: number;
+}
+
 /** Object-store key for bytes. The sha256 itself lives on document_versions.hash. */
 export function blobStorageKey(hash: string): string {
   return `blobs/${hash}`;
@@ -104,6 +111,54 @@ export function createSpecialistStore(db: Database) {
       return withRlsBypass(db, async (tx) => {
         const rows = await tx.select({ id: workspaces.id }).from(workspaces);
         return rows.map((row) => row.id);
+      });
+    },
+
+    async summarizeCabinets(
+      workspaceIds: readonly string[],
+    ): Promise<Map<string, SpecialistCabinetCounts>> {
+      const summaries = new Map<string, SpecialistCabinetCounts>();
+      for (const workspaceId of workspaceIds) {
+        summaries.set(workspaceId, {
+          profileCount: 0,
+          mineCount: 0,
+          archiveCount: 0,
+          trashCount: 0,
+        });
+      }
+      if (workspaceIds.length === 0) return summaries;
+      const ids = [...workspaceIds];
+      return withRlsBypass(db, async (tx) => {
+        const profileRows = await tx
+          .select({
+            workspaceId: workspaceProfiles.workspaceId,
+            n: count(),
+          })
+          .from(workspaceProfiles)
+          .where(inArray(workspaceProfiles.workspaceId, ids))
+          .groupBy(workspaceProfiles.workspaceId);
+        for (const row of profileRows) {
+          const current = summaries.get(row.workspaceId);
+          if (current !== undefined) current.profileCount = Number(row.n);
+        }
+        const caseRows = await tx
+          .select({
+            workspaceId: workspaceProcurements.workspaceId,
+            mine: sql<number>`cast(count(*) filter (where ${workspaceProcurements.triage} in ('monitor', 'participate') and ${workspaceProcurements.archived} = false) as integer)`,
+            archive: sql<number>`cast(count(*) filter (where ${workspaceProcurements.archived} = true and ${workspaceProcurements.triage} is distinct from 'reject') as integer)`,
+            trash: sql<number>`cast(count(*) filter (where ${workspaceProcurements.triage} = 'reject') as integer)`,
+          })
+          .from(workspaceProcurements)
+          .where(inArray(workspaceProcurements.workspaceId, ids))
+          .groupBy(workspaceProcurements.workspaceId);
+        for (const row of caseRows) {
+          const current = summaries.get(row.workspaceId);
+          if (current === undefined) continue;
+          current.mineCount = Number(row.mine);
+          current.archiveCount = Number(row.archive);
+          current.trashCount = Number(row.trash);
+        }
+        return summaries;
       });
     },
 
@@ -297,13 +352,16 @@ export function createSpecialistStore(db: Database) {
           .select({
             id: workspaceProcurements.id,
             sourceProcurementId: workspaceProcurements.sourceProcurementId,
+            archived: workspaceProcurements.archived,
           })
           .from(workspaceProcurements)
           .where(eq(workspaceProcurements.workspaceId, workspaceId));
         for (const row of caseRows) {
+          const nextArchived = archived.has(row.sourceProcurementId);
+          if (row.archived === nextArchived) continue;
           await tx
             .update(workspaceProcurements)
-            .set({ archived: archived.has(row.sourceProcurementId), updatedAt: now })
+            .set({ archived: nextArchived, updatedAt: now })
             .where(eq(workspaceProcurements.id, row.id));
         }
 
@@ -542,13 +600,20 @@ export function createSpecialistStore(db: Database) {
 
     async removeCases(ids: readonly string[], workspaceId: string): Promise<void> {
       if (ids.length === 0) return;
+      const idList = [...ids];
+      // Delete children first. CASCADE + RLS on workspace_procurement_profiles
+      // joins back to the parent row; once the parent is gone the policy
+      // hides the child and the whole delete is rolled back.
       await withWorkspace(db, workspaceId, async (tx) => {
+        await tx
+          .delete(workspaceProcurementProfiles)
+          .where(inArray(workspaceProcurementProfiles.workspaceProcurementId, idList));
         await tx
           .delete(workspaceInbox)
           .where(
             and(
               eq(workspaceInbox.workspaceId, workspaceId),
-              inArray(workspaceInbox.workspaceProcurementId, [...ids]),
+              inArray(workspaceInbox.workspaceProcurementId, idList),
             ),
           );
         await tx
@@ -556,7 +621,7 @@ export function createSpecialistStore(db: Database) {
           .where(
             and(
               eq(workspaceProcurements.workspaceId, workspaceId),
-              inArray(workspaceProcurements.id, [...ids]),
+              inArray(workspaceProcurements.id, idList),
             ),
           );
       });
@@ -788,6 +853,20 @@ export function postgresErrorMessage(error: unknown): string {
 
 type StoreTx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
+export function caseListTimeShouldBump(
+  previous:
+    | { triage: string | null; archived: boolean; foundAs: string | null }
+    | undefined,
+  next: { triage?: string | undefined; archived?: boolean | undefined; foundAs?: string | undefined },
+): boolean {
+  if (previous === undefined) return true;
+  return (
+    previous.triage !== (next.triage ?? null) ||
+    previous.archived !== (next.archived === true) ||
+    previous.foundAs !== (next.foundAs ?? null)
+  );
+}
+
 async function saveWorkspaceCase(
   tx: StoreTx,
   workspaceId: string,
@@ -801,6 +880,26 @@ async function saveWorkspaceCase(
     ...parsed,
     canonicalProcurementId: canonicalId,
   });
+  const existing = await tx
+    .select({
+      triage: workspaceProcurements.triage,
+      archived: workspaceProcurements.archived,
+      foundAs: workspaceProcurements.foundAs,
+      updatedAt: workspaceProcurements.updatedAt,
+    })
+    .from(workspaceProcurements)
+    .where(
+      and(
+        eq(workspaceProcurements.workspaceId, workspaceId),
+        eq(workspaceProcurements.sourceProcurementId, stored.sourceProcurementId),
+      ),
+    )
+    .limit(1);
+  const previous = existing[0];
+  const updatedAt =
+    previous === undefined || caseListTimeShouldBump(previous, stored)
+      ? now
+      : toIsoDateTime(previous.updatedAt);
   await tx
     .insert(workspaceProcurements)
     .values({
@@ -814,7 +913,7 @@ async function saveWorkspaceCase(
       lastSeenAt: stored.lastSeenAt,
       watchSnapshot: stored.watchSnapshot,
       card: stored,
-      updatedAt: now,
+      updatedAt,
     })
     .onConflictDoUpdate({
       target: [workspaceProcurements.workspaceId, workspaceProcurements.sourceProcurementId],
@@ -826,7 +925,7 @@ async function saveWorkspaceCase(
         lastSeenAt: stored.lastSeenAt,
         watchSnapshot: stored.watchSnapshot,
         card: stored,
-        updatedAt: now,
+        updatedAt,
       },
     });
   await tx

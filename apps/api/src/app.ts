@@ -1,4 +1,5 @@
 import {
+  AdminCabinetListResponse,
   InboxFixtureItem,
   ProcedureCard,
   type SearchQuery,
@@ -82,6 +83,7 @@ import type { SpecialistReviewPort } from "./search-review.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createMemoryCabinetRegistry,
+  EMPTY_CABINET_COUNTS,
   TEST_WORKSPACE_ID,
   type CabinetRegistry,
   type SpecialistCabinet,
@@ -823,6 +825,88 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     return SpecialistDiscoveryHealthResponse.parse({
       health: discoveryController.health(watchingCount),
+    });
+  });
+
+  app.get("/api/admin/cabinets", async (_request, reply) => {
+    if (options.authDirectory === undefined) {
+      return reply.code(503).send({ error: "auth_unavailable" });
+    }
+    const users = await options.authDirectory.listUsers();
+    const seen = await options.authDirectory.listLatestSeen();
+    const workspaceByUser = new Map<string, string>();
+    const workspaceIds: string[] = [];
+    for (const user of users) {
+      const workspaceId = await cabinets.findWorkspaceId(user.id);
+      if (workspaceId === undefined) continue;
+      workspaceByUser.set(user.id, workspaceId);
+      workspaceIds.push(workspaceId);
+    }
+    const counts = await cabinets.summarizeCabinets(workspaceIds);
+    return AdminCabinetListResponse.parse({
+      items: users.map((user) => {
+        const workspaceId = workspaceByUser.get(user.id);
+        const summary =
+          workspaceId === undefined ? EMPTY_CABINET_COUNTS : (counts.get(workspaceId) ?? EMPTY_CABINET_COUNTS);
+        const lastActiveAt = seen.get(user.id);
+        return {
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          accessStatus: user.accessStatus,
+          ...(workspaceId === undefined ? {} : { workspaceId }),
+          profileCount: summary.profileCount,
+          mineCount: summary.mineCount,
+          archiveCount: summary.archiveCount,
+          trashCount: summary.trashCount,
+          ...(lastActiveAt === undefined ? {} : { lastActiveAt }),
+        };
+      }),
+    });
+  });
+
+  app.get("/api/admin/users/:id/procurements", async (request, reply) => {
+    if (options.authDirectory === undefined) {
+      return reply.code(503).send({ error: "auth_unavailable" });
+    }
+    const params = request.params as { id: string };
+    const users = await options.authDirectory.listUsers();
+    const target = users.find((user) => user.id === params.id);
+    if (target === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const workspaceId = await cabinets.findWorkspaceId(target.id);
+    if (workspaceId === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const rawQuery = (request.query ?? {}) as Record<string, unknown>;
+    const parsed = SpecialistProcurementListQuery.safeParse({
+      ...rawQuery,
+      tab: rawQuery.tab ?? "all",
+    });
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const tab = parsed.data.tab;
+    const offset = parsed.data.offset;
+    const page = await cabinets.listCases(workspaceId, {
+      tab,
+      limit: parsed.data.limit,
+      offset,
+    });
+    const actor = users.find((user) => user.id === request.principal?.userId);
+    await recordJournal(journal, {
+      kind: "access",
+      level: "info",
+      message: `Администратор просмотрел кабинет: ${target.name} (${target.email})`,
+      ...(actor === undefined ? {} : { actorName: actor.name, actorEmail: actor.email }),
+    });
+    return SpecialistProcurementListResponse.parse({
+      items: page.items,
+      total: page.total,
+      tab,
+      hasMore: offset + page.items.length < page.total,
     });
   });
 

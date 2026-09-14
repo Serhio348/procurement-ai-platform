@@ -2,11 +2,16 @@ import {
   AdminApproveWrite,
   AdminJournalListResponse,
   AdminRoleWrite,
+  AdminCabinetListResponse,
   AdminUserListResponse,
+  SpecialistProcurementListResponse,
   AuthSessionResponse,
   type AdminJournalListResponse as AdminJournalListResponseValue,
+  type AdminCabinetListResponse as AdminCabinetListResponseValue,
   type AdminUserListResponse as AdminUserListResponseValue,
   type AuthSessionUser,
+  type SpecialistProcurementListResponse as SpecialistProcurementListResponseValue,
+  type SpecialistProcurementListTab,
   type SpecialistRole,
 } from "@procurement/contracts";
 import { withCredentials } from "./http.js";
@@ -122,6 +127,35 @@ export async function fetchAdminUsers(
     throw new Error("Не удалось загрузить пользователей");
   }
   return AdminUserListResponse.parse(await response.json());
+}
+
+export async function fetchAdminCabinets(
+  fetcher: typeof fetch = fetch,
+): Promise<AdminCabinetListResponseValue> {
+  const response = await fetcher("/api/admin/cabinets", withCredentials());
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить кабинеты");
+  }
+  return AdminCabinetListResponse.parse(await response.json());
+}
+
+export async function fetchAdminUserProcurements(
+  userId: string,
+  tab: SpecialistProcurementListTab = "all",
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistProcurementListResponseValue> {
+  const params = new URLSearchParams({ tab });
+  const response = await fetcher(
+    `/api/admin/users/${userId}/procurements?${params.toString()}`,
+    withCredentials(),
+  );
+  if (response.status === 404) {
+    throw new Error("Кабинет не найден");
+  }
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить закупки кабинета");
+  }
+  return SpecialistProcurementListResponse.parse(await response.json());
 }
 
 export async function approveUser(

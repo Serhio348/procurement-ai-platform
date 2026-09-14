@@ -160,4 +160,111 @@ describe("personal cabinets", () => {
 
     await app.close();
   });
+
+  it("lets an admin read another cabinet without mixing cases or allowing a specialist in", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const cabinets = createMemoryCabinetRegistry();
+    const app = await buildSpecialistApi({
+      authDirectory: directory,
+      cabinets,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/admin-view-1",
+            url: "https://goszakupki.by/auction/view/admin-view-1",
+            title: "Кабель для админа",
+          }),
+        ],
+      },
+    });
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const adminCookie = cookieHeader(adminIn);
+    const signed = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up",
+      payload: { email: "spec@example.com", name: "Иван", password: "secret-password" },
+    });
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/admin/users",
+      headers: { cookie: adminCookie },
+    });
+    const specialistId = (
+      JSON.parse(listed.body) as { items: Array<{ id: string; email: string }> }
+    ).items.find((item) => item.email === "spec@example.com")?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${specialistId}/approve`,
+      headers: { cookie: adminCookie },
+      payload: { role: "specialist" },
+    });
+    const specCookie = cookieHeader(signed);
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      headers: { cookie: specCookie },
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      headers: { cookie: specCookie },
+      payload: {},
+    });
+    const foundId = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${foundId}/decision`,
+      headers: { cookie: specCookie },
+      payload: { kind: "participate" },
+    });
+
+    const forbidden = await app.inject({
+      method: "GET",
+      url: "/api/admin/cabinets",
+      headers: { cookie: specCookie },
+    });
+    const cabinetsList = await app.inject({
+      method: "GET",
+      url: "/api/admin/cabinets",
+      headers: { cookie: adminCookie },
+    });
+    const mine = await app.inject({
+      method: "GET",
+      url: `/api/admin/users/${specialistId}/procurements`,
+      headers: { cookie: adminCookie },
+    });
+    const journal = await app.inject({
+      method: "GET",
+      url: "/api/admin/journal",
+      headers: { cookie: adminCookie },
+    });
+
+    expect(forbidden.statusCode).toBe(403);
+    const summary = (
+      JSON.parse(cabinetsList.body) as {
+        items: Array<{ userId: string; name: string; mineCount: number; lastActiveAt?: string }>;
+      }
+    ).items.find((item) => item.userId === specialistId);
+    expect(summary?.name).toBe("Иван");
+    expect(summary?.mineCount).toBe(1);
+    expect(summary?.lastActiveAt).toEqual(expect.any(String));
+    expect(mine.statusCode).toBe(200);
+    expect(JSON.parse(mine.body).items).toEqual([
+      expect.objectContaining({ id: foundId, title: "Кабель для админа", triage: "participate" }),
+    ]);
+    expect(
+      (JSON.parse(journal.body).items as Array<{ message: string }>).some((item) =>
+        item.message.includes("просмотрел кабинет: Иван (spec@example.com)"),
+      ),
+    ).toBe(true);
+
+    await app.close();
+  });
 });

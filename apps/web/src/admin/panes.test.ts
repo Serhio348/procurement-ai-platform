@@ -36,7 +36,9 @@ describe("admin panes", () => {
     expect(messages("errors")).toEqual(["Площадка goszakupki.by недоступна"]);
     expect(messages("discovery")[0]).toContain("Фоновый поиск выполнен");
     expect(messages("access")).toEqual([]);
+    expect(messages("cabinets")).toEqual([]);
     expect(messages("journal")).toHaveLength(5);
+    expect(parseAdminPane("cabinets")).toBe("cabinets");
   });
 });
 

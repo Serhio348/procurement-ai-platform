@@ -2,7 +2,7 @@ import type { AccessStatus, SpecialistRole } from "@procurement/contracts";
 import { authPasswordResets, authSessions, authUsers, type Database } from "@procurement/db";
 import { hasActiveAdmin } from "@procurement/domain";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, max } from "drizzle-orm";
 import {
   RESET_TTL_MS,
   SESSION_TOUCH_MS,
@@ -219,6 +219,21 @@ export function createPostgresAuthDirectory(
 
     async listUsers() {
       return allUsers();
+    },
+
+    async listLatestSeen() {
+      const rows = await db
+        .select({
+          userId: authSessions.userId,
+          at: max(authSessions.lastSeenAt),
+        })
+        .from(authSessions)
+        .groupBy(authSessions.userId);
+      const latest = new Map<string, string>();
+      for (const row of rows) {
+        if (row.at !== null) latest.set(row.userId, toIsoDateTime(row.at));
+      }
+      return latest;
     },
 
     async pendingCount() {

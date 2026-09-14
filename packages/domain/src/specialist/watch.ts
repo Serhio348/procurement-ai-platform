@@ -4,6 +4,7 @@ import {
   SpecialistProcurementCard,
   type ChangeKind,
   type InboxFixtureItem as InboxFixtureItemValue,
+  type ListedSourceAttachment,
   type PlatformInstant,
   type ProcedureCard,
   type SpecialistCardSnapshot as SpecialistCardSnapshotValue,
@@ -41,7 +42,22 @@ export function cardSnapshot(
     ...(priceKey === undefined ? {} : { priceKey }),
     ...(priceLabel === undefined ? {} : { priceLabel }),
     ...(deadline === undefined ? {} : { bidsDeadline: deadline }),
+    documents: listedAttachmentsForSnapshot(card.listedDocuments),
   });
+}
+
+/** Stable order so a reshuffled block on the page is not a change. */
+export function listedAttachmentsForSnapshot(
+  items: readonly ListedSourceAttachment[],
+): ListedSourceAttachment[] {
+  const seen = new Set<string>();
+  const unique: ListedSourceAttachment[] = [];
+  for (const item of items) {
+    if (seen.has(item.sourceUrl)) continue;
+    seen.add(item.sourceUrl);
+    unique.push({ name: item.name, sourceUrl: item.sourceUrl });
+  }
+  return unique.sort((left, right) => left.sourceUrl.localeCompare(right.sourceUrl));
 }
 
 /**
@@ -85,6 +101,48 @@ export function diffCardSnapshots(
       field: "bidsDeadline",
       previous: previous.bidsDeadline,
       current: current.bidsDeadline,
+    });
+  }
+  if (previous.documents !== undefined && current.documents !== undefined) {
+    changes.push(...diffListedDocuments(previous.documents, current.documents));
+  }
+  return changes;
+}
+
+function diffListedDocuments(
+  previous: readonly ListedSourceAttachment[],
+  current: readonly ListedSourceAttachment[],
+): WatchChange[] {
+  const before = new Map(previous.map((item) => [item.sourceUrl, item] as const));
+  const after = new Map(current.map((item) => [item.sourceUrl, item] as const));
+  const changes: WatchChange[] = [];
+  for (const [url, doc] of after) {
+    const was = before.get(url);
+    if (was === undefined) {
+      changes.push({
+        kind: "document_added",
+        field: "documents",
+        previous: null,
+        current: doc.name,
+      });
+      continue;
+    }
+    if (was.name !== doc.name) {
+      changes.push({
+        kind: "document_updated",
+        field: "documents",
+        previous: was.name,
+        current: doc.name,
+      });
+    }
+  }
+  for (const [url, doc] of before) {
+    if (after.has(url)) continue;
+    changes.push({
+      kind: "document_removed",
+      field: "documents",
+      previous: doc.name,
+      current: null,
     });
   }
   return changes;
@@ -132,7 +190,9 @@ export function inboxItemFromWatchChange(
     change: {
       // The new value is part of the id: the same change reported twice stays
       // one inbox row, a further change becomes a new one.
-      id: uuidFromHex(`inbox-watch:${card.id}:${change.kind}:${change.current ?? ""}`),
+      id: uuidFromHex(
+        `inbox-watch:${card.id}:${change.kind}:${change.current ?? change.previous ?? ""}`,
+      ),
       procurementId: card.id,
       kind: change.kind,
       field: change.field,

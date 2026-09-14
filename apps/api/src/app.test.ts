@@ -5,11 +5,12 @@ import path from "node:path";
 import {
   ProcedureCard,
   SearchHit,
+  SearchIntentPlan,
   SpecialistProcurementCard,
   electricalEquipmentSeedV1,
   type InboxFixtureItem,
 } from "@procurement/contracts";
-import { SpecialistCatalog, SpecialistWorkspace, type ReviewOutcome } from "@procurement/domain";
+import { SpecialistCatalog, SpecialistWorkspace, inferSearchIntentPlan, type ReviewOutcome } from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
@@ -487,9 +488,14 @@ describe("specialist API", () => {
         confidence: 0.5,
       },
     };
-    const review = vi.fn(async (reviewed: readonly SearchHit[]) =>
-      reviewed.map((item) => verdicts[item.sourceProcurementId] as ReviewOutcome),
-    );
+    let releaseReview!: () => void;
+    const reviewGate = new Promise<void>((resolve) => {
+      releaseReview = resolve;
+    });
+    const review = vi.fn(async (reviewed: readonly SearchHit[]) => {
+      await reviewGate;
+      return reviewed.map((item) => verdicts[item.sourceProcurementId] as ReviewOutcome);
+    });
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
       searchHits: { search: async () => hits },
@@ -511,23 +517,185 @@ describe("specialist API", () => {
       relevantCount: number;
       ambiguousCount: number;
       discardedCount: number;
-      items: Array<{ title: string; foundAs?: string; actions: Array<{ detail: string }> }>;
+      items: Array<{ title: string }>;
     };
-    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
-    const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
-      (item) => item.title,
-    );
+    expect(body.items).toEqual([]);
+    expect(body.relevantCount).toBe(0);
+    expect(body.discardedCount).toBe(1);
+    expect(body.ambiguousCount).toBe(3);
+    expect(
+      (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{ title: string }>)
+        .map((item) => item.title)
+        .sort(),
+    ).toEqual(["Закупка НКУ", "НКУ щитовое", "Поставка НКУ 0,4 кВ"].sort());
 
-    // Missing purpose goes to the review port. Substring noise is discarded first.
-    expect(review).toHaveBeenCalledTimes(1);
+    releaseReview();
+    await vi.waitFor(async () => {
+      expect(review).toHaveBeenCalledTimes(1);
+    });
     expect(review.mock.calls[0]?.[0]).toHaveLength(3);
-    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
-    expect(body.items[0]?.foundAs).toBe("match");
-    expect(body.items[0]?.actions.at(-1)?.detail).toContain("насосная");
-    expect(body.relevantCount).toBe(1);
-    expect(body.discardedCount).toBe(2);
-    expect(body.ambiguousCount).toBe(1);
-    expect(inboxTitles).toEqual(["Закупка НКУ"]);
+
+    await vi.waitFor(async () => {
+      const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+      const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
+        (item) => item.title,
+      );
+      const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+      const listedItems = JSON.parse(listed.body).items as Array<{
+        id: string;
+        title: string;
+        foundAs?: string;
+      }>;
+      expect(inboxTitles).toEqual(["Закупка НКУ"]);
+      expect(listedItems.map((item) => item.title)).toContain("Поставка НКУ 0,4 кВ");
+      const lotId = listedItems.find((item) => item.title === "Поставка НКУ 0,4 кВ")?.id ?? "";
+      const lot = JSON.parse((await app.inject({ method: "GET", url: `/api/procurements/${lotId}` })).body) as {
+        foundAs?: string;
+        actions: Array<{ detail: string }>;
+      };
+      expect(lot.foundAs).toBe("match");
+      expect(lot.actions.at(-1)?.detail).toContain("насосная");
+    });
+
+    await app.close();
+  });
+
+  it("starts the site listing before the plan model returns", async () => {
+    let listingStarted = false;
+    let releasePlan!: () => void;
+    const planGate = new Promise<void>((resolve) => {
+      releasePlan = resolve;
+    });
+    const search = vi.fn(async () => {
+      listingStarted = true;
+      return [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/ktpb-1",
+          url: "https://goszakupki.by/auction/view/ktpb-1",
+          title: "Поставка КТПБ-250",
+        }),
+      ];
+    });
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+      searchIntent: {
+        plan: async (profile) => {
+          await planGate;
+          return inferSearchIntentPlan({
+            name: profile.name,
+            keywords: profile.keywords,
+            excludeKeywords: profile.excludeKeywords,
+          });
+        },
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+
+    const pending = app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(() => expect(listingStarted).toBe(true));
+    expect(search).toHaveBeenCalledTimes(1);
+    releasePlan();
+    const searched = await pending;
+
+    expect(searched.statusCode).toBe(200);
+    expect(JSON.parse(searched.body).items.map((item: { title: string }) => item.title)).toEqual([
+      "Поставка КТПБ-250",
+    ]);
+    expect(search).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
+  it("queries extra objects the model added after the cheap listing", async () => {
+    const search = vi.fn(async (query: { keywords: string[] }) => {
+      if (query.keywords.includes("шкаф управления")) {
+        return [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/cabinet-1",
+            url: "https://goszakupki.by/auction/view/cabinet-1",
+            title: "Поставка шкафа управления насосами",
+          }),
+        ];
+      }
+      return [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/nku-1",
+          url: "https://goszakupki.by/auction/view/nku-1",
+          title: "Поставка НКУ для насосов",
+        }),
+      ];
+    });
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+      searchIntent: {
+        plan: async () =>
+          SearchIntentPlan.parse({
+            objects: ["НКУ", "шкаф управления"],
+            required_context: ["насос"],
+            desired_actions: ["поставка"],
+            excluded_actions: ["монтаж"],
+            intent: "equipment_purchase",
+          }),
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+
+    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const titles = (JSON.parse(searched.body).items as Array<{ title: string }>).map((item) => item.title);
+
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(search.mock.calls[0]?.[0].keywords).toEqual(["НКУ"]);
+    expect(search.mock.calls[1]?.[0].keywords).toEqual(["шкаф управления"]);
+    expect(titles).toEqual(["Поставка НКУ для насосов", "Поставка шкафа управления насосами"]);
+
+    await app.close();
+  });
+
+  it("puts a dismissed review hit back in the inbox on the next search", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/again-1",
+            url: "https://goszakupki.by/auction/view/again-1",
+            title: "Поставка НКУ 0,4 кВ",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const firstInbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rowId = (JSON.parse(firstInbox.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    expect(rowId.length).toBeGreaterThan(0);
+    await app.inject({ method: "DELETE", url: `/api/inbox/${rowId}` });
+    expect(JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items).toEqual([]);
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const restored = (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{
+      title: string;
+    }>).map((item) => item.title);
+    expect(restored).toEqual(["Поставка НКУ 0,4 кВ"]);
 
     await app.close();
   });
@@ -592,6 +760,134 @@ describe("specialist API", () => {
     expect(body.ran).toBe(true);
     expect(body.addedCount).toBe(1);
     expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    await app.close();
+  });
+
+  it("watches extra objects the model added, with the same watermark on both queries", async () => {
+    const search = vi.fn(async (query: { keywords: string[]; publishedFrom?: string | undefined }) => {
+      if (query.keywords.includes("шкаф управления")) {
+        return [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/watch-cabinet",
+            url: "https://goszakupki.by/auction/view/watch-cabinet",
+            title: "Поставка шкафа управления насосами",
+          }),
+        ];
+      }
+      return [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/watch-nku",
+          url: "https://goszakupki.by/auction/view/watch-nku",
+          title: "Поставка НКУ для насосов",
+        }),
+      ];
+    });
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+      searchIntent: {
+        plan: async () =>
+          SearchIntentPlan.parse({
+            objects: ["НКУ", "шкаф управления"],
+            required_context: ["насос"],
+            desired_actions: ["поставка"],
+            excluded_actions: ["монтаж"],
+            intent: "equipment_purchase",
+          }),
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const body = JSON.parse(ran.body) as { addedCount: number; items: Array<{ title: string }> };
+
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(search.mock.calls[0]?.[0].keywords).toEqual(["НКУ"]);
+    expect(search.mock.calls[1]?.[0].keywords).toEqual(["шкаф управления"]);
+    expect(search.mock.calls.map((call) => call[0].publishedFrom)).toEqual([undefined, undefined]);
+    expect(body.addedCount).toBe(2);
+    expect(body.items.map((item) => item.title).sort()).toEqual(
+      ["Поставка НКУ для насосов", "Поставка шкафа управления насосами"].sort(),
+    );
+
+    await app.close();
+  });
+
+  it("does not let a later watch pass re-review a match the specialist already has", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/keep-match",
+        url: "https://goszakupki.by/auction/view/keep-match",
+        title: "Поставка НКУ 0,4 кВ",
+      }),
+    ];
+    const review = vi.fn(async (reviewed: readonly SearchHit[]) =>
+      reviewed.map(
+        (): ReviewOutcome => ({
+          verdict: "relevant",
+          decidedBy: "card",
+          reason: "В лотах есть насосная станция.",
+          matchedTerms: ["насос"],
+          confidence: 1,
+        }),
+      ),
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      searchReview: { review },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(async () => {
+      const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+      expect(
+        (JSON.parse(listed.body).items as Array<{ title: string }>).map((item) => item.title),
+      ).toContain("Поставка НКУ 0,4 кВ");
+    });
+    review.mockClear();
+    review.mockImplementation(async (reviewed: readonly SearchHit[]) =>
+      reviewed.map(
+        (): ReviewOutcome => ({
+          verdict: "irrelevant",
+          decidedBy: "model",
+          reason: "Не для насосов.",
+          matchedTerms: [],
+          confidence: 0.95,
+        }),
+      ),
+    );
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+
+    expect(JSON.parse(ran.body).ran).toBe(true);
+    expect(review).not.toHaveBeenCalled();
+    expect((JSON.parse(listed.body).items as Array<{ title: string }>).map((item) => item.title)).toContain(
+      "Поставка НКУ 0,4 кВ",
+    );
 
     await app.close();
   });
@@ -723,21 +1019,22 @@ describe("specialist API", () => {
     });
 
     const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
-
-    expect(review).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 2 });
+    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(1));
     expect(review.mock.calls[0]?.[0].map((item) => item.sourceProcurementId).sort()).toEqual([
       "auction/drop-2",
       "auction/unclear-2",
     ]);
-    // Incubator is discarded before the port. The dropped shield is remembered;
-    // missing purpose waits in the inbox.
-    expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
+    await vi.waitFor(async () => {
+      const latest = await app.inject({ method: "GET", url: "/api/inbox" });
+      expect((JSON.parse(latest.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
+        "Поставка НКУ 0,4 кВ",
+      ]);
+    });
+
+    const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    expect(review).toHaveBeenCalledTimes(1);
     expect(JSON.parse(second.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
-    expect((JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
-      "Поставка НКУ 0,4 кВ",
-    ]);
 
     // Changing the phrases forgets the irrelevant verdict: the next search asks again.
     await app.inject({
@@ -746,7 +1043,7 @@ describe("specialist API", () => {
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ", "ЩО"] },
     });
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    expect(review).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
 
     await app.close();
   });
@@ -1667,6 +1964,130 @@ describe("specialist API", () => {
     expect(rows.some((item) => item.summary.includes("Статус"))).toBe(true);
     const log = await journal.list();
     expect(log.some((item) => item.message.includes("Проверено отслеживаемых"))).toBe(true);
+
+    await app.close();
+  });
+
+  it("reports a new document on a watched case and does not download on monitor", async () => {
+    const ingest = vi.fn(async (card: SpecialistProcurementCard) => card);
+    const withFiles = (files: Array<{ name: string; sourceUrl: string }>) =>
+      ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/780",
+        url: "https://goszakupki.by/auction/view/auction-780",
+        title: "Поставка кабеля",
+        fetchedAt: "2026-09-10T00:00:00.000Z",
+        status: "accepting_bids",
+        listedDocuments: files,
+      });
+    const first = withFiles([{ name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" }]);
+    const second = withFiles([
+      { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" },
+      { name: "Изменения.pdf", sourceUrl: "https://goszakupki.by/files/2" },
+    ]);
+    const read = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(first).mockResolvedValue(second);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/780",
+            url: "https://goszakupki.by/auction/view/auction-780",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+      documentIngest: { ingest },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const third = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rows = JSON.parse(inbox.body).items as Array<{ topic: string; summary: string }>;
+
+    expect(JSON.parse(third.body).changedCount).toBe(1);
+    expect(rows.some((item) => item.topic === "documents" && item.summary.includes("документ"))).toBe(
+      true,
+    );
+    expect(ingest).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it("downloads only after a new file appears on a participated case", async () => {
+    const ingest = vi.fn(async (card: SpecialistProcurementCard) => card);
+    const withFiles = (files: Array<{ name: string; sourceUrl: string }>) =>
+      ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/781",
+        url: "https://goszakupki.by/auction/view/auction-781",
+        title: "Поставка кабеля",
+        fetchedAt: "2026-09-10T00:00:00.000Z",
+        status: "accepting_bids",
+        listedDocuments: files,
+      });
+    const first = withFiles([{ name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" }]);
+    const second = withFiles([
+      { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" },
+      { name: "Изменения.pdf", sourceUrl: "https://goszakupki.by/files/2" },
+    ]);
+    const read = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(first).mockResolvedValue(second);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/781",
+            url: "https://goszakupki.by/auction/view/auction-781",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+      documentIngest: { ingest },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "participate" },
+    });
+    await vi.waitFor(() => expect(ingest).toHaveBeenCalledTimes(1));
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    await vi.waitFor(() => expect(ingest).toHaveBeenCalledTimes(2));
 
     await app.close();
   });

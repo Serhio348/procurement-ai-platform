@@ -1,6 +1,6 @@
 import { SearchIntentPlan } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { inferSearchIntentPlan, parseSearchIntentPlan } from "./intent-plan.js";
+import { extraPlatformSearchTerms, inferSearchIntentPlan, parseSearchIntentPlan } from "./intent-plan.js";
 import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
 
 const nkuPlan = SearchIntentPlan.parse({
@@ -184,5 +184,22 @@ describe("inferSearchIntentPlan", () => {
     expect(plan.desired_actions).toContain("поставка");
     expect(plan.excluded_actions).toContain("монтаж");
     expect(plan.intent).toBe("equipment_purchase");
+  });
+});
+
+describe("extraPlatformSearchTerms", () => {
+  it("returns only objects the cheap listing has not already queried", () => {
+    const inferred = inferSearchIntentPlan({
+      name: "НКУ для управления насосами",
+      keywords: ["НКУ"],
+      excludeKeywords: [],
+    });
+    const fromModel = SearchIntentPlan.parse({
+      objects: ["НКУ", "шкаф управления"],
+      desired_actions: ["поставка"],
+      intent: "equipment_purchase",
+    });
+    expect(extraPlatformSearchTerms(inferred.objects, fromModel, ["НКУ"])).toEqual(["шкаф управления"]);
+    expect(extraPlatformSearchTerms(["НКУ", "шкаф управления"], fromModel, ["НКУ"])).toEqual([]);
   });
 });

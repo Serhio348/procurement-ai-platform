@@ -97,31 +97,48 @@ export function createProcurementDocumentIngest(
         ocr: scan.ocr,
         maxOcrPages: Number.parseInt(process.env["DOCUMENT_OCR_MAX_PAGES"] ?? "50", 10),
       });
+      const known = new Map(
+        card.documents
+          .filter((item) => item.status === "hashed")
+          .map((item) => [item.sourceUrl, item] as const),
+      );
       const documents: SpecialistCaseDocumentValue[] = [];
+      const seen = new Set<string>();
       try {
         for (const source of listed.documents) {
-          documents.push(
-            ...(await ingestOne({
-              name: source.name,
-              sourceUrl: source.sourceUrl,
-              fetchUrl: source.downloadUrl ?? source.sourceUrl,
-              ...(source.downloadUrl === undefined ? {} : { listedDownloadUrl: source.downloadUrl }),
-              sourceId,
-              requestId,
-              client,
-              blobDirectory: options.blobDirectory,
-              ...(options.blobStore === undefined ? {} : { blobStore: options.blobStore }),
-              nativeExtractor,
-              scanExtractor,
-              usesVision: scan.usesVision,
-              logger,
-              ...(options.progress === undefined ? {} : { progress: options.progress }),
-              procurementId: card.id,
-            })),
-          );
+          const existing = known.get(source.sourceUrl);
+          if (existing !== undefined) {
+            documents.push(existing);
+            seen.add(source.sourceUrl);
+            continue;
+          }
+          const ingested = await ingestOne({
+            name: source.name,
+            sourceUrl: source.sourceUrl,
+            fetchUrl: source.downloadUrl ?? source.sourceUrl,
+            ...(source.downloadUrl === undefined ? {} : { listedDownloadUrl: source.downloadUrl }),
+            sourceId,
+            requestId,
+            client,
+            blobDirectory: options.blobDirectory,
+            ...(options.blobStore === undefined ? {} : { blobStore: options.blobStore }),
+            nativeExtractor,
+            scanExtractor,
+            usesVision: scan.usesVision,
+            logger,
+            ...(options.progress === undefined ? {} : { progress: options.progress }),
+            procurementId: card.id,
+          });
+          documents.push(...ingested);
+          seen.add(source.sourceUrl);
         }
       } finally {
         await scan.close();
+      }
+      for (const previous of card.documents) {
+        if (seen.has(previous.sourceUrl)) continue;
+        if (!isArchiveMemberSourceUrl(previous.sourceUrl)) continue;
+        documents.push(previous);
       }
       return finishCommercialRead(card, documents, options, logger);
     },

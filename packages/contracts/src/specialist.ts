@@ -3,7 +3,14 @@ import { CommercialFactKey } from "./commercial-terms.js";
 import { IsoDate, IsoDateTime, Sha256 } from "./common.js";
 import { ExtractedPage, ExtractionStatus } from "./documents.js";
 import { ProcurementId } from "./ids.js";
-import { ChangeEvent, ChangeKind, ProcedureCard, ProcedureStatus, SearchHit } from "./procurement.js";
+import {
+  ChangeEvent,
+  ChangeKind,
+  ListedSourceAttachment,
+  ProcedureCard,
+  ProcedureStatus,
+  SearchHit,
+} from "./procurement.js";
 
 export const SpecialistSearchFilters = z.object({
   /** Site-side: buyer / organizer UNP. */
@@ -176,6 +183,11 @@ export const SpecialistCardSnapshot = z.object({
   priceLabel: z.string().min(1).optional(),
   /** Bids deadline as published: a plain date or an instant, verbatim. */
   bidsDeadline: z.string().min(1).optional(),
+  /**
+   * Attachments as listed on the page. Absent on snapshots taken before
+   * document watch: the next pass records the list and does not alert.
+   */
+  documents: z.array(ListedSourceAttachment).optional(),
 });
 export type SpecialistCardSnapshot = z.infer<typeof SpecialistCardSnapshot>;
 

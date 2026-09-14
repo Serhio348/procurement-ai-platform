@@ -80,6 +80,7 @@ describe("parseGoszakupkiCard", () => {
       expect(parsed.card.lots).toHaveLength(1);
       expect(parsed.card.lots[0]?.number).toBe("1");
       expect(parsed.documents.length).toBeGreaterThan(0);
+      expect(parsed.card.listedDocuments[0]?.sourceUrl).toBe(parsed.documents[0]?.sourceUrl);
       expect(parsed.documents[0]?.sourceUrl).toContain(
         `/${family}/get-file/${id}?c=detail&f=0`,
       );

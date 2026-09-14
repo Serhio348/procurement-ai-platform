@@ -39,6 +39,7 @@ import {
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inboxTopic,
+  extraPlatformSearchTerms,
   inferSearchIntentPlan,
   isConsoleListedCase,
   partitionHitsByDecision,
@@ -494,11 +495,136 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             ...(foundAs === undefined ? {} : { foundAs }),
             ...(card.relevanceScore === undefined ? {} : { relevanceScore: card.relevanceScore }),
             ...(card.relevanceReason === undefined ? {} : { relevanceReason: card.relevanceReason }),
+            ...(card.actions.length > existing.actions.length ? { actions: card.actions } : {}),
             lastSeenAt: now,
           };
     const owned = withTriage(attachProfileToCard(merged, profileId), workspace());
     catalog().upsertCase(owned);
     return { card: owned, isNew: existing === undefined };
+  }
+
+  function queueFoundInbox(card: SpecialistProcurementCardValue, now: string): void {
+    const recorded = catalog().record(inboxItemFromFoundCard(card, now));
+    if (recorded.duplicate) catalog().undismiss(recorded.item.change.id);
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
+  }
+
+  function mergeSearchHits(
+    first: readonly SearchHit[],
+    extra: readonly SearchHit[],
+  ): SearchHit[] {
+    const seen = new Set(first.map((item) => item.sourceProcurementId));
+    const merged = [...first];
+    for (const hit of extra) {
+      if (seen.has(hit.sourceProcurementId)) continue;
+      seen.add(hit.sourceProcurementId);
+      merged.push(hit);
+    }
+    return merged;
+  }
+
+  /**
+   * Listing for a profile: cheap terms go to the site while the model plans;
+   * objects the model added are fetched after, with the same filters.
+   * Button search leaves publishedFrom empty; watch passes the watermark.
+   */
+  async function fetchProfileHits(
+    profile: SpecialistWorkingProfile,
+    limit: number,
+    offset: number,
+    publishedFrom?: string,
+  ): Promise<{ plan: SearchIntentPlan; hits: SearchHit[] }> {
+    const inferred = inferSearchIntentPlan({
+      name: profileDisplayName(profile),
+      keywords: profile.keywords,
+      excludeKeywords: profile.excludeKeywords,
+    });
+    const listingTerms = platformSearchTerms(inferred, profile.keywords);
+    const [plan, firstHits] = await Promise.all([
+      resolveSearchPlan(profile),
+      searchHits.search(
+        buildSearchQuery(profile, limit, offset, publishedFrom, listingTerms),
+      ),
+    ]);
+    const extraTerms = extraPlatformSearchTerms(listingTerms, plan, profile.keywords);
+    const extraHits =
+      extraTerms.length === 0
+        ? []
+        : await searchHits.search(
+            buildSearchQuery(profile, limit, offset, publishedFrom, extraTerms),
+          );
+    return { plan, hits: mergeSearchHits(firstHits, extraHits) };
+  }
+
+  /**
+   * Card look for listing-score review hits. The HTTP search already returned
+   * matches and queued the rest in the inbox; this pass may promote, drop, or
+   * leave a reason on the same cards.
+   */
+  function startListingReviewJob(
+    pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>,
+    profile: SpecialistWorkingProfile,
+    now: string,
+  ): void {
+    if (searchReview === undefined || pending.length === 0) return;
+    const cabinet = currentCabinet();
+    const reviewer = searchReview;
+    void cabinetAls.run(cabinet, async () => {
+      try {
+        const outcomes = await reviewer.review(
+          pending.map((item) => item.hit),
+          {
+            name: profileDisplayName(profile),
+            ...(profile.purpose === undefined ? {} : { purpose: profile.purpose }),
+            ...(profile.description === undefined ? {} : { description: profile.description }),
+            keywords: profile.keywords,
+            excludeKeywords: profile.excludeKeywords,
+          },
+        );
+        const dropped: string[] = [];
+        for (const [index, { card }] of pending.entries()) {
+          const outcome = outcomes[index];
+          if (outcome?.verdict === "irrelevant") {
+            workspace().rememberIrrelevant(profile.id, card.sourceProcurementId, now);
+            catalog().forgetCase(card.id);
+            dropped.push(card.id);
+            continue;
+          }
+          const reviewedCard: SpecialistProcurementCardValue =
+            outcome === undefined
+              ? card
+              : {
+                  ...card,
+                  ...(outcome.verdict === "relevant" ? { foundAs: "match" as const } : {}),
+                  actions: [
+                    ...card.actions,
+                    {
+                      step: card.actions.length + 1,
+                      actor: "DomainSearchAgent",
+                      status: "done",
+                      detail: `${reviewActor(outcome.decidedBy)}: ${outcome.reason}`,
+                    },
+                  ],
+                };
+          await rememberFound(reviewedCard, profile.id, now);
+          if (outcome?.verdict === "relevant") {
+            catalog().dismissByProcurementId(card.id);
+          }
+        }
+        workspace().setDismissedInboxIds(catalog().dismissedIds());
+        if (dropped.length > 0) {
+          await cabinets.removeCases(cabinet.workspaceId, dropped);
+          if (options.removeCases !== undefined) {
+            await options.removeCases(dropped, cabinet.workspaceId);
+          }
+        }
+        await persist(cabinet);
+      } catch (error) {
+        logger.error("Specialist search review job failed", error, {
+          profileName: profileDisplayName(profile),
+        });
+      }
+    });
   }
 
   /**
@@ -537,7 +663,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         discarded += 1;
         continue;
       }
-      if (known.get(card.sourceProcurementId)?.foundAs === "review") {
+      const already = known.get(card.sourceProcurementId);
+      if (already?.foundAs === "match") {
+        await rememberFound({ ...card, foundAs: "match" }, profile.id, now);
+        continue;
+      }
+      if (already?.foundAs === "review") {
         await rememberFound(card, profile.id, now);
         ambiguousCount += 1;
         continue;
@@ -654,6 +785,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         sourceProcurementId: card.sourceProcurementId,
         kinds: changes.map((item) => item.kind),
       });
+      if (
+        next.triage === "participate" &&
+        changes.some((item) => item.kind === "document_added")
+      ) {
+        startParticipateIngest(next);
+      }
     }
     return { monitoredCount, changedCount };
   }
@@ -676,15 +813,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   }
 
+  /**
+   * Button search: listing + code score. The plan model overlaps the site
+   * query (cheap inferred terms; extra objects from the model are fetched
+   * after). Review cards run in the cabinet background so the specialist
+   * sees matches without waiting on procurement.get.
+   */
   async function runManualSearch(
     limit: number,
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace().profile();
-    const plan = await resolveSearchPlan(profile);
-    const hits = await searchHits.search(
-      buildSearchQuery(profile, limit, offset, undefined, platformSearchTerms(plan, profile.keywords)),
-    );
+    const { plan, hits } = await fetchProfileHits(profile, limit, offset);
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -706,24 +846,53 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       resultItems.push((await rememberFound(card, profile.id, now)).card);
     }
-    const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: false });
-    resultItems.push(...reviewed.matched);
+    const rejected = workspace().rejectedSourceIds();
+    const sourceIds = selected.ambiguousCards.map((item) => item.sourceProcurementId);
+    const stored = await cabinets.loadCasesBySources(currentCabinet().workspaceId, sourceIds);
+    const known = new Map(
+      catalog().procurements().map((item) => [item.sourceProcurementId, item] as const),
+    );
+    for (const [sourceId, card] of stored) {
+      if (!known.has(sourceId)) known.set(sourceId, card);
+    }
+    let discardedFromReview = 0;
+    let ambiguousCount = 0;
+    const pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }> = [];
+    for (const [index, card] of selected.ambiguousCards.entries()) {
+      const hit = selected.ambiguousHits[index];
+      if (hit === undefined || rejected.has(card.sourceProcurementId)) continue;
+      if (workspace().isReviewedIrrelevant(profile.id, card.sourceProcurementId)) {
+        discardedFromReview += 1;
+        continue;
+      }
+      const already = known.get(card.sourceProcurementId);
+      if (already?.foundAs === "match") {
+        await rememberFound({ ...card, foundAs: "match" }, profile.id, now);
+        continue;
+      }
+      const remembered = await rememberFound(card, profile.id, now);
+      queueFoundInbox(remembered.card, now);
+      ambiguousCount += 1;
+      if (already?.foundAs === "review") continue;
+      pending.push({ card: remembered.card, hit });
+    }
     const relevantCount = resultItems.length;
     const discardedCount =
-      selected.discardedCount + skippedRejected + reviewed.discarded;
+      selected.discardedCount + skippedRejected + discardedFromReview;
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
       relevantCount,
       discardedCount,
-      ambiguousCount: reviewed.ambiguousCount,
+      ambiguousCount,
     });
     await pruneStaleCases();
     await persist();
+    startListingReviewJob(pending, profile, now);
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
       relevantCount,
       discardedCount,
-      ambiguousCount: reviewed.ambiguousCount,
+      ambiguousCount,
       hasMore: hits.length >= limit,
       items: resultItems,
     });
@@ -779,16 +948,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         const startedAt = clock();
         try {
           await discoveryController.beforeRequest(new Date());
-          plan = await resolveSearchPlan(profile);
-          hits = await searchHits.search(
-            buildSearchQuery(
-              profile,
-              limit,
-              0,
-              discoveryPublishedFrom(profile),
-              platformSearchTerms(plan, profile.keywords),
-            ),
+          const fetched = await fetchProfileHits(
+            profile,
+            limit,
+            0,
+            discoveryPublishedFrom(profile),
           );
+          plan = fetched.plan;
+          hits = fetched.hits;
         } catch (error) {
           logger.error("Specialist discovery search failed", error, {
             profileName: profileDisplayName(profile),

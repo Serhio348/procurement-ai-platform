@@ -14,6 +14,7 @@ function sourceCard(input: {
   raw?: string;
   amount?: number;
   bidsDeadline?: unknown;
+  listedDocuments?: Array<{ name: string; sourceUrl: string }>;
 }) {
   return ProcedureCard.parse({
     sourceId: "goszakupki_by",
@@ -28,6 +29,7 @@ function sourceCard(input: {
         ? { amount: { kind: "limit", amount: input.amount, raw: `${String(input.amount)} BYN` } }
         : {}),
     ...(input.bidsDeadline === undefined ? {} : { bidsDeadline: input.bidsDeadline }),
+    ...(input.listedDocuments === undefined ? {} : { listedDocuments: input.listedDocuments }),
   });
 }
 
@@ -111,6 +113,43 @@ describe("diffCardSnapshots", () => {
     const kinds = diffCardSnapshots(previous, current).map((item) => item.kind);
     expect(kinds).toContain("status_changed");
     expect(kinds).toContain("deadline_changed");
+  });
+
+  it("fires when a file appears or vanishes and ignores a reshuffle", () => {
+    const tz = (files: Array<{ name: string; sourceUrl: string }>) =>
+      cardSnapshot(
+        sourceCard({
+          listedDocuments: files,
+        }),
+        "2026-09-10T00:00:00.000Z",
+      );
+    const one = tz([{ name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" }]);
+    const two = tz([
+      { name: "Изменения.pdf", sourceUrl: "https://goszakupki.by/files/2" },
+      { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" },
+    ]);
+    const reshuffled = tz([
+      { name: "Изменения.pdf", sourceUrl: "https://goszakupki.by/files/2" },
+      { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" },
+    ]);
+    const added = diffCardSnapshots(one, two);
+    expect(added.map((item) => item.kind)).toEqual(["document_added"]);
+    expect(added[0]?.current).toBe("Изменения.pdf");
+    expect(diffCardSnapshots(two, reshuffled)).toEqual([]);
+    expect(diffCardSnapshots(two, one).map((item) => item.kind)).toEqual(["document_removed"]);
+  });
+
+  it("does not treat a snapshot taken before document watch as an empty list", () => {
+    const previous = cardSnapshot(sourceCard({}), "2026-09-10T00:00:00.000Z");
+    const withoutDocs = { ...previous };
+    delete withoutDocs.documents;
+    const current = cardSnapshot(
+      sourceCard({
+        listedDocuments: [{ name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" }],
+      }),
+      "2026-09-11T00:00:00.000Z",
+    );
+    expect(diffCardSnapshots(withoutDocs, current)).toEqual([]);
   });
 
   it("ignores a field that simply disappeared from the page", () => {

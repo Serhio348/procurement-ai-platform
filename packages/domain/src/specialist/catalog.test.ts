@@ -102,6 +102,8 @@ describe("SpecialistCatalog", () => {
     expect(catalog.dismiss(status.id)).toBe(true);
     expect(catalog.urgentInbox().map((entry) => entry.title)).toEqual(["НКУ и щитовое оборудование"]);
     expect(catalog.procurement(status.procurementId)?.title).toBe("Поставка КТПБ");
+    catalog.undismiss(status.id);
+    expect(catalog.urgentInbox()[0]?.title).toBe("Поставка КТПБ");
   });
 
   it("keeps both profiles on a case found twice", () => {
@@ -207,6 +209,29 @@ describe("SpecialistCatalog", () => {
     catalog.upsertCase(card);
     expect(catalog.storedCases()).toEqual([]);
     expect(catalog.procurement(card.id)).toBeUndefined();
+  });
+
+  it("forgets a review miss so a later search can store the same id again", () => {
+    const catalog = new SpecialistCatalog();
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000020",
+      title: "НКУ щитовое",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://goszakupki.by/auction/view/drop-1",
+      sourceProcurementId: "auction/drop-1",
+      foundAs: "review",
+    });
+    catalog.upsertCase(card);
+    catalog.record(inboxItemFromFoundCard(card, "2026-09-01T10:00:00.000Z"));
+    catalog.forgetCase(card.id);
+
+    expect(catalog.storedCases()).toEqual([]);
+    expect(catalog.urgentInbox()).toEqual([]);
+
+    catalog.upsertCase(card);
+    expect(catalog.storedCases().map((item) => item.id)).toEqual([card.id]);
+    expect(catalog.procurement(card.id)?.title).toBe("НКУ щитовое");
   });
 
   it("does not treat inbox stubs as stored cases for persist", () => {

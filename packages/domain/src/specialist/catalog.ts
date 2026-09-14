@@ -60,6 +60,16 @@ export class SpecialistCatalog {
     this.dismissByProcurementId(id);
   }
 
+  /**
+   * Drops a review miss so the list and inbox no longer show it. The same
+   * source id may come back on a later search (new phrases); unlike dropCase
+   * this does not permanently block the stable listing id.
+   */
+  forgetCase(id: string): void {
+    this.#cases.delete(id);
+    this.dismissByProcurementId(id);
+  }
+
   inboxItem(id: string): InboxFixtureItemValue | undefined {
     if (this.#dismissed.has(id)) return undefined;
     return this.#byChangeId.get(id);
@@ -69,6 +79,11 @@ export class SpecialistCatalog {
     if (this.#byChangeId.get(id) === undefined) return false;
     this.#dismissed.add(id);
     return true;
+  }
+
+  /** A later search found the same review hit: the row belongs in the inbox again. */
+  undismiss(id: string): void {
+    this.#dismissed.delete(id);
   }
 
   dismissMany(ids: readonly string[]): void {

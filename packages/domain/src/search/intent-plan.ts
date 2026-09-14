@@ -84,6 +84,21 @@ export function platformSearchTerms(
 }
 
 /**
+ * Phrases the model added that the cheap plan did not already send. Empty
+ * when both plans name the same objects — the listing did not miss anything.
+ */
+export function extraPlatformSearchTerms(
+  alreadyQueried: readonly string[],
+  plan: SearchIntentPlanValue,
+  fallbackKeywords: readonly string[],
+): string[] {
+  const have = new Set(alreadyQueried.map((item) => item.toLocaleLowerCase("ru-BY")));
+  return platformSearchTerms(plan, fallbackKeywords).filter(
+    (item) => !have.has(item.toLocaleLowerCase("ru-BY")),
+  );
+}
+
+/**
  * Accepts camelCase aliases and silently drops any score the model tried to
  * add. Invalid JSON becomes undefined so the caller can fall back.
  */

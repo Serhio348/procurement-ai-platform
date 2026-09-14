@@ -150,6 +150,7 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
     ...(giasId === undefined ? [] : [{ kind: "gias" as const, value: giasId }]),
   ];
 
+  const documents = parseDocuments($, input.url, input.fetchedAt);
   const card = ProcedureCard.parse({
     sourceId: "goszakupki_by",
     sourceProcurementId,
@@ -223,11 +224,12 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
     lots,
     rawFields: Object.fromEntries(fields),
     fetchedAt: input.fetchedAt,
+    listedDocuments: documents.map((item) => ({ name: item.name, sourceUrl: item.sourceUrl })),
   });
 
   return {
     card,
-    documents: parseDocuments($, input.url, input.fetchedAt),
+    documents,
     history: parseHistory($, input.url),
   };
 }

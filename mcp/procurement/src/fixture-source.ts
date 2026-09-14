@@ -80,7 +80,15 @@ export class FixtureProcurementSource implements ProcurementSourcePort {
   }
 
   async get(id: SourceProcurementId): Promise<z.infer<typeof ProcedureCard>> {
-    return this.#getRecord(id).card;
+    const record = this.#getRecord(id);
+    if (record.card.listedDocuments.length > 0) return record.card;
+    return ProcedureCard.parse({
+      ...record.card,
+      listedDocuments: record.documents.map((item) => ({
+        name: item.name,
+        sourceUrl: item.sourceUrl,
+      })),
+    });
   }
 
   async getStatus(

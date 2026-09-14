@@ -134,11 +134,22 @@ export const Lot = SourceLot.omit({ positions: true }).extend({
 export type Lot = z.infer<typeof Lot>;
 
 /**
+ * Name and URL as printed in the card's document block. No download, no
+ * Yandex expansion: enough to see that a file appeared or vanished.
+ */
+export const ListedSourceAttachment = z.object({
+  name: z.string().min(1),
+  sourceUrl: z.string().url(),
+});
+export type ListedSourceAttachment = z.infer<typeof ListedSourceAttachment>;
+
+/**
  * The platform card as fetched by a source adapter. Almost everything is
  * optional: a scraped page is allowed to be incomplete, and the pipeline must
  * survive that rather than throw.
  */
 export const ProcedureCard = z.object({
+  listedDocuments: z.array(ListedSourceAttachment).default([]),
   sourceId: SourceId,
   sourceProcurementId: SourceProcurementId,
   externalIds: z.array(ExternalIdentifier).default([]),

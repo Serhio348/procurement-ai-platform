@@ -202,6 +202,85 @@ describe("createProcurementDocumentIngest", () => {
     expect(next.documents[0]?.hash).toBe(hash);
   });
 
+  it("does not download a file the case already hashed", async () => {
+    const oldBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
+    const newBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x32]);
+    const oldHash = createHash("sha256").update(oldBytes).digest("hex");
+    const newHash = createHash("sha256").update(newBytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-skip-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, newHash, newBytes);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "ТЗ.pdf",
+                sourceUrl: "https://goszakupki.by/files/1",
+                downloadUrl: "https://goszakupki.by/files/1?download=1",
+                mimeType: "application/pdf",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+              {
+                name: "Изменения.pdf",
+                sourceUrl: "https://goszakupki.by/files/2",
+                downloadUrl: "https://goszakupki.by/files/2?download=1",
+                mimeType: "application/pdf",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        return {
+          structuredContent: {
+            hash: newHash,
+            storageKey: `blobs/${newHash}`,
+            sizeBytes: newBytes.byteLength,
+            contentType: "application/pdf",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+      documents: [
+        {
+          name: "ТЗ.pdf",
+          sourceUrl: "https://goszakupki.by/files/1",
+          hash: oldHash,
+          status: "hashed",
+        },
+      ],
+    });
+
+    const next = await port.ingest(card);
+
+    expect(callTool.mock.calls.map((item) => item[0])).toEqual([
+      "procurement.get_documents",
+      "procurement.download",
+    ]);
+    expect(next.documents.map((item) => item.sourceUrl).sort()).toEqual([
+      "https://goszakupki.by/files/1",
+      "https://goszakupki.by/files/2",
+    ]);
+    expect(next.documents.find((item) => item.sourceUrl.endsWith("/1"))?.hash).toBe(oldHash);
+    expect(next.documents.find((item) => item.sourceUrl.endsWith("/2"))?.hash).toBe(newHash);
+  });
+
   it("does not report a download as hashed when the blob cannot be read back", async () => {
     const hash = "a".repeat(64);
     const port = createProcurementDocumentIngest({

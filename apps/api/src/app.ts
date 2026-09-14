@@ -29,12 +29,14 @@ import {
   applyInboxChangeToCard,
   applySourceCard,
   attachProfileToCard,
+  caseMatchesListTab,
   diffCardSnapshots,
   discoveryPublishedFrom,
   inboxDocumentLinks,
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inboxTopic,
+  isConsoleListedCase,
   partitionHitsByDecision,
   profileDisplayName,
   selectRelevantSearchCards,
@@ -244,12 +246,22 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       liveOnly: liveProcurementsOnly,
       ...(tab === "trash" ? {} : { rejectedSourceIds: workspace().rejectedSourceIds() }),
     });
-    const items = page.items.map((item) => withTriage(item, workspace()));
+    const rejectedSourceIds = workspace().rejectedSourceIds();
+    const items = page.items
+      .map((item) => withTriage(item, workspace()))
+      .filter((item) =>
+        tab === "trash"
+          ? item.triage === "reject"
+          : isConsoleListedCase(item, {
+              liveOnly: liveProcurementsOnly,
+              rejectedSourceIds,
+            }) && caseMatchesListTab(item, tab),
+      );
     return SpecialistProcurementListResponse.parse({
       items,
       total: page.total,
       tab,
-      hasMore: offset + items.length < page.total,
+      hasMore: offset + page.items.length < page.total,
     });
   };
 

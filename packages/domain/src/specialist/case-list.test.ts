@@ -60,9 +60,18 @@ describe("pageListedCases", () => {
     expect(page.items.map((item) => item.id)).toEqual([watching.id]);
   });
 
-  it("isolates the archive tab from active decided cases", () => {
-    const page = pageListedCases([watching, archived], { tab: "archive" });
-    expect(page.items.map((item) => item.id)).toEqual([archived.id]);
+  it("keeps rejected cases out of the archive tab", () => {
+    const trashed = card({
+      id: "00000000-0000-4000-8000-000000000006",
+      sourceProcurementId: "auction/6",
+      foundAs: "match",
+      triage: "reject",
+      archived: true,
+      live: true,
+    });
+    expect(pageListedCases([archived, trashed], { tab: "archive" }).items.map((item) => item.id)).toEqual([
+      archived.id,
+    ]);
   });
 
   it("lists rejected cases only on the trash tab, even when search would skip them", () => {

@@ -133,6 +133,56 @@ describe("MyProcurementsApp", () => {
     expect(load).toHaveBeenCalledWith("all");
   });
 
+  it("reloads the list when the specialist switches Все / Слежу / Архив", async () => {
+    const user = userEvent.setup();
+    const watching = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000011",
+      title: "Кабель под наблюдением",
+      triage: "monitor",
+    });
+    const archived = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000012",
+      title: "Завершённая в архиве",
+      archived: true,
+    });
+    const load = vi.fn(async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
+      if (tab === "all") return [card, watching];
+      if (tab === "monitor") return [watching];
+      if (tab === "archive") return [archived];
+      return [];
+    });
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: "Слежу" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+    });
+    expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
+    expect(load).toHaveBeenCalledWith("monitor");
+
+    await user.click(screen.getByRole("tab", { name: "Архив" }));
+    await waitFor(() => {
+      expect(screen.getByText("Завершённая в архиве")).toBeTruthy();
+    });
+    expect(screen.queryByText("Кабель под наблюдением")).toBeNull();
+    expect(load).toHaveBeenCalledWith("archive");
+  });
+
   it("does not keep Корзина among Мои закупки tabs", () => {
     render(
       <MemoryRouter initialEntries={["/my-procurements"]}>
@@ -146,6 +196,30 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByRole("heading", { name: "Мои закупки" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Корзина" })).toBeNull();
     expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+  });
+
+  it("keeps rejected cards out of Мои закупки even if the loaded page is mixed", async () => {
+    const trashed = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000099",
+      title: "Убранная закупка",
+      triage: "reject",
+    });
+    const load = vi.fn(async () => [card, trashed]);
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[card, trashed]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    expect(screen.queryByText("Убранная закупка")).toBeNull();
   });
 
   it("lists a rejected card on the Корзина page and restores it", async () => {

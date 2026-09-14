@@ -74,18 +74,22 @@ export function MyProcurementsApp({
 
   const source = remote ?? procurements;
   const decided = source.filter((item) => isDecided(item) && item.archived !== true);
-  const archived = source.filter((item) => item.archived === true);
+  const archived = source.filter(
+    (item) => item.archived === true && item.triage !== "reject",
+  );
   const trashed = source.filter((item) => item.triage === "reject");
-  const visible =
-    load !== undefined
-      ? source
-      : isTrash
-        ? trashed
-        : filter === "archive"
-          ? archived
-          : filter === "all"
-            ? decided
-            : decided.filter((item) => item.triage === filter);
+  // When load() is set it already returns the active tab. Filtering that page
+  // again (e.g. Архив against a «Все» response) emptied the list. Still drop
+  // reject so trash cannot leak into Мои закупки.
+  const visible = isTrash
+    ? trashed
+    : load !== undefined
+      ? source.filter((item) => item.triage !== "reject")
+      : filter === "archive"
+        ? archived
+        : filter === "all"
+          ? decided
+          : decided.filter((item) => item.triage === filter);
 
   async function runCardAction(
     item: SpecialistProcurementCard,

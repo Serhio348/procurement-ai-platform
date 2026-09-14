@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
   SpecialistInboxAction,
@@ -198,15 +198,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           setProcurements((current) => current.filter((item) => item.id !== id));
         };
 
-  const loadList =
-    props.listMine === undefined
-      ? undefined
-      : async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
-          const items = await props.listMine?.({ tab, limit: 100 });
-          const next = items ?? [];
-          setProcurements((current) => mergeProcurementCards(current, next));
-          return next;
-        };
+  const listMine = props.listMine;
+  const loadList = useCallback(
+    async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
+      const items = (await listMine?.({ tab, limit: 100 })) ?? [];
+      setProcurements((current) => mergeProcurementCards(current, items));
+      return items;
+    },
+    [listMine],
+  );
 
   function rememberCard(card: SpecialistProcurementCard): void {
     setProcurements((current) => {
@@ -375,7 +375,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(decide === undefined
                 ? {}
                 : { onRemove: async (id: string) => void decide(id, "reject") })}
-              {...(loadList === undefined ? {} : { load: loadList })}
+              {...(listMine === undefined ? {} : { load: loadList })}
             />
           }
         />
@@ -387,7 +387,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               procurements={procurements}
               {...(restore === undefined ? {} : { onRestore: restore })}
               {...(purge === undefined ? {} : { onPurge: purge })}
-              {...(loadList === undefined ? {} : { load: loadList })}
+              {...(listMine === undefined ? {} : { load: loadList })}
             />
           }
         />

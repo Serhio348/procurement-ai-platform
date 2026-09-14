@@ -53,7 +53,7 @@ export function caseMatchesListTab(
     case "participate":
       return card.triage === "participate" && card.archived !== true;
     case "archive":
-      return card.archived === true;
+      return card.archived === true && card.triage !== "reject";
     case "trash":
       return card.triage === "reject";
   }

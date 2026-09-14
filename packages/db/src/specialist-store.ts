@@ -680,6 +680,9 @@ function caseListFilters(workspaceId: string, query: SpecialistCaseListQuery) {
     return [eq(workspaceProcurements.workspaceId, workspaceId), eq(workspaceProcurements.triage, "reject")];
   }
   if (listed !== undefined) filters.push(listed);
+  filters.push(
+    or(isNull(workspaceProcurements.triage), ne(workspaceProcurements.triage, "reject"))!,
+  );
   if (tab === "all") {
     filters.push(eq(workspaceProcurements.archived, false));
     filters.push(inArray(workspaceProcurements.triage, ["monitor", "participate"]));

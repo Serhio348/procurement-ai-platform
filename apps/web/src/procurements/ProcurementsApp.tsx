@@ -206,7 +206,7 @@ export function ProcurementsApp({
   const [nextOffset, setNextOffset] = useState(0);
   const [searchPct, setSearchPct] = useState(0);
   const scoring = searchRun?.status === "retrieving" || searchRun?.status === "scoring";
-  const searching = (busy && busyKind === undefined) || scoring;
+  const listing = busy && busyKind === undefined && !scoring;
   useEffect(() => {
     if (searchRun !== undefined && searchRun.retrievedCount > 0) {
       const pct =
@@ -216,7 +216,7 @@ export function ProcurementsApp({
       setSearchPct(pct);
       return undefined;
     }
-    if (!searching) {
+    if (!listing && !scoring) {
       setSearchPct(0);
       return undefined;
     }
@@ -226,7 +226,7 @@ export function ProcurementsApp({
       );
     }, 300);
     return () => clearInterval(timer);
-  }, [searchRun, searching]);
+  }, [searchRun, listing, scoring]);
   useEffect(() => {
     if (searchRun === undefined) return;
     if (searchRun.status === "failed") {
@@ -388,7 +388,7 @@ export function ProcurementsApp({
                   <select
                     id="search-profile-select"
                     value={chosenProfileId}
-                    disabled={busy}
+                    disabled={listing}
                     onChange={(event) => {
                       const id = event.target.value;
                       setChosenProfileId(id);
@@ -414,18 +414,18 @@ export function ProcurementsApp({
               <button
                 type="button"
                 className="search-profile"
-                disabled={search === undefined || busy}
+                disabled={search === undefined || listing}
                 onClick={() => {
                   void runSearch();
                 }}
               >
-                {searching ? "Ищем…" : "Искать по профилю"}
+                {listing ? "Ищем…" : scoring ? "Дочитываем…" : "Искать по профилю"}
               </button>
               {hasMore && search !== undefined ? (
                 <button
                   type="button"
                   className="search-profile"
-                  disabled={busy}
+                  disabled={listing}
                   onClick={() => {
                     void runSearch(nextOffset);
                   }}
@@ -436,16 +436,12 @@ export function ProcurementsApp({
             </div>
           </div>
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}
-          {searching ? (
+          {listing ? (
             <div className="search-overlay" role="status" aria-live="polite">
               <div className="search-spinner">
                 <span className="search-spinner-pct">{searchPct}%</span>
               </div>
-              <p className="search-overlay-text">
-                {searchRun?.status === "scoring"
-                  ? `Читаем карточки: ${String(searchRun.scoredCount)} из ${String(searchRun.retrievedCount)}…`
-                  : "Ищем закупки на площадке…"}
-              </p>
+              <p className="search-overlay-text">Ищем закупки на площадке…</p>
             </div>
           ) : null}
           {items.length === 0 ? (

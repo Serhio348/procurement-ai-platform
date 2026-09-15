@@ -5,6 +5,7 @@ import { SpecialistCatalog, SpecialistWorkspace } from "@procurement/domain";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { silentLogger } from "@procurement/observability";
 import { afterEach, describe, expect, it } from "vitest";
+import { TEST_WORKSPACE_ID } from "./cabinets.js";
 import { openSpecialistPersistence } from "./persist.js";
 
 const tmpDirs: string[] = [];
@@ -48,6 +49,37 @@ describe("openSpecialistPersistence", () => {
     expect(saved.profiles[0]?.name).toBe("Кабель");
 
     await persistence.close();
+  });
+
+  it("does not restore the search queue after a disk restart", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const workspacePath = path.join(directory, "specialist-workspace.json");
+    const persistence = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const workspace = new SpecialistWorkspace();
+    workspace.replaceSearchIds(workspace.profile().id, [
+      "00000000-0000-4000-8000-000000000701",
+    ]);
+    await persistence.persistWorkspace(workspace.snapshot());
+    await persistence.close();
+
+    const saved = JSON.parse(await readFile(workspacePath, "utf8")) as {
+      searchIdsByProfile: Record<string, string[]>;
+    };
+    expect(saved.searchIdsByProfile).toEqual({});
+
+    const restarted = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const cabinet = await restarted.cabinets.open(TEST_WORKSPACE_ID);
+    expect(cabinet.workspace.searchIds(cabinet.workspace.profile().id)).toEqual([]);
+    await restarted.close();
   });
 
   it("drops a purged case from the disk copy so a restart cannot restore trash", async () => {

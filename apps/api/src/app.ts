@@ -44,6 +44,7 @@ import {
   inferSearchIntentPlan,
   mergeSearchIntentPlans,
   isClosedProcedureStatus,
+  isPersistedCabinetCase,
   isConsoleListedCase,
   partitionHitsByDecision,
   platformSearchTerms,
@@ -209,12 +210,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await options.persistCases(
         cabinet.catalog
           .storedCases()
-          .filter(
-            (card) =>
-              card.live !== true ||
-              !isClosedProcedureStatus(card.status) ||
-              card.triage !== undefined,
-          ),
+          .filter((card) => isPersistedCabinetCase(card) || card.foundAs === "review"),
         cabinet.workspaceId,
       );
     }
@@ -235,14 +231,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   // finished-status search may show them, but they are never persisted.
   // Watch / participate / reject stay. Untouched old live rows are removed.
   const pruneStaleCases = async (): Promise<void> => {
-    const visibleClosedStatuses = new Set(
-      workspace().profile().statuses.filter((status) => isClosedProcedureStatus(status)),
+    const keepCaseIds = new Set(
+      workspace()
+        .profiles()
+        .flatMap((profile) => [...workspace().searchIds(profile.id)]),
     );
     const removed = catalog().prune({
       now: clock(),
       maxAgeMs: caseMaxAgeMs,
       keepSourceIds: workspace().decidedSourceIds(),
-      keepClosedStatuses: visibleClosedStatuses,
+      keepCaseIds,
     });
     const cutoff = new Date(Date.parse(clock()) - caseMaxAgeMs).toISOString();
     const staleIds = await cabinets.listStaleUndecidedIds(
@@ -352,7 +350,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const tab = query.tab ?? "listed";
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 100;
-    await pruneStaleCases();
+    if (tab === "listed" || tab === "search") {
+      await pruneStaleCases();
+    }
     if (tab === "search") {
       const items: SpecialistProcurementCardValue[] = [];
       for (const id of workspace().searchIds(workspace().profile().id)) {
@@ -700,9 +700,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   /**
    * Scores listing rows after procurement.get (or a title-only stand-in when
-   * the review port is off). Each settled match is persisted immediately so
-   * the specialist list grows while the rest of the queue is still opening
-   * cards. Listing titles never write a match/discard verdict.
+   * the review port is off). Matches stay in the session search queue; SQL
+   * gets a row only after watch / participate / reject (or a review stub).
+   * Listing titles never write a match/discard verdict.
    */
   async function scorePendingHits(
     pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>,
@@ -902,7 +902,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     selected: ReturnType<typeof selectRelevantSearchCards>,
     profile: SpecialistWorkingProfile,
     now: string,
-    options: { restoreReviewInbox: boolean },
+    options: { restoreReviewInbox: boolean; skipKnownIrrelevant: boolean },
   ): Promise<{
     pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>;
     skippedRejected: number;
@@ -929,7 +929,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         skippedRejected += 1;
         continue;
       }
-      if (workspace().isReviewedIrrelevant(profile.id, card.sourceProcurementId)) {
+      if (
+        options.skipKnownIrrelevant &&
+        workspace().isReviewedIrrelevant(profile.id, card.sourceProcurementId)
+      ) {
         discardedFromReview += 1;
         continue;
       }
@@ -1056,7 +1059,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         statuses: profile.statuses,
         excludeSingleSource: profile.excludeSingleSource,
         intent: plan,
-        skipReviewSourceIds: workspace().reviewedIrrelevantSourceIds(profile.id),
       },
       limit,
     );
@@ -1065,6 +1067,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (offset === 0) workspace().replaceSearchIds(profile.id, []);
     const collected = await collectPendingHits(selected, profile, now, {
       restoreReviewInbox: true,
+      skipKnownIrrelevant: false,
     });
     const listingDiscarded =
       selected.discardedCount + collected.skippedRejected + collected.discardedFromReview;
@@ -1204,6 +1207,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         const now = clock();
         const collected = await collectPendingHits(selected, profile, now, {
           restoreReviewInbox: false,
+          skipKnownIrrelevant: true,
         });
         const reviewed = await scorePendingHits(collected.pending, profile, now, plan, {
           inboxForMatches: true,

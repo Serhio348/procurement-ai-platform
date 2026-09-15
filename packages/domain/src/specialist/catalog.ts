@@ -4,7 +4,6 @@ import {
   SpecialistInboxEntry,
   SpecialistProcurementCard,
   type InboxFixtureItem as InboxFixtureItemValue,
-  type ProcedureStatus,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
 import { compileChangeAlert } from "../notification/message.js";
@@ -111,29 +110,19 @@ export class SpecialistCatalog {
   }
 
   /**
-   * Drops unused finished procedures and undecided live cases a search has not
-   * returned for `maxAgeMs`. Watch / participate / reject stay. A finished
-   * procedure is not kept just because it was seen today — the specialist can
-   * find it again on the platform with a status filter. Inbox rows of pruned
-   * cases are dismissed so the inbox cannot point at a card that no longer exists.
+   * Drops unused search hits. Watch / participate / reject stay, as do ids
+   * from the current search queue. Inbox rows of pruned cases are dismissed.
    */
   prune(input: {
     now: string;
     maxAgeMs: number;
     keepSourceIds: ReadonlySet<string>;
-    keepClosedStatuses?: ReadonlySet<ProcedureStatus>;
+    keepCaseIds?: ReadonlySet<string>;
   }): string[] {
     const cutoff = Date.parse(input.now) - input.maxAgeMs;
     const removed: string[] = [];
     for (const card of this.#cases.values()) {
-      if (
-        !isPrunableUndecidedCase(
-          card,
-          cutoff,
-          input.keepSourceIds,
-          input.keepClosedStatuses,
-        )
-      ) {
+      if (!isPrunableUndecidedCase(card, cutoff, input.keepSourceIds, input.keepCaseIds)) {
         continue;
       }
       removed.push(card.id);

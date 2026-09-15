@@ -40,11 +40,11 @@ afterEach(() => {
 });
 
 describe("SpecialistApp search list", () => {
-  it("replaces the cabinet dump with this search and remount keeps only last search", async () => {
+  it("starts empty, then keeps only this search after remount", async () => {
     const user = userEvent.setup();
     const searchProps = {
       inbox: [],
-      procurements: [stale, found],
+      procurements: [] as SpecialistProcurementCard[],
       profiles: [profile],
       activeProfileId: profile.id,
       search: async () => ({
@@ -56,7 +56,8 @@ describe("SpecialistApp search list", () => {
     };
 
     const first = render(<SpecialistApp {...searchProps} />);
-    expect(screen.getByRole("button", { name: /Старая из базы/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Старая из базы/ })).toBeNull();
+    expect(screen.getAllByText("Нет закупок в работе").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "Искать по профилю" }));
     expect(screen.getByRole("button", { name: /Найденная поиском/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Старая из базы/ })).toBeNull();
@@ -68,17 +69,21 @@ describe("SpecialistApp search list", () => {
   });
 
   it("keeps a watched case out of Закупки", () => {
-    const watching = SpecialistProcurementCard.parse({ ...found, triage: "monitor" });
+    const watching = SpecialistProcurementCard.parse({
+      ...stale,
+      triage: "monitor",
+      title: "Отслеживаемая из кабинета",
+    });
     render(
       <SpecialistApp
         inbox={[]}
-        procurements={[watching, stale]}
+        procurements={[watching, found]}
         profiles={[profile]}
         activeProfileId={profile.id}
       />,
     );
-    expect(screen.queryByRole("button", { name: /Найденная поиском/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Старая из базы/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Отслеживаемая из кабинета/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Найденная поиском/ })).toBeTruthy();
   });
 
   it("moves an inbox case into Закупки and opens it for triage", async () => {

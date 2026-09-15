@@ -15,12 +15,13 @@ import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
 import {
   countCabinetCases,
-  isClosedProcedureStatus,
+  isPersistedCabinetCase,
   isPrunableUndecidedCase,
   isWatchedTriage,
   pageListedCases,
   SpecialistCatalog,
   SpecialistWorkspace,
+  withoutSearchQueue,
 } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type {
@@ -92,13 +93,14 @@ export async function openSpecialistPersistence(options: {
     state: SpecialistWorkspaceState,
     workspaceId = defaultWorkspaceId,
   ): Promise<void> => {
+    const durable = SpecialistWorkspace.parse(withoutSearchQueue(state));
     await saveWorkspaceFile(
       workspaceFilePath(options.workspacePath, workspaceId),
-      SpecialistWorkspace.parse(state),
+      durable,
     );
     if (store === undefined) return;
     try {
-      await store.saveWorkspace(state, workspaceId);
+      await store.saveWorkspace(durable.snapshot(), workspaceId);
     } catch (error) {
       options.logger.error("PostgreSQL workspace save failed; disk copy remains", error);
       await recordJournal(journal, {
@@ -194,7 +196,7 @@ export async function openSpecialistPersistence(options: {
         throw error;
       }
       await hydrateCabinet(cabinet, {
-        ...(fromDb === undefined ? {} : { workspace: fromDb }),
+        ...(fromDb === undefined ? {} : { workspace: withoutSearchQueue(fromDb) }),
         inbox,
       });
     } else {
@@ -208,7 +210,7 @@ export async function openSpecialistPersistence(options: {
         [],
       );
       await hydrateCabinet(cabinet, {
-        workspace: fromFile.snapshot(),
+        workspace: withoutSearchQueue(fromFile.snapshot()),
         cases,
         inbox,
       });
@@ -245,12 +247,7 @@ export async function openSpecialistPersistence(options: {
       await persistCases(
         cabinet.catalog
           .storedCases()
-          .filter(
-            (card) =>
-              card.live !== true ||
-              !isClosedProcedureStatus(card.status) ||
-              card.triage !== undefined,
-          ),
+          .filter((card) => isPersistedCabinetCase(card) || card.foundAs === "review"),
         cabinet.workspaceId,
       );
       await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
@@ -329,16 +326,17 @@ export async function openSpecialistPersistence(options: {
         .sort((left, right) => watchOrder(left) - watchOrder(right))
         .slice(0, limit);
     },
-    async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds) {
+    async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds, keepIds = []) {
       if (store !== undefined) {
-        return store.listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds);
+        return store.listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds, keepIds);
       }
       const cabinet = await openCabinet(workspaceId);
       const cutoff = Date.parse(cutoffIso);
       const keep = new Set(keepSourceIds);
+      const keepCases = new Set(keepIds);
       return cabinet.catalog
-        .procurements()
-        .filter((card) => isPrunableUndecidedCase(card, cutoff, keep))
+        .storedCases()
+        .filter((card) => isPrunableUndecidedCase(card, cutoff, keep, keepCases))
         .map((card) => card.id);
     },
     async findDocument(workspaceId, hash) {

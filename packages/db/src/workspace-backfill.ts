@@ -129,12 +129,7 @@ function cloneWorkspaceState(state: SpecialistWorkspaceState): {
         ...item,
         profileId: profileMap.get(item.profileId) ?? item.profileId,
       })),
-      searchIdsByProfile: Object.fromEntries(
-        Object.entries(state.searchIdsByProfile).map(([profileId, ids]) => [
-          profileMap.get(profileId) ?? profileId,
-          ids,
-        ]),
-      ),
+      searchIdsByProfile: {},
     }),
   };
 }

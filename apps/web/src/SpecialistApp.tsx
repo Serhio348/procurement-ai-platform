@@ -290,7 +290,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       if (list !== undefined) {
         void list({ tab: "search", limit: 100 })
           .then((items) => {
-            setProcurements((current) => mergeProcurementCards(current, items));
+            setProcurements((current) => {
+              const kept = current.filter(
+                (item) => isWatchedTriage(item) || isRejectedTriage(item.triage),
+              );
+              return mergeProcurementCards(kept, items);
+            });
           })
           .catch(() => undefined);
       }

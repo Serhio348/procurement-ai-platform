@@ -342,6 +342,16 @@ export class SpecialistWorkspace {
   }
 }
 
+/** Search queue is a process session. Disk and SQL keep the profile cabinet. */
+export function withoutSearchQueue(
+  state: SpecialistWorkspaceStateValue,
+): SpecialistWorkspaceStateValue {
+  return SpecialistWorkspaceState.parse({
+    ...state,
+    searchIdsByProfile: {},
+  });
+}
+
 function migrateWorkspaceState(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null) {
     const created = emptySpecialistWorkingProfile();

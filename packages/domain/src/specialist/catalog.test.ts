@@ -151,13 +151,13 @@ describe("SpecialistCatalog", () => {
     ]);
   });
 
-  it("prunes stale undecided live cases together with their inbox rows, keeps decided and fresh ones", () => {
+  it("prunes unused cases and keeps decided ones", () => {
     const catalog = new SpecialistCatalog();
     const base = {
       status: "unknown",
       statusLabel: "неизвестно",
       live: true,
-      foundAs: "review",
+      foundAs: "match",
     };
     const stale = SpecialistProcurementCard.parse({
       ...base,
@@ -200,10 +200,8 @@ describe("SpecialistCatalog", () => {
       keepSourceIds: new Set(),
     });
 
-    expect(removed.sort()).toEqual([stale.id, legacy.id].sort());
-    expect(catalog.procurements().map((card) => card.id).sort()).toEqual(
-      [fresh.id, decided.id].sort(),
-    );
+    expect(removed.sort()).toEqual([stale.id, legacy.id, fresh.id].sort());
+    expect(catalog.procurements().map((card) => card.id)).toEqual([decided.id]);
     expect(catalog.urgentInbox()).toEqual([]);
   });
 

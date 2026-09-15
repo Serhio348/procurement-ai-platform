@@ -235,6 +235,18 @@ describe("isPrunableUndecidedCase", () => {
     expect(
       isPrunableUndecidedCase(
         {
+          foundAs: "review",
+          status: "accepting_bids",
+          sourceProcurementId: "auction/2",
+          live: true,
+        },
+        cutoff,
+        new Set(),
+      ),
+    ).toBe(false);
+    expect(
+      isPrunableUndecidedCase(
+        {
           status: "completed",
           sourceProcurementId: "auction/1",
           triage: "participate",
@@ -246,18 +258,18 @@ describe("isPrunableUndecidedCase", () => {
     ).toBe(false);
   });
 
-  it("keeps finished cases while the profile explicitly watches that status", () => {
+  it("keeps the current search queue even when the hit is unused", () => {
     expect(
       isPrunableUndecidedCase(
         {
-          status: "completed",
+          id: "00000000-0000-4000-8000-000000000001",
+          status: "accepting_bids",
           sourceProcurementId: "auction/1",
           live: true,
-          lastSeenAt: "2026-09-16T12:00:00.000Z",
         },
         cutoff,
         new Set(),
-        new Set(["completed"]),
+        new Set(["00000000-0000-4000-8000-000000000001"]),
       ),
     ).toBe(false);
   });

@@ -3,6 +3,7 @@ import {
   REVIEW_VERDICT_MAX_AGE_MS,
   SpecialistWorkspace,
   discoveryPublishedFrom,
+  withoutSearchQueue,
 } from "./workspace.js";
 
 const write = {
@@ -164,6 +165,15 @@ describe("search queue ids", () => {
       "00000000-0000-4000-8000-000000000002",
     ]);
     expect(restored.searchIds(second)).toEqual([]);
+  });
+
+  it("strips search ids from a durable snapshot", () => {
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profile().id;
+    workspace.replaceSearchIds(profileId, ["00000000-0000-4000-8000-000000000001"]);
+    const durable = withoutSearchQueue(workspace.snapshot());
+    expect(durable.searchIdsByProfile).toEqual({});
+    expect(workspace.searchIds(profileId)).toEqual(["00000000-0000-4000-8000-000000000001"]);
   });
 });
 

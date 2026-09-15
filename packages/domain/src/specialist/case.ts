@@ -336,31 +336,34 @@ export function isClosedProcedureStatus(status: ProcedureStatus): boolean {
   return status === "completed" || status === "cancelled" || status === "failed";
 }
 
+/** Only a specialist decision belongs in SQL. A search hit is a temporary queue row. */
+export function isPersistedCabinetCase(card: { triage?: string | undefined }): boolean {
+  return card.triage !== undefined;
+}
+
 /**
- * Undecided catalog rows that must leave the cabinet: a finished procedure
- * the specialist never took, or a live row a search has not returned for a
- * while. Decided (watch / participate / reject) rows stay.
+ * Unused search hits leave the cabinet. Watch / participate / reject stay, as
+ * does the current search queue (`keepCaseIds`). Age is not a reason to keep
+ * a row the specialist never took.
  */
 export function isPrunableUndecidedCase(
   card: {
+    id?: string | undefined;
     live?: boolean | undefined;
     triage?: string | undefined;
+    foundAs?: string | undefined;
     status: ProcedureStatus;
     lastSeenAt?: string | undefined;
     sourceProcurementId: string;
   },
-  cutoffMs: number,
+  _cutoffMs: number,
   keepSourceIds: ReadonlySet<string>,
-  keepClosedStatuses: ReadonlySet<ProcedureStatus> = new Set(),
+  keepCaseIds: ReadonlySet<string> = new Set(),
 ): boolean {
   if (card.triage !== undefined) return false;
   if (keepSourceIds.has(card.sourceProcurementId)) return false;
-  if (isClosedProcedureStatus(card.status)) {
-    return card.live === true && !keepClosedStatuses.has(card.status);
-  }
-  if (card.live !== true) return false;
-  const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
-  if (Number.isFinite(seen) && seen >= cutoffMs) return false;
+  if (card.id !== undefined && keepCaseIds.has(card.id)) return false;
+  if (card.foundAs === "review") return false;
   return true;
 }
 

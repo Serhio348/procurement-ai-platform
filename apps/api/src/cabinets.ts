@@ -79,6 +79,7 @@ export interface CabinetRegistry {
     workspaceId: string,
     cutoffIso: string,
     keepSourceIds: readonly string[],
+    keepIds?: readonly string[],
   ) => Promise<string[]>;
   findDocument: (workspaceId: string, hash: string) => Promise<SpecialistCaseDocument | undefined>;
   hasDocumentHash?: (workspaceId: string, hash: string) => Promise<boolean>;
@@ -192,11 +193,13 @@ export function createMemoryCabinetRegistry(options: {
         .sort((left, right) => watchOrder(left) - watchOrder(right))
         .slice(0, limit);
     },
-    async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds) {
+    async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds, keepIds = []) {
       const cutoff = Date.parse(cutoffIso);
       const keep = new Set(keepSourceIds);
-      return casesOf(workspaceId)
-        .filter((card) => isPrunableUndecidedCase(card, cutoff, keep))
+      const keepCases = new Set(keepIds);
+      return openFresh(workspaceId)
+        .catalog.storedCases()
+        .filter((card) => isPrunableUndecidedCase(card, cutoff, keep, keepCases))
         .map((card) => card.id);
     },
     async findDocument(workspaceId, hash) {

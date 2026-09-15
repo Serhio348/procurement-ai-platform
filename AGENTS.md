@@ -68,6 +68,8 @@
 - [`docs/architecture/STAGE-59.md`](docs/architecture/STAGE-59.md) — поиск: план параллельно, разбор карточек в фоне
 - [`docs/architecture/STAGE-60.md`](docs/architecture/STAGE-60.md) — слежение: список документов на взятой закупке
 - [`docs/architecture/STAGE-61.md`](docs/architecture/STAGE-61.md) — предмет лота в оценке поиска
+- [`docs/architecture/STAGE-62.md`](docs/architecture/STAGE-62.md) — поиск по каждому терму, честный merge и provenance
+- [`docs/architecture/STAGE-63.md`](docs/architecture/STAGE-63.md) — план не сужается моделью, услуги ≠ поставка, кандидат ≠ новая закупка
 - [`docs/architecture/STAGE-62.md`](docs/architecture/STAGE-62.md) — аудит поиска: retrieval / relevance, трассировка, объект из фразы работ
 
 ---

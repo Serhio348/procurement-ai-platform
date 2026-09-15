@@ -135,7 +135,11 @@ export class SpecialistCatalog {
 
   urgentInbox(): SpecialistInboxEntry[] {
     return this.#order
-      .filter((item) => item.change.urgent && !this.#dismissed.has(item.change.id))
+      .filter(
+        (item) =>
+          (item.change.urgent || item.change.kind === "procedure_candidate") &&
+          !this.#dismissed.has(item.change.id),
+      )
       .map(toInboxEntry);
   }
 
@@ -179,7 +183,7 @@ function toInboxEntry(item: InboxFixtureItemValue): SpecialistInboxEntry {
     summary: presented.summary,
     detail: presented.detail,
     detectedOn: item.change.detectedAt.slice(0, 10),
-    urgent: true,
+    urgent: item.change.urgent,
     kind: item.change.kind,
     topic,
     topicLabel: inboxTopicLabel(topic),

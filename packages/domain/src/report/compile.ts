@@ -226,6 +226,8 @@ function changeKindLabel(kind: ChangeKind): string {
   switch (kind) {
     case "procedure_found":
       return "Новая закупка";
+    case "procedure_candidate":
+      return "На проверку";
     case "status_changed":
       return "Статус";
     case "price_changed":

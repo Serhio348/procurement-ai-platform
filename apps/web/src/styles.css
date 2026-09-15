@@ -237,6 +237,12 @@ a {
   border: 1px solid #b7c4d4;
 }
 
+.inbox-topic.is-review {
+  color: #6b4e12;
+  background: #f7efdc;
+  border: 1px solid #d9c391;
+}
+
 .inbox-topic.is-card_update {
   color: #5a2a2a;
   background: #f8eeee;

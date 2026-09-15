@@ -63,6 +63,14 @@ const SIDE_MENTION =
   /с\s+последующ|силами\s+заказчика|включая\s+|в\s+том\s+числе/iu;
 
 /**
+ * A title whose head noun is a generic service/work carrier. For a purchase
+ * profile that is the subject, whatever equipment is named after it:
+ * «Инжиниринговые услуги (… сетей электроснабжения)» is not a supply.
+ */
+const SERVICE_HEAD =
+  /^(?:[\p{L}-]+\s+)?(?:услуг[аи]|работ[аы]|выполнени[ея]\s+работ|оказани[ея]\s+услуг|обслуживани[ея]|инжиниринг\p{L}*|эксплуатаци[яи])(?=$|[^\p{L}])/iu;
+
+/**
  * Code-owned 0–100 score. The model must not call this and must not invent
  * a parallel number.
  */
@@ -80,8 +88,16 @@ export function scoreSearchIntent(
   const objects = objectRole === "mention" ? extraObjects : matchedObjects;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
-  const excludedInTitle = plan.excluded_actions.filter((item) => termOccurs(title, item));
-  const excludedRole = excludedActionRole(title, plan, matchedDesired);
+  const serviceHead =
+    plan.intent !== "works" && matchedDesired.length === 0
+      ? SERVICE_HEAD.exec(leadingClause(title).trim())?.[0]
+      : undefined;
+  const excludedInTitle = [
+    ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
+    ...(serviceHead === undefined ? [] : [serviceHead.trim()]),
+  ];
+  const excludedRole: IntentExcludedRole =
+    serviceHead !== undefined ? "subject" : excludedActionRole(title, plan, matchedDesired);
   const context = contextRoleFor(title, extra, plan);
   const matchedContext = context.matched;
 
@@ -333,6 +349,9 @@ function relevanceReason(input: {
 
 function workLabel(action: string): string {
   const lower = action.toLocaleLowerCase("ru-BY");
+  if (lower.includes("услуг") || lower.includes("инжиниринг")) return "услуги";
+  if (/^работ|выполнени/u.test(lower)) return "работы";
+  if (lower.includes("эксплуатац")) return "эксплуатация";
   if (lower.includes("монтаж")) return "монтажные работы";
   if (lower.includes("ремонт")) return "ремонт";
   if (lower.includes("обслуж")) return "обслуживание";

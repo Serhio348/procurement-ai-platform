@@ -59,7 +59,7 @@ export const InboxFixture = z.object({
 });
 export type InboxFixture = z.infer<typeof InboxFixture>;
 
-export const SpecialistInboxTopic = z.enum(["new_found", "documents", "card_update"]);
+export const SpecialistInboxTopic = z.enum(["new_found", "documents", "card_update", "review"]);
 export type SpecialistInboxTopic = z.infer<typeof SpecialistInboxTopic>;
 
 export const SpecialistInboxAction = z.enum(["open", "refresh", "documents", "dismiss"]);
@@ -76,7 +76,7 @@ export const SpecialistInboxEntry = z.object({
   summary: z.string().min(1),
   detail: z.string().min(1),
   detectedOn: IsoDate,
-  urgent: z.literal(true),
+  urgent: z.boolean(),
   kind: ChangeKind,
   topic: SpecialistInboxTopic,
   topicLabel: z.string().min(1),

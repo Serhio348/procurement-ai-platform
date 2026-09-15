@@ -118,6 +118,38 @@ export function platformSearchTerms(
 }
 
 /**
+ * The model may widen the deterministic plan, never narrow it. Objects and
+ * actions are unioned; the intent label follows the model only when the
+ * cheap plan did not see work phrases (a model cannot turn a works profile
+ * back into a purchase). Required/excluded context comes from the model
+ * when it named any, because the cheap parser only reads «для …».
+ */
+export function mergeSearchIntentPlans(
+  inferred: SearchIntentPlanValue,
+  fromModel: SearchIntentPlanValue,
+): SearchIntentPlanValue {
+  const union = (left: readonly string[], right: readonly string[]): string[] => {
+    const out: string[] = [];
+    for (const item of [...left, ...right]) pushUnique(out, item);
+    return out;
+  };
+  const intent = inferred.intent === "works" ? "works" : fromModel.intent;
+  const excluded = union(inferred.excluded_actions, fromModel.excluded_actions).filter(
+    // A works profile must not veto its own work verbs even if the model listed them.
+    (item) => intent !== "works" || !inferred.desired_actions.some((d) => matchesAny(d, [item])),
+  );
+  return SearchIntentPlan.parse({
+    objects: union(inferred.objects, fromModel.objects),
+    required_context:
+      fromModel.required_context.length > 0 ? fromModel.required_context : inferred.required_context,
+    excluded_context: union(inferred.excluded_context, fromModel.excluded_context),
+    desired_actions: union(inferred.desired_actions, fromModel.desired_actions),
+    excluded_actions: excluded,
+    intent,
+  });
+}
+
+/**
  * Phrases the model added that the cheap plan did not already send. Empty
  * when both plans name the same objects — the listing did not miss anything.
  */

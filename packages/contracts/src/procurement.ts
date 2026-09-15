@@ -332,6 +332,7 @@ export type Clarification = z.infer<typeof Clarification>;
 
 export const ChangeKind = z.enum([
   "procedure_found",
+  "procedure_candidate",
   "status_changed",
   "price_changed",
   "deadline_changed",

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   extraPlatformSearchTerms,
   inferSearchIntentPlan,
+  mergeSearchIntentPlans,
   parseSearchIntentPlan,
   platformSearchTerms,
 } from "./intent-plan.js";
@@ -96,6 +97,56 @@ describe("scoreSearchIntent", () => {
     expect(result.decision).toBe("match");
     expect(result.excludedRole).toBe("mention");
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
+  });
+
+  it("does not read a service headed title as an implicit supply of the equipment it names", () => {
+    const plan = inferSearchIntentPlan({
+      name: "КТП",
+      keywords: ["КТПБ", "КТП", "сети электроснабжения"],
+      excludeKeywords: [],
+    });
+    for (const title of [
+      "Инжиниринговые услуги (услуги по комплексному управлению строительной деятельностью на стадии разработки проектной документации по объекту: «модернизация сетей электроснабжения»)",
+      "Техническое обслуживание инженерных сетей (по электроснабжению)",
+      "Услуги по эксплуатации сетей электроснабжения",
+      "Выполнение работ по устройству сетей электроснабжения",
+    ]) {
+      const scored = scoreSearchIntent({ title }, plan);
+      expect(scored.decision, title).toBe("veto");
+      expect(scored.reason, title).toMatch(
+        /предмет закупки — (услуги|работы|обслуживание|эксплуатация|проектирование)/,
+      );
+    }
+    expect(scoreSearchIntent({ title: "Закупка КТП 10/0,4 кВ" }, plan).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "Поставка КТП с услугами шефмонтажа" }, plan).decision).toBe("match");
+  });
+
+  it("lets the model widen the cheap plan but never drop its exclusions or objects", () => {
+    const inferred = inferSearchIntentPlan({ name: "КТП", keywords: ["КТП"], excludeKeywords: [] });
+    const fromModel = SearchIntentPlan.parse({
+      objects: ["трансформаторная подстанция"],
+      desired_actions: ["поставка"],
+      excluded_actions: [],
+      required_context: ["10 кВ"],
+    });
+    const merged = mergeSearchIntentPlans(inferred, fromModel);
+    expect(merged.objects).toEqual(["КТП", "трансформаторная подстанция"]);
+    expect(merged.excluded_actions).toEqual(inferred.excluded_actions);
+    expect(merged.required_context).toEqual(["10 кВ"]);
+
+    const works = inferSearchIntentPlan({
+      name: "Монтаж",
+      keywords: ["монтаж электрооборудования"],
+      excludeKeywords: [],
+    });
+    const modelSaysPurchase = SearchIntentPlan.parse({
+      objects: ["электрооборудование"],
+      excluded_actions: ["монтаж"],
+      intent: "equipment_purchase",
+    });
+    const mergedWorks = mergeSearchIntentPlans(works, modelSaysPurchase);
+    expect(mergedWorks.intent).toBe("works");
+    expect(mergedWorks.excluded_actions).not.toContain("монтаж");
   });
 
   it("leaves supply and works listed as equals for the model instead of a word-order veto", () => {
@@ -284,6 +335,10 @@ describe("scoreSearchIntent", () => {
     const grain = scoreSearchIntent({ title: "Пусконаладка зернового комплекса" }, plan);
     expect(grain.decision).not.toBe("match");
     expect(grain.matchedObjects).toEqual([]);
+
+    // Unrelated equipment is not a works match either: no object, no work verb.
+    const boiler = scoreSearchIntent({ title: "Котёл твердотопливный КВр-0,5" }, plan);
+    expect(boiler.decision).toBe("discard");
   });
 
   it("does not match a works profile on commissioning alone without the object", () => {

@@ -41,6 +41,7 @@ import {
   inboxTopic,
   extraPlatformSearchTerms,
   inferSearchIntentPlan,
+  mergeSearchIntentPlans,
   isConsoleListedCase,
   partitionHitsByDecision,
   platformSearchTerms,
@@ -446,20 +447,44 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       keywords: profile.keywords,
       excludeKeywords: profile.excludeKeywords,
     });
-    if (searchIntent === undefined) return inferred;
+    const profileName = profileDisplayName(profile);
+    if (searchIntent === undefined) {
+      logger.info("Specialist search plan", { profileName, source: "inferred", ...planSummary(inferred) });
+      return inferred;
+    }
     try {
-      return await searchIntent.plan({
-        name: profileDisplayName(profile),
+      const fromModel = await searchIntent.plan({
+        name: profileName,
         keywords: profile.keywords,
         excludeKeywords: profile.excludeKeywords,
       });
+      const plan = mergeSearchIntentPlans(inferred, fromModel);
+      logger.info("Specialist search plan", {
+        profileName,
+        source: "model+inferred",
+        ...planSummary(plan),
+        modelOnly: planSummary(fromModel),
+      });
+      return plan;
     } catch (error) {
       logger.warn("Search intent parser failed; using the cheap plan", {
-        profileName: profileDisplayName(profile),
+        profileName,
         err: error instanceof Error ? error.message : String(error),
       });
+      logger.info("Specialist search plan", { profileName, source: "inferred", ...planSummary(inferred) });
       return inferred;
     }
+  }
+
+  function planSummary(plan: SearchIntentPlan): Record<string, unknown> {
+    return {
+      intent: plan.intent,
+      objects: plan.objects,
+      desired: plan.desired_actions,
+      excluded: plan.excluded_actions,
+      requiredContext: plan.required_context,
+      excludedContext: plan.excluded_context,
+    };
   }
 
   /**

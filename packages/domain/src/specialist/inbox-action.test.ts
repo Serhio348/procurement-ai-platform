@@ -32,6 +32,23 @@ describe("inbox actions", () => {
     expect(first.change.urgent).toBe(true);
   });
 
+  it("labels a review hit as a candidate, not an urgent new procurement", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Пусконаладка котла",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/auction/view/002",
+      sourceProcurementId: "auction/002",
+      foundAs: "review",
+    });
+    const item = inboxItemFromFoundCard(card, "2026-09-06T12:00:00.000Z");
+    expect(item.change.kind).toBe("procedure_candidate");
+    expect(item.change.urgent).toBe(false);
+    expect(inboxTopic(item.change.kind)).toBe("review");
+    expect(inboxTopicLabel("review")).toBe("На проверку");
+  });
+
   it("copies the detected status and price onto the card and does not invent an advance", () => {
     const card = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000020",

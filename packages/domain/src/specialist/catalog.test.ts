@@ -72,6 +72,27 @@ describe("SpecialistCatalog", () => {
     expect(inbox.map((entry) => entry.detail).join("\n")).not.toMatch(/аванс/i);
   });
 
+  it("keeps a review candidate in the inbox without the urgent new-procurement label", () => {
+    const catalog = new SpecialistCatalog();
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Котёл твердотопливный",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/auction/view/002",
+      sourceProcurementId: "auction/002",
+      foundAs: "review",
+    });
+    catalog.record(inboxItemFromFoundCard(card, "2026-09-06T12:00:00.000Z"));
+
+    const entry = catalog.urgentInbox()[0];
+    expect(entry?.topic).toBe("review");
+    expect(entry?.topicLabel).toBe("На проверку");
+    expect(entry?.urgent).toBe(false);
+    expect(entry?.summary).toMatch(/^На проверку: /u);
+    expect(entry?.summary).not.toContain("срочно");
+  });
+
   it("lists every procurement case including a non-urgent latest change", () => {
     const catalog = SpecialistCatalog.parse(fixture);
     const household = catalog.procurement("00000000-0000-4000-8000-000000000022");

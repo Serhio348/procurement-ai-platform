@@ -12,6 +12,7 @@ import { statusLabel, uuidFromHex } from "./case.js";
 
 export function inboxTopic(kind: ChangeKind): SpecialistInboxTopicValue {
   if (kind === "procedure_found") return "new_found";
+  if (kind === "procedure_candidate") return "review";
   if (kind === "document_added" || kind === "document_updated" || kind === "document_removed") {
     return "documents";
   }
@@ -26,6 +27,8 @@ export function inboxTopicLabel(topic: SpecialistInboxTopicValue): string {
       return "Документы";
     case "card_update":
       return "Карточка";
+    case "review":
+      return "На проверку";
   }
 }
 
@@ -33,6 +36,9 @@ export function inboxItemFromFoundCard(
   card: SpecialistProcurementCardValue,
   detectedAt: string,
 ): InboxFixtureItemValue {
+  // A review-only hit is a candidate, not a new procurement: it stays in the
+  // inbox for triage but is not labelled «Новая закупка (срочно)».
+  const candidate = card.foundAs === "review";
   return InboxFixtureItem.parse({
     procurement: {
       title: card.title,
@@ -43,11 +49,11 @@ export function inboxItemFromFoundCard(
     change: {
       id: uuidFromHex(`inbox-found:${card.id}`),
       procurementId: card.id,
-      kind: "procedure_found",
+      kind: candidate ? "procedure_candidate" : "procedure_found",
       previous: null,
       current: card.title,
       detectedAt,
-      urgent: true,
+      urgent: !candidate,
     },
   });
 }

@@ -91,6 +91,25 @@ describe("archive", () => {
 });
 
 describe("remembered review verdicts", () => {
+  it("invalidates automatic verdicts from an older search algorithm", () => {
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profile().id;
+    const restored = SpecialistWorkspace.parse({
+      ...workspace.snapshot(),
+      reviewedIrrelevant: [
+        {
+          profileId,
+          sourceProcurementId: "auction/old-algorithm",
+          decidedAt: "2026-09-15T12:00:00.000Z",
+          algorithmVersion: "search-review-v1",
+        },
+      ],
+    });
+
+    expect(restored.isReviewedIrrelevant(profileId, "auction/old-algorithm")).toBe(false);
+    expect(restored.snapshot().reviewedIrrelevant).toEqual([]);
+  });
+
   it("remembers an irrelevant hit per profile and forgets it when the phrases change", () => {
     const workspace = new SpecialistWorkspace();
     const first = workspace.profile().id;

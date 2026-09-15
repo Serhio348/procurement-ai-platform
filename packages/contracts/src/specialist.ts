@@ -359,6 +359,8 @@ export const SpecialistReviewVerdict = z.object({
   profileId: z.string().uuid(),
   sourceProcurementId: z.string().min(1),
   decidedAt: IsoDateTime,
+  /** Automatic classifier revision; old revisions must be re-evaluated. */
+  algorithmVersion: z.string().min(1).default("legacy"),
 });
 export type SpecialistReviewVerdict = z.infer<typeof SpecialistReviewVerdict>;
 

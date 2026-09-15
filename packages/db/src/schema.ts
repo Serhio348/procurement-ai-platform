@@ -972,6 +972,7 @@ export const workspaceReviewVerdicts = pgTable(
     profileId: uuid("profile_id").notNull(),
     sourceProcurementId: varchar("source_procurement_id", { length: 256 }).notNull(),
     decidedAt: timestamptz("decided_at").notNull(),
+    algorithmVersion: varchar("algorithm_version", { length: 64 }).notNull().default("legacy"),
     expiresAt: timestamptz("expires_at"),
   },
   (table) => [

@@ -241,6 +241,7 @@ export function createSpecialistStore(db: Database) {
             profileId: row.profileId,
             sourceProcurementId: row.sourceProcurementId,
             decidedAt: toIsoDateTime(row.decidedAt),
+            algorithmVersion: row.algorithmVersion,
           })),
           archivedSourceIds: caseRows
             .filter((row) => row.archived)
@@ -323,6 +324,7 @@ export function createSpecialistStore(db: Database) {
             profileId: verdict.profileId,
             sourceProcurementId: verdict.sourceProcurementId,
             decidedAt: verdict.decidedAt,
+            algorithmVersion: verdict.algorithmVersion,
           });
         }
 

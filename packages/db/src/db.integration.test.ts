@@ -170,7 +170,14 @@ integration("PostgreSQL migrations and invariants", () => {
       activeProfileId: "00000000-0000-4000-8000-000000000902",
       decisions: [],
       dismissedInboxIds: [],
-      reviewedIrrelevant: [],
+      reviewedIrrelevant: [
+        {
+          profileId: "00000000-0000-4000-8000-000000000902",
+          sourceProcurementId: "auction/review-cache",
+          decidedAt: "2026-09-09T10:00:00.000Z",
+          algorithmVersion: "search-review-v2",
+        },
+      ],
       archivedSourceIds: [],
     }, workspaceId);
     await store.saveCases([card], workspaceId);
@@ -209,6 +216,7 @@ integration("PostgreSQL migrations and invariants", () => {
 
     expect(loadedWorkspace?.profiles[0]?.name).toBe("Persist");
     expect(loadedWorkspace?.profiles[0]?.lastDiscoveryAt).toBe("2026-09-09T10:00:00.000Z");
+    expect(loadedWorkspace?.reviewedIrrelevant[0]?.algorithmVersion).toBe("search-review-v2");
     expect(loadedCases.map((item) => item.sourceProcurementId)).toContain("auction/901-persist");
     expect(listed.items.some((item) => item.id === card.id)).toBe(true);
     expect(mine.items.some((item) => item.id === card.id)).toBe(false);

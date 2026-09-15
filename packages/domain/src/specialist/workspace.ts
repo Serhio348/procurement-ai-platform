@@ -12,6 +12,7 @@ import { resolvePlatformKeywords, sameSearchPhrases } from "./looking-for.js";
 
 /** How long a review verdict of "irrelevant" is trusted before the hit may be looked at again. */
 export const REVIEW_VERDICT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const REVIEW_ALGORITHM_VERSION = "search-review-v2";
 
 /**
  * Margin subtracted from lastDiscoveryAt when asking the source for new
@@ -81,7 +82,9 @@ export class SpecialistWorkspace {
       workspace.#decisions.push(SpecialistTriageDecision.parse(decision));
     }
     workspace.#dismissedInboxIds = [...state.dismissedInboxIds];
-    workspace.#reviewedIrrelevant = [...state.reviewedIrrelevant];
+    workspace.#reviewedIrrelevant = state.reviewedIrrelevant.filter(
+      (item) => item.algorithmVersion === REVIEW_ALGORITHM_VERSION,
+    );
     workspace.#archivedSourceIds = new Set(state.archivedSourceIds);
     return workspace;
   }
@@ -108,7 +111,12 @@ export class SpecialistWorkspace {
   rememberIrrelevant(profileId: string, sourceProcurementId: string, decidedAt: string): void {
     if (this.isReviewedIrrelevant(profileId, sourceProcurementId)) return;
     this.#reviewedIrrelevant.push(
-      SpecialistReviewVerdict.parse({ profileId, sourceProcurementId, decidedAt }),
+      SpecialistReviewVerdict.parse({
+        profileId,
+        sourceProcurementId,
+        decidedAt,
+        algorithmVersion: REVIEW_ALGORITHM_VERSION,
+      }),
     );
   }
 

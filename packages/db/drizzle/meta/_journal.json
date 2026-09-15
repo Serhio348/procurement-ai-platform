@@ -64,6 +64,13 @@
       "when": 1788205342803,
       "tag": "0008_admin_journal_ack",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789477200000,
+      "tag": "0009_review_algorithm_version",
+      "breakpoints": true
     }
   ]
 }

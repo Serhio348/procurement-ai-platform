@@ -118,12 +118,32 @@ export function reviewByIntentCard(
   return outcomeFromIntentCard(scoreSearchIntentFromProcedure(card, plan));
 }
 
+/** Both the settled outcome (if any) and the score behind it, for the model prompt. */
+export function scoreIntentCard(
+  card: ProcedureCard,
+  plan: SearchIntentPlan,
+): { scored: SearchIntentScore; outcome: ReviewOutcome | undefined } {
+  const scored = scoreSearchIntentFromProcedure(card, plan);
+  return { scored, outcome: outcomeFromIntentCard(scored) };
+}
+
 export function buildSearchClassifierInput(
   profile: ReviewProfile,
   hit: SearchHit,
   card: ProcedureCard | undefined,
+  scored?: SearchIntentScore,
 ): SearchClassifierInputValue {
+  const mixed = scored?.mixedActions;
   return SearchClassifierInput.parse({
+    ...(mixed === undefined
+      ? {}
+      : {
+          mixedActions: {
+            desired: [...mixed.desired],
+            excluded: [...mixed.excluded],
+            question: `В предмете закупки перечислены и ${mixed.desired.join(", ")}, и ${mixed.excluded.join(", ")}. Профиль ищет ${profile.intent?.intent === "works" ? "работы" : "поставку оборудования"}. Что является основным предметом закупки — то, что ищет профиль, или другое? Если доли сопоставимы или это закупка «под ключ», верни needs_human.`,
+          },
+        }),
     profile: {
       name: profile.name,
       purpose: profile.purpose ?? "",

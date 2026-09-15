@@ -11,10 +11,11 @@ import {
   outcomeFromModel,
   quotaOutcome,
   reviewByCard,
-  reviewByIntentCard,
+  scoreIntentCard,
   unavailableOutcome,
   type ReviewOutcome,
   type ReviewProfile,
+  type SearchIntentScore,
 } from "@procurement/domain";
 import { ProcurementMcpClient, ToolPolicyGate, type McpToolCaller } from "@procurement/mcp-client";
 import { silentLogger, type Logger } from "@procurement/observability";
@@ -74,10 +75,12 @@ export function createProcurementSearchReview(
           const hit = hits[index];
           if (hit === undefined) continue;
           const card = await fetchCard(client, hit, logger);
+          let scored: SearchIntentScore | undefined;
           if (card !== undefined && profile.intent !== undefined) {
-            const byIntent = reviewByIntentCard(card, profile.intent);
-            if (byIntent !== undefined) {
-              results[index] = byIntent;
+            const byIntent = scoreIntentCard(card, profile.intent);
+            scored = byIntent.scored;
+            if (byIntent.outcome !== undefined) {
+              results[index] = byIntent.outcome;
               continue;
             }
           } else if (card !== undefined) {
@@ -96,7 +99,15 @@ export function createProcurementSearchReview(
             continue;
           }
           modelCalls += 1;
-          results[index] = await classify(options.classifier, profile, hit, card, minConfidence, logger);
+          results[index] = await classify(
+            options.classifier,
+            profile,
+            hit,
+            card,
+            scored,
+            minConfidence,
+            logger,
+          );
         }
       };
       await Promise.all(Array.from({ length: Math.min(concurrency, hits.length) }, worker));
@@ -129,11 +140,12 @@ async function classify(
   profile: ReviewProfile,
   hit: SearchHit,
   card: ProcedureCard | undefined,
+  scored: SearchIntentScore | undefined,
   minConfidence: number,
   logger: Logger,
 ): Promise<ReviewOutcome> {
   try {
-    const raw = await classifier.classify(buildSearchClassifierInput(profile, hit, card));
+    const raw = await classifier.classify(buildSearchClassifierInput(profile, hit, card, scored));
     return outcomeFromModel(raw, minConfidence);
   } catch (error) {
     logger.error("Search review classifier failed", error, {

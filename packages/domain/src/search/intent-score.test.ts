@@ -98,6 +98,44 @@ describe("scoreSearchIntent", () => {
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
   });
 
+  it("leaves supply and works listed as equals for the model instead of a word-order veto", () => {
+    const supplyPlan = SearchIntentPlan.parse({
+      objects: ["КТП"],
+      desired_actions: ["поставка"],
+      excluded_actions: ["монтаж", "пусконаладка"],
+    });
+    const mixed = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Выбор подрядчика по объекту «Микрорайон №5»",
+        "монтаж КТП, поставка и пусконаладка оборудования",
+      ),
+      supplyPlan,
+    );
+    expect(mixed.decision).toBe("review");
+    expect(mixed.excludedRole).toBe("peer");
+    expect(mixed.mixedActions?.desired).toEqual(["поставка"]);
+    expect(mixed.mixedActions?.excluded).toContain("монтаж");
+    expect(mixed.reason).toMatch(/Смешанная закупка/);
+
+    // Works alone in the leading clause is still a veto — no enumeration with supply.
+    expect(scoreSearchIntent({ title: "Монтаж КТП на объекте" }, supplyPlan).decision).toBe("veto");
+    // Supply first, works after: still a plain match, as before.
+    expect(scoreSearchIntent({ title: "Поставка КТП, монтаж и пусконаладка" }, supplyPlan).decision).toBe("match");
+    // Works in one lot, supply of something else in another lot: not peers.
+    const twoLots = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/2",
+      url: "https://goszakupki.by/auction/view/2",
+      title: "Закупка по объекту",
+      lots: [
+        { number: "1", title: "Монтаж КТП" },
+        { number: "2", title: "Поставка кабеля" },
+      ],
+      fetchedAt: "2026-09-15T00:00:00.000Z",
+    });
+    expect(scoreSearchIntentFromProcedure(twoLots, supplyPlan).decision).toBe("veto");
+  });
+
   it("does not auto-match NCU that appears only in extra text", () => {
     const result = scoreSearchIntent(
       {

@@ -55,6 +55,9 @@ STAGE B — RELEVANCE (domain + api)
        match → relevant
        veto или чужое назначение → irrelevant
        «объект не найден» → НЕ решение: модель (квота 50) → иначе человек
+       смешанный предмет («монтаж КТП, поставка и пусконаладка») →
+         excludedRole = peer → review → модели задаётся явный вопрос,
+         что является основным предметом (SearchClassifierInput.mixedActions)
   лог по каждому кандидату: decision / score / matchedSearchTerms / reason
 ```
 
@@ -75,6 +78,14 @@ STAGE B — RELEVANCE (domain + api)
   по доле фразы. Для трёх фраз и `limit 100` это 3 страницы на фразу вместо
   6 — быстрее при том же покрытии. Потери хвоста видны в логе
   `candidates` vs `returned`.
+- Смешанные закупки. Раньше при «монтаж КТП, поставка и пусконаладка»
+  решал порядок слов: исключённое действие раньше желаемого → veto. Для
+  перечисления через запятую / «и» это монетка. Теперь, если оба действия
+  стоят в одном предложении-перечислении, а объект найден, код выносит не
+  veto, а `peer` → review, и модель получает вопрос «что основной предмет».
+  Порядок «Поставка КТП, монтаж» по-прежнему match; «Монтаж КТП» без
+  поставки — по-прежнему veto; работы в одном лоте и поставка в другом
+  не считаются перечислением (границы по `\n . ; :`).
 - Стеммер: обрезка одного падежного окончания до трёхбуквенной основы только
   для слов ≤5 букв; «шкаф», «банк» не трогаются, аббревиатуры ≤3 букв идут
   прежним exact-матчером.
@@ -93,7 +104,13 @@ STAGE B — RELEVANCE (domain + api)
 - `mcp/procurement/src/main.ts` — логгер в live-источник
 - `packages/domain/src/search/intent-plan.ts` — `splitWorkPhrase`
 - `packages/domain/src/search/query-terms.ts` — `SHORT_NOUN_ENDINGS`
-- `packages/domain/src/search/review.ts` — `outcomeFromIntentCard`
+- `packages/contracts/src/domain-search.ts` — `SearchClassifierInput.mixedActions?`
+- `packages/domain/src/search/intent-score.ts` — `IntentExcludedRole.peer`,
+  `enumeratesTogether`, `mixedActions` в результате
+- `packages/domain/src/search/review.ts` — `outcomeFromIntentCard`,
+  `scoreIntentCard`, вопрос модели в `buildSearchClassifierInput`
+- `apps/api/src/search-review.ts`, `search-classifier.ts` — score в промпт,
+  инструкция по `mixedActions`
 - `packages/domain/src/search/search-cards.ts` — `discarded[]` с причинами,
   «Найдена по: …» в действии карточки, `matchedSearchTerms` в проверке
   substring-шума
@@ -127,6 +144,10 @@ STAGE B — RELEVANCE (domain + api)
   фраза представлена, страниц у первой ≤ 3
 - T7 domain: «сети электроснабжения» ⇔ «сетей электроснабжения»
 - veto и чужое назначение по карточке по-прежнему решаются без модели
+- смешанный лот «монтаж КТП, поставка и пусконаладка» → `peer` / review с
+  `mixedActions`; «Поставка КТП, монтаж» → match; «Монтаж КТП» → veto;
+  два лота (монтаж КТП / поставка кабеля) → veto; api: модель получает
+  вопрос, `needs_human` проходит специалисту
 - `npm run evaluate:search`: P 100 / R 100 / F1 100, FP 0, FN 0 — как на
   этапе 51; «Шкаф автоматики» (gold uncertain) из discard в review
 

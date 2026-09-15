@@ -68,6 +68,18 @@ export const SearchClassifierInput = z.object({
       rawFields: z.record(z.string(), z.string()).default({}),
     })
     .optional(),
+  /**
+   * Set when code found the wanted action and an excluded work verb listed
+   * as equals on the card. The model is asked which one is the subject; it
+   * does not get to re-score anything else.
+   */
+  mixedActions: z
+    .object({
+      desired: z.array(z.string()),
+      excluded: z.array(z.string()),
+      question: z.string(),
+    })
+    .optional(),
 });
 export type SearchClassifierInput = z.infer<typeof SearchClassifierInput>;
 

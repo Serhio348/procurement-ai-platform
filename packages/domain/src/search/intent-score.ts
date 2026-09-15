@@ -26,6 +26,13 @@ export const SEARCH_INTENT_WEIGHTS = {
 } as const;
 
 export type IntentMatchRole = "subject" | "mention" | "none";
+/**
+ * Where an excluded work verb stands relative to the desired action.
+ * "peer": both are equal members of one enumeration («монтаж КТП, поставка
+ * и пусконаладка») — word order alone must not decide, so the case is left
+ * open for the model instead of a veto.
+ */
+export type IntentExcludedRole = IntentMatchRole | "peer";
 export type IntentContextRole = "match" | "mismatch" | "missing" | "none";
 export type IntentScoreDecision = "match" | "review" | "veto" | "discard";
 
@@ -42,9 +49,11 @@ export interface SearchIntentScore {
   matchedDesired: readonly string[];
   matchedContext: readonly string[];
   excludedActions: readonly string[];
-  excludedRole: IntentMatchRole;
+  excludedRole: IntentExcludedRole;
   objectRole: IntentMatchRole;
   contextRole: IntentContextRole;
+  /** Supply and works listed as equals: the model must weigh which is the subject. */
+  mixedActions?: { desired: readonly string[]; excluded: readonly string[] };
 }
 
 const WORK_LEAD =
@@ -102,7 +111,9 @@ export function scoreSearchIntent(
   if (context.role === "match") score += SEARCH_INTENT_WEIGHTS.CONTEXT_MATCH_WEIGHT;
   else if (context.role === "mismatch") score -= SEARCH_INTENT_WEIGHTS.CONTEXT_MISMATCH_PENALTY;
   if (excludedRole === "subject") score -= SEARCH_INTENT_WEIGHTS.EXCLUDED_ACTION_PENALTY;
-  else if (excludedRole === "mention") score -= SEARCH_INTENT_WEIGHTS.EXCLUDED_MENTION_PENALTY;
+  else if (excludedRole === "mention" || excludedRole === "peer") {
+    score -= SEARCH_INTENT_WEIGHTS.EXCLUDED_MENTION_PENALTY;
+  }
 
   score = clampScore(score);
   const decision = decisionFor(score, excludedRole, objectRole, context.role, matchedDesired.length, plan);
@@ -126,6 +137,9 @@ export function scoreSearchIntent(
     excludedRole,
     objectRole,
     contextRole: context.role,
+    ...(excludedRole === "peer"
+      ? { mixedActions: { desired: matchedDesired, excluded: excludedInTitle } }
+      : {}),
   };
 }
 
@@ -183,7 +197,7 @@ function excludedActionRole(
   title: string,
   plan: SearchIntentPlan,
   matchedDesired: readonly string[],
-): IntentMatchRole {
+): IntentExcludedRole {
   const found = plan.excluded_actions.filter((item) => termOccurs(title, item));
   if (found.length === 0) return "none";
   if (SIDE_MENTION.test(title)) return "mention";
@@ -193,10 +207,31 @@ function excludedActionRole(
   const lead = leadingClause(title);
   const inLead = found.some((item) => termOccurs(lead, item));
   if (!inLead) return "mention";
+  if (desiredIndex !== -1 && enumeratesTogether(title, found, matchedDesired)) return "peer";
   if (found.some((item) => startsWithTerm(lead, item)) || WORK_LEAD.test(lead.trim())) {
     return "subject";
   }
   return "subject";
+}
+
+/**
+ * True when an excluded verb and a desired verb sit in one sentence joined
+ * as list members («монтаж КТП, поставка и пусконаладка»). Sentence and
+ * lot boundaries (newline, period, semicolon, colon) split the check so a
+ * works lot does not borrow «поставка» from another lot.
+ */
+function enumeratesTogether(
+  text: string,
+  excluded: readonly string[],
+  desired: readonly string[],
+): boolean {
+  for (const sentence of text.split(/[\n.;:]+/u)) {
+    if (!/,|\sи\s|\+|\/|\sа\s+также\s/iu.test(sentence)) continue;
+    const hasExcluded = excluded.some((item) => termOccurs(sentence, item));
+    const hasDesired = desired.some((item) => termOccurs(sentence, item));
+    if (hasExcluded && hasDesired) return true;
+  }
+  return false;
 }
 
 function leadingClause(title: string): string {
@@ -220,7 +255,7 @@ function earliestIndex(text: string, terms: readonly string[]): number {
 
 function decisionFor(
   score: number,
-  excludedRole: IntentMatchRole,
+  excludedRole: IntentExcludedRole,
   objectRole: IntentMatchRole,
   contextRole: IntentContextRole,
   desiredCount: number,
@@ -228,6 +263,7 @@ function decisionFor(
 ): IntentScoreDecision {
   if (excludedRole === "subject") return "veto";
   if (contextRole === "mismatch") return "discard";
+  if (excludedRole === "peer" && objectRole !== "none") return "review";
   if (objectRole === "none") {
     if (plan.objects.length > 0) return "discard";
     if (desiredCount > 0) return "review";
@@ -248,7 +284,7 @@ function relevanceReason(input: {
   objects: readonly string[];
   desired: readonly string[];
   excluded: readonly string[];
-  excludedRole: IntentMatchRole;
+  excludedRole: IntentExcludedRole;
   objectRole: IntentMatchRole;
   contextRole: IntentContextRole;
   matchedContext: readonly string[];
@@ -256,6 +292,10 @@ function relevanceReason(input: {
 }): string {
   const equipment =
     input.objects.length > 0 ? input.objects.join(", ") : undefined;
+  if (input.excludedRole === "peer" && equipment !== undefined) {
+    const work = input.excluded[0] ?? "работы";
+    return `Смешанная закупка: ${input.desired.join(", ")} и ${workLabel(work)} перечислены как равные части предмета — нужна проверка по смыслу.`;
+  }
   if (input.decision === "veto" && equipment !== undefined) {
     const work = input.excluded[0] ?? "работы";
     return `Оборудование ${equipment} найдено, но предмет закупки — ${workLabel(work)}.`;

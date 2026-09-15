@@ -218,6 +218,44 @@ describe("createProcurementSearchReview", () => {
     expect(classify).not.toHaveBeenCalled();
   });
 
+  it("asks the model which side of a mixed supply-and-works lot is the subject", async () => {
+    const classify = vi.fn(async (input: SearchClassifierInput) => {
+      expect(input.mixedActions?.desired).toEqual(["поставка"]);
+      expect(input.mixedActions?.excluded).toContain("монтаж");
+      expect(input.mixedActions?.question).toMatch(/основным предметом/);
+      return {
+        verdict: "needs_human",
+        confidence: 0.6,
+        reason: "Закупка под ключ: поставка и монтаж сопоставимы.",
+        needDeeper: false,
+        matchedTerms: ["КТП"],
+      };
+    });
+    const review = createProcurementSearchReview({
+      caller: cardCaller({
+        "auction/12": cardWithLots("auction/12", "Выбор подрядчика по объекту «Микрорайон №5»", [
+          "монтаж КТП, поставка и пусконаладка оборудования",
+        ]),
+      }),
+      classifier: { classify },
+    });
+    const supplyProfile = {
+      name: "КТП",
+      keywords: ["КТП"],
+      excludeKeywords: [] as string[],
+      intent: inferSearchIntentPlan({ name: "КТП", keywords: ["КТП"], excludeKeywords: [] }),
+    };
+
+    const [outcome] = await review.review(
+      [hit("auction/12", "Выбор подрядчика по объекту «Микрорайон №5»")],
+      supplyProfile,
+    );
+
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(outcome?.verdict).toBe("needs_human");
+    expect(outcome?.decidedBy).toBe("model");
+  });
+
   it("hands commissioning without the profile object to the model instead of a silent card discard", async () => {
     const classify = vi.fn(async () => ({
       verdict: "irrelevant",

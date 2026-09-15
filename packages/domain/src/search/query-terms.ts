@@ -257,6 +257,30 @@ export function listingMatchesAnyKeyword(
   return keywords.some((keyword) => termOccurs(haystack, keyword));
 }
 
+/**
+ * A listing row the platform already returned. Keep it when a keyword is a
+ * real term in the visible row, or when the keyword is not on the row at
+ * all — goszakupki.by may have matched «Предмет закупки» on the card, which
+ * the listing HTML does not show. Still drop «НКУ» inside «конкурс»: that is
+ * the site's substring filter, not a hidden lot match.
+ */
+export function listingKeepsPlatformHit(
+  haystack: string,
+  keywords: readonly string[],
+): boolean {
+  if (keywords.length === 0) return true;
+  if (listingMatchesAnyKeyword(haystack, keywords)) return true;
+  const foldedHay = compactSearchText(haystack);
+  return !keywords.some((keyword) => {
+    const foldedNeedle = compactSearchText(keyword);
+    return foldedNeedle.length > 0 && foldedHay.includes(foldedNeedle);
+  });
+}
+
+function compactSearchText(text: string): string {
+  return withoutHyphens(normaliseSearchText(text), "");
+}
+
 export function firstTermIndex(text: string, term: string): number {
   if (!term.includes(" ") && needleIsShort(term) && termMatchStrength(text, term) === "exact") {
     const hay = tokenizeStems(text);

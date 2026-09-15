@@ -61,7 +61,7 @@ export function parseGoszakupkiSearchPage(
       if (cells.length < 6 || href === undefined) return undefined;
       const targetUrl = new URL(href, pageUrl);
       const identity = targetUrl.pathname.match(
-        /^\/(auction|marketing|request|etrade|single-source)\/view\/(\d+)\/?$/,
+        /^\/(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)\/?$/,
       );
       if (identity?.[1] === undefined || identity[2] === undefined) return undefined;
       const family = identity[1];
@@ -110,7 +110,7 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
 
   const pageFamily = pageFamilyFromUrl(input.url);
   const pathId = new URL(input.url).pathname.match(
-    /^\/(auction|marketing|request|etrade|single-source)\/view\/(\d+)\/?$/,
+    /^\/(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)\/?$/,
   );
   if (pathId?.[1] === undefined || pathId[2] === undefined) {
     throw new Error("Goszakupki card URL does not contain a supported source identifier");
@@ -122,6 +122,7 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
     "Название процедуры закупки",
     "Название запроса ценовых предложений",
     "Название открытого конкурса/конкурса",
+    "Название конкурса с ограниченным участием",
     "Название процедуры закупки из одного источника на ЭТП",
     "Название",
   ]);
@@ -622,6 +623,7 @@ function procedureKind(label: string | undefined): ProcedureKind {
   if (normalized.includes("электронный аукцион")) return "electronic_auction";
   if (normalized.includes("запрос ценовых предложений")) return "request_for_quotations";
   if (normalized.includes("открытый конкурс")) return "open_tender";
+  if (normalized.includes("конкурс") && normalized.includes("ограниченн")) return "open_tender";
   if (normalized.includes("из одного источника")) return "single_source";
   if (normalized.includes("переговор")) return "competitive_negotiation";
   return "other";

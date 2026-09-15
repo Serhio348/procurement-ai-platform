@@ -5,7 +5,9 @@ import {
   outcomeFromCardReview,
   outcomeFromModel,
   reviewByCard,
+  reviewByIntentCard,
 } from "./review.js";
+import { inferSearchIntentPlan } from "./intent-plan.js";
 
 const profile = {
   name: "Электротехническое оборудование",
@@ -52,6 +54,43 @@ describe("reviewByCard", () => {
     );
     expect(result.verdict).toBe("weak");
     expect(outcomeFromCardReview(result)).toBeUndefined();
+  });
+});
+
+describe("reviewByIntentCard", () => {
+  const worksPlan = inferSearchIntentPlan({
+    name: "Монтаж и пусконаладка электросилового оборудования",
+    keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+    excludeKeywords: [],
+  });
+
+  it("matches lot subject that the procedure title does not name", () => {
+    const outcome = reviewByIntentCard(
+      card(
+        "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+        [
+          {
+            title:
+              "работы по монтажу электрооборудования распределительного пункта с трансформаторной подстанцией, АСКУЭ, пусконаладочных работ",
+          },
+        ],
+      ),
+      worksPlan,
+    );
+    expect(outcome?.verdict).toBe("relevant");
+    expect(outcome?.decidedBy).toBe("card");
+    expect(outcome?.reason).toMatch(/электрооборудован/i);
+    expect(outcome?.reason).toMatch(/монтаж/i);
+  });
+
+  it("does not match commissioning of a grain complex for an electrical works plan", () => {
+    const outcome = reviewByIntentCard(
+      card("Пусконаладка зернового комплекса", [
+        { title: "Пусконаладочные работы оборудования зерноочистительного комплекса" },
+      ]),
+      worksPlan,
+    );
+    expect(outcome?.verdict).toBe("irrelevant");
   });
 });
 

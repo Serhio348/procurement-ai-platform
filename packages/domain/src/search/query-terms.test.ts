@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  listingKeepsPlatformHit,
   listingMatchesAnyKeyword,
   stemWord,
   stemsShareRoot,
@@ -60,5 +61,21 @@ describe("listingMatchesAnyKeyword", () => {
     expect(listingMatchesAnyKeyword("Поставка КИП для насосной", ["КИП"])).toBe(true);
     expect(listingMatchesAnyKeyword("закупка материалов МТР", ["МТР"])).toBe(true);
     expect(listingMatchesAnyKeyword("экипировка персонала", ["КИП"])).toBe(false);
+  });
+});
+
+describe("listingKeepsPlatformHit", () => {
+  it("keeps a row the site returned when the keyword is only on the card", () => {
+    expect(
+      listingKeepsPlatformHit(
+        "Выбор субподрядной организации по объекту в Жлобине",
+        ["АСКУЭ"],
+      ),
+    ).toBe(true);
+  });
+
+  it("still drops substring noise that the site matched in the listing title", () => {
+    expect(listingKeepsPlatformHit("Открытый конкурс", ["НКУ"])).toBe(false);
+    expect(listingKeepsPlatformHit("инкубатор", ["НКУ"])).toBe(false);
   });
 });

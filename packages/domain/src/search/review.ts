@@ -11,14 +11,21 @@ import {
   type ProcedureCard,
   type SearchHit,
   type SearchClassifierInput as SearchClassifierInputValue,
+  type SearchIntentPlan,
 } from "@procurement/contracts";
 import { cheapClassifyHit, type CheapClassifyProfile, type CheapClassifyResult } from "./cheap-classify.js";
+import {
+  scoreSearchIntentFromProcedure,
+  type SearchIntentScore,
+} from "./intent-score.js";
 
 /** Profile slice the review step may see. Free-text fields help the model. */
 export interface ReviewProfile extends CheapClassifyProfile {
   name: string;
   purpose?: string;
   description?: string;
+  /** When set, lot subject is scored with the same plan as the listing. */
+  intent?: SearchIntentPlan;
 }
 
 export type ReviewVerdict = "relevant" | "irrelevant" | "needs_human";
@@ -73,6 +80,39 @@ export function outcomeFromCardReview(result: CheapClassifyResult): ReviewOutcom
     };
   }
   return undefined;
+}
+
+/**
+ * Listing-score on the full card text. Match / veto / discard settle the
+ * case; an inconclusive review leaves the cheap keyword pass or the model.
+ */
+export function outcomeFromIntentCard(scored: SearchIntentScore): ReviewOutcome | undefined {
+  if (scored.decision === "match") {
+    return {
+      verdict: "relevant",
+      decidedBy: "card",
+      reason: scored.reason,
+      matchedTerms: [...scored.matchedObjects, ...scored.matchedDesired],
+      confidence: 1,
+    };
+  }
+  if (scored.decision === "veto" || scored.decision === "discard") {
+    return {
+      verdict: "irrelevant",
+      decidedBy: "card",
+      reason: scored.reason,
+      matchedTerms: [],
+      confidence: 1,
+    };
+  }
+  return undefined;
+}
+
+export function reviewByIntentCard(
+  card: ProcedureCard,
+  plan: SearchIntentPlan,
+): ReviewOutcome | undefined {
+  return outcomeFromIntentCard(scoreSearchIntentFromProcedure(card, plan));
 }
 
 export function buildSearchClassifierInput(

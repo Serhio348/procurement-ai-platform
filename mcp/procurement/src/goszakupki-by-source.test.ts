@@ -218,4 +218,50 @@ describe("GoszakupkiBySource", () => {
     expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).toContain("трансформатор");
     expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).not.toContain("кабель");
   });
+
+  it("keeps a listing row the site returned when the keyword is not in the title", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["АСКУЭ"],
+        limit: 10,
+      }),
+    );
+
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hits.every((item) => !item.title.includes("АСКУЭ"))).toBe(true);
+  });
+
+  it("loads a limited contest card by family/id the same way as other families", async () => {
+    const limitedHtml = await readFile(
+      fileURLToPath(
+        new URL("../../../tests/fixtures/goszakupki-by/limited.html", import.meta.url),
+      ),
+      "utf8",
+    );
+    const get = vi.fn(async (): Promise<GoszakupkiPageResponse> => ({
+      status: 200,
+      url: "https://goszakupki.by/limited/view/3669746",
+      body: limitedHtml,
+    }));
+    const source = new GoszakupkiBySource({
+      client: { get },
+      now: () => new Date("2026-09-15T12:00:00.000Z"),
+    });
+
+    const card = await source.get(SourceProcurementId.parse("limited/3669746"));
+
+    expect(get).toHaveBeenCalledWith("/limited/view/3669746");
+    expect(card.title).toContain("Жлобине");
+    expect(card.lots[0]?.title).toMatch(/монтаж.*электрооборудования/i);
+    expect(card.lots[0]?.title).toMatch(/АСКУЭ/);
+    expect(card.lots[0]?.positions[0]?.title).toMatch(/электрооборудования/i);
+  });
 });

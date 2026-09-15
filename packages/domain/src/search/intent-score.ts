@@ -1,4 +1,4 @@
-import type { SearchIntentPlan } from "@procurement/contracts";
+import type { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
 import { inferSearchIntentPlan } from "./intent-plan.js";
 import { firstTermIndex, termOccurs } from "./query-terms.js";
 
@@ -43,6 +43,7 @@ export interface SearchIntentScore {
   matchedContext: readonly string[];
   excludedActions: readonly string[];
   excludedRole: IntentMatchRole;
+  objectRole: IntentMatchRole;
   contextRole: IntentContextRole;
 }
 
@@ -123,6 +124,7 @@ export function scoreSearchIntent(
     matchedContext,
     excludedActions: excludedInTitle,
     excludedRole,
+    objectRole,
     contextRole: context.role,
   };
 }
@@ -132,6 +134,29 @@ export function scoreSearchIntentFromProfile(
   profile: { name: string; keywords: readonly string[]; excludeKeywords: readonly string[] },
 ): SearchIntentScore {
   return scoreSearchIntent(hit, inferSearchIntentPlan(profile));
+}
+
+/**
+ * Title plus lot subject, description and positions. Passed as `title` so a
+ * term in «Предмет закупки» is scored as the subject, not as weak extraText.
+ */
+export function procedureIntentText(card: ProcedureCard): string {
+  const parts: string[] = [card.title];
+  for (const lot of card.lots) {
+    parts.push(lot.title);
+    if (lot.description !== undefined && lot.description.length > 0) {
+      parts.push(lot.description);
+    }
+    for (const position of lot.positions) parts.push(position.title);
+  }
+  return parts.join("\n");
+}
+
+export function scoreSearchIntentFromProcedure(
+  card: ProcedureCard,
+  plan: SearchIntentPlan,
+): SearchIntentScore {
+  return scoreSearchIntent({ title: procedureIntentText(card) }, plan);
 }
 
 function contextRoleFor(

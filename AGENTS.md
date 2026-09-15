@@ -67,6 +67,7 @@
 - [`docs/architecture/STAGE-55.md`](docs/architecture/STAGE-55.md) — ZIP и ссылка на хранилище документации
 - [`docs/architecture/STAGE-59.md`](docs/architecture/STAGE-59.md) — поиск: план параллельно, разбор карточек в фоне
 - [`docs/architecture/STAGE-60.md`](docs/architecture/STAGE-60.md) — слежение: список документов на взятой закупке
+- [`docs/architecture/STAGE-61.md`](docs/architecture/STAGE-61.md) — предмет лота в оценке поиска
 
 ---
 
@@ -245,6 +246,9 @@ docs/architecture/ Документы этапов
   фраз и страниц
 - Этап 60 — «Слежу»/«Участвовать»: смена списка файлов на карточке во входящих;
   новые файлы качаются только у «Участвовать»
+- Этап 61 — поиск: предмет лота (`lots[].title`) в `scoreSearchIntent`;
+  площадка может найти строку по лоту, listing больше не режет её из‑за
+  пустого названия; `procurement.get` только у review, лимит 50
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

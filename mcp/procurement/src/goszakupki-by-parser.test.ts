@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { inferSearchIntentPlan, scoreSearchIntentFromProcedure } from "@procurement/domain";
 import {
   parseGoszakupkiCard,
   parseGoszakupkiSearchPage,
@@ -235,5 +236,54 @@ describe("parseGoszakupkiCard", () => {
         fetchedAt,
       }),
     ).toThrow(/auc identifier/);
+  });
+
+  it("keeps a limited contest listing row and parses its lot subject", async () => {
+    const listingHtml = await readFile(
+      fileURLToPath(new URL("search-limited.html", fixtureDirectory)),
+      "utf8",
+    );
+    const listing = parseGoszakupkiSearchPage(
+      listingHtml,
+      "https://goszakupki.by/tenders/posted",
+    );
+    expect(listing.rows).toHaveLength(1);
+    expect(listing.rows[0]?.hit).toMatchObject({
+      sourceProcurementId: "limited/3669746",
+      url: "https://goszakupki.by/limited/view/3669746",
+      pageFamily: "other",
+      kind: "open_tender",
+      title:
+        "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+    });
+
+    const html = await readFile(
+      fileURLToPath(new URL("limited.html", fixtureDirectory)),
+      "utf8",
+    );
+    const parsed = parseGoszakupkiCard({
+      html,
+      url: "https://goszakupki.by/limited/view/3669746",
+      fetchedAt,
+    });
+    expect(parsed.card.sourceProcurementId).toBe("limited/3669746");
+    expect(parsed.card.pageFamily).toBe("other");
+    expect(parsed.card.kind).toBe("open_tender");
+    expect(parsed.card.title).toContain("Жлобине");
+    expect(parsed.card.lots[0]?.title).toMatch(/монтаж.*электрооборудования/i);
+    expect(parsed.card.lots[0]?.title).toMatch(/АСКУЭ/);
+    expect(parsed.card.lots[0]?.positions[0]?.title).toMatch(/электрооборудования/i);
+
+    const scored = scoreSearchIntentFromProcedure(
+      parsed.card,
+      inferSearchIntentPlan({
+        name: "Монтаж и пусконаладка электросилового оборудования",
+        keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+        excludeKeywords: [],
+      }),
+    );
+    expect(scored.decision).toBe("match");
+    expect(scored.matchedObjects).toContain("электрооборудование");
+    expect(scored.matchedDesired).toEqual(expect.arrayContaining(["монтаж", "пусконаладка"]));
   });
 });

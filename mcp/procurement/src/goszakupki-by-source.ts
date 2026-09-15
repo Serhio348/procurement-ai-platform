@@ -12,7 +12,7 @@ import {
   type SearchQuery,
   type SourceProcurementId,
 } from "@procurement/contracts";
-import { listingMatchesAnyKeyword } from "@procurement/domain";
+import { listingKeepsPlatformHit } from "@procurement/domain";
 import { expandPublicDocumentation } from "./documentation-expand.js";
 import type { ParsedGoszakupkiCard } from "./goszakupki-by-parser.js";
 import {
@@ -198,7 +198,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
 }
 
 function sourcePath(id: SourceProcurementId): string {
-  if (!/^(auction|marketing|request|etrade|single-source)\/\d+$/.test(id)) {
+  if (!/^(auction|marketing|request|etrade|single-source|limited)\/\d+$/.test(id)) {
     throw new SourceRecordNotFoundError("goszakupki_by", id);
   }
   return id;
@@ -265,10 +265,10 @@ function matchesSearchRow(
   ]
     .filter((value): value is string => value !== undefined)
     .join(" ");
-  // The site's text filter is a substring. Drop rows where the keyword is
-  // only letters inside another word («НКУ» in «конкурс»). Abbreviations and
-  // inflected terms still match via termOccurs.
-  if (query.keywords.length > 0 && !listingMatchesAnyKeyword(haystack, query.keywords)) {
+  // The site's text filter is a substring. Drop «НКУ» inside «конкурс».
+  // Keep a row whose listing text has no keyword at all: the site may have
+  // matched lot subject, which this HTML does not show.
+  if (query.keywords.length > 0 && !listingKeepsPlatformHit(haystack, query.keywords)) {
     return false;
   }
   return true;

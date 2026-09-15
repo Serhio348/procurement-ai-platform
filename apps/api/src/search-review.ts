@@ -11,6 +11,7 @@ import {
   outcomeFromModel,
   quotaOutcome,
   reviewByCard,
+  reviewByIntentCard,
   unavailableOutcome,
   type ReviewOutcome,
   type ReviewProfile,
@@ -73,10 +74,18 @@ export function createProcurementSearchReview(
           const hit = hits[index];
           if (hit === undefined) continue;
           const card = await fetchCard(client, hit, logger);
-          const byCard = card === undefined ? undefined : outcomeFromCardReview(reviewByCard(card, profile));
-          if (byCard !== undefined) {
-            results[index] = byCard;
-            continue;
+          if (card !== undefined && profile.intent !== undefined) {
+            const byIntent = reviewByIntentCard(card, profile.intent);
+            if (byIntent !== undefined) {
+              results[index] = byIntent;
+              continue;
+            }
+          } else if (card !== undefined) {
+            const byCard = outcomeFromCardReview(reviewByCard(card, profile));
+            if (byCard !== undefined) {
+              results[index] = byCard;
+              continue;
+            }
           }
           if (options.classifier === undefined) {
             results[index] = unavailableOutcome();

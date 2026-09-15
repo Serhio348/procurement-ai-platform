@@ -13,7 +13,7 @@ import {
 import { statusLabel, uuidFromHex } from "../specialist/case.js";
 import { cheapClassifyHit, type CheapClassifyProfile } from "./cheap-classify.js";
 import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
-import { termOccurs } from "./query-terms.js";
+import { listingKeepsPlatformHit, termOccurs } from "./query-terms.js";
 import { termMatches } from "./term-match.js";
 
 export interface ProfileSearchSelection {
@@ -46,7 +46,9 @@ export interface SearchSelectionProfile extends CheapClassifyProfile {
  * become cards. Hits where a keyword is only buried inside a foreign code
  * ("КТПБ" in "БКТПБ-746") and hits that match no keyword at all become
  * ambiguous cards for human review, capped at MAX_AMBIGUOUS_PER_SEARCH.
- * Only an exclude keyword drops a hit outright.
+ * With an intent plan, a title that names no object is also review: the
+ * platform may have matched lot subject, and procurement.get scores the card.
+ * Only an exclude keyword, a veto, or a mismatched purpose drops a hit outright.
  */
 export function selectRelevantSearchCards(
   hits: readonly SearchHitValue[],
@@ -185,10 +187,17 @@ function rankHitByIntent(
     .join(" ");
   if (profile.excludeKeywords.some((term) => termOccurs(haystack, term))) return undefined;
   const scored = scoreSearchIntent({ title: hit.title }, profile.intent);
-  if (scored.decision === "veto" || scored.decision === "discard") return undefined;
   if (scored.decision === "match" && scored.score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) {
     return { kind: "match", card: cardFromIntentHit(hit, scored.score, scored.reason, "match") };
   }
+  if (scored.decision === "veto") return undefined;
+  if (scored.decision === "discard" && scored.objectRole !== "none") return undefined;
+  if (scored.decision === "discard" && scored.objectRole === "none") {
+    const queried = profile.intent.objects.length > 0 ? profile.intent.objects : profile.keywords;
+    if (!listingKeepsPlatformHit(haystack, queried)) return undefined;
+  }
+  // No object in the listing title, and the visible row is not substring
+  // noise: the site may have matched lot subject. Cap at MAX_AMBIGUOUS.
   return { kind: "review", card: cardFromIntentHit(hit, scored.score, scored.reason, "review") };
 }
 

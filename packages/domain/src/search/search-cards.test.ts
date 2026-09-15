@@ -284,7 +284,7 @@ describe("selectRelevantSearchCards with intent", () => {
     expect(selected.ambiguousCards.some((card) => card.sourceProcurementId === "c")).toBe(false);
   });
 
-  it("discards a listing when excluded_context matches, and noise without an object", () => {
+  it("discards an excluded_context hit and substring noise without an object", () => {
     const selected = selectRelevantSearchCards(
       [
         hit("light", "Закупка шкаф управления наружным освещением"),
@@ -299,5 +299,31 @@ describe("selectRelevantSearchCards with intent", () => {
     expect(selected.cards).toEqual([]);
     expect(selected.ambiguousCards).toEqual([]);
     expect(selected.discardedCount).toBe(2);
+  });
+
+  it("reviews a listing whose title has no object when the site still returned it", () => {
+    const selected = selectRelevantSearchCards(
+      [
+        hit(
+          "zhlobin",
+          "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+        ),
+      ],
+      {
+        keywords: ["электрооборудование"],
+        excludeKeywords: [],
+        intent: {
+          objects: ["электрооборудование"],
+          required_context: [],
+          excluded_context: [],
+          desired_actions: ["монтаж", "пусконаладка"],
+          excluded_actions: [],
+          intent: "works",
+        },
+      },
+      20,
+    );
+    expect(selected.cards).toEqual([]);
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["zhlobin"]);
   });
 });

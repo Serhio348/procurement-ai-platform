@@ -565,6 +565,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>,
     profile: SpecialistWorkingProfile,
     now: string,
+    plan: SearchIntentPlan,
   ): void {
     if (searchReview === undefined || pending.length === 0) return;
     const cabinet = currentCabinet();
@@ -579,6 +580,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             ...(profile.description === undefined ? {} : { description: profile.description }),
             keywords: profile.keywords,
             excludeKeywords: profile.excludeKeywords,
+            intent: plan,
           },
         );
         const dropped: string[] = [];
@@ -628,12 +630,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   /**
-   * Hits the intent scorer marked review (missing purpose, weak score) get a
-   * second look when a review port is configured: the card first, then the
-   * model. Listing noise without an object is already discarded and never
-   * reaches this port. A confident "relevant" joins the list as a match; a
-   * confident "irrelevant" is discarded and remembered for the profile;
-   * everything else waits in the inbox with the reason attached to the card.
+   * Hits the intent scorer marked review (missing purpose, weak score, or
+   * no object in the listing title) get a second look when a review port is
+   * configured: the card first, then the model. Title-only veto and a
+   * mismatched purpose are already discarded. A confident "relevant" joins
+   * the list as a match; a confident "irrelevant" is discarded and remembered
+   * for the profile; everything else waits in the inbox with the reason
+   * attached to the card.
    * A hit already remembered as irrelevant, or already waiting in the inbox
    * as a review case, is not looked at again: the source returning it once
    * more is not new information.
@@ -643,6 +646,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     profile: SpecialistWorkingProfile,
     now: string,
     options: { inboxForMatches: boolean },
+    plan: SearchIntentPlan,
   ): Promise<{ matched: SpecialistProcurementCardValue[]; discarded: number; ambiguousCount: number }> {
     const rejected = workspace().rejectedSourceIds();
     const sourceIds = selected.ambiguousCards.map((item) => item.sourceProcurementId);
@@ -686,6 +690,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               ...(profile.description === undefined ? {} : { description: profile.description }),
               keywords: profile.keywords,
               excludeKeywords: profile.excludeKeywords,
+              intent: plan,
             },
           );
     const matched: SpecialistProcurementCardValue[] = [];
@@ -887,7 +892,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
     await pruneStaleCases();
     await persist();
-    startListingReviewJob(pending, profile, now);
+    startListingReviewJob(pending, profile, now, plan);
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
       relevantCount,
@@ -990,7 +995,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           known.add(card.sourceProcurementId);
           addedCount += 1;
         }
-        const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: true });
+        const reviewed = await reviewAmbiguous(selected, profile, now, { inboxForMatches: true }, plan);
         for (const card of reviewed.matched) {
           if (known.has(card.sourceProcurementId)) continue;
           known.add(card.sourceProcurementId);

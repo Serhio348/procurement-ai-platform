@@ -1,4 +1,5 @@
 import { ProcedureCard, SearchHit, type SearchClassifierInput } from "@procurement/contracts";
+import { inferSearchIntentPlan } from "@procurement/domain";
 import type { McpToolCaller } from "@procurement/mcp-client";
 import { describe, expect, it, vi } from "vitest";
 import { createProcurementSearchReview } from "./search-review.js";
@@ -180,5 +181,70 @@ describe("createProcurementSearchReview", () => {
     expect(outcomes.filter((item) => item.decidedBy === "model")).toHaveLength(2);
     expect(outcomes.filter((item) => item.decidedBy === "quota")).toHaveLength(1);
     expect(outcomes.every((item) => item.verdict !== "relevant")).toBe(true);
+  });
+
+  it("scores lot subject with the profile intent without a model call", async () => {
+    const classify = vi.fn(async (_input: SearchClassifierInput) => ({}));
+    const review = createProcurementSearchReview({
+      caller: cardCaller({
+        "auction/10": cardWithLots(
+          "auction/10",
+          "Выбор субподрядной организации по объекту в Жлобине",
+          [
+            "работы по монтажу электрооборудования распределительного пункта, пусконаладочных работ",
+          ],
+        ),
+      }),
+      classifier: { classify },
+    });
+    const worksProfile = {
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      excludeKeywords: [] as string[],
+      intent: inferSearchIntentPlan({
+        name: "Монтаж и пусконаладка электросилового оборудования",
+        keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+        excludeKeywords: [],
+      }),
+    };
+
+    const [outcome] = await review.review(
+      [hit("auction/10", "Выбор субподрядной организации по объекту в Жлобине")],
+      worksProfile,
+    );
+
+    expect(outcome?.verdict).toBe("relevant");
+    expect(outcome?.decidedBy).toBe("card");
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it("does not treat commissioning without the profile object as a match", async () => {
+    const review = createProcurementSearchReview({
+      caller: cardCaller({
+        "auction/11": cardWithLots(
+          "auction/11",
+          "Пусконаладка зернового комплекса",
+          ["Пусконаладочные работы оборудования зерноочистительного комплекса"],
+        ),
+      }),
+    });
+    const worksProfile = {
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      excludeKeywords: [] as string[],
+      intent: inferSearchIntentPlan({
+        name: "Монтаж и пусконаладка электросилового оборудования",
+        keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+        excludeKeywords: [],
+      }),
+    };
+
+    const [outcome] = await review.review(
+      [hit("auction/11", "Пусконаладка зернового комплекса")],
+      worksProfile,
+    );
+
+    expect(outcome?.verdict).toBe("irrelevant");
+    expect(outcome?.decidedBy).toBe("card");
   });
 });

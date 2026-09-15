@@ -1,7 +1,11 @@
-import { SearchIntentPlan } from "@procurement/contracts";
+import { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import { extraPlatformSearchTerms, inferSearchIntentPlan, parseSearchIntentPlan } from "./intent-plan.js";
-import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
+import {
+  scoreSearchIntent,
+  scoreSearchIntentFromProcedure,
+  SEARCH_INTENT_WEIGHTS,
+} from "./intent-score.js";
 
 const nkuPlan = SearchIntentPlan.parse({
   objects: ["НКУ", "шкаф управления"],
@@ -18,6 +22,17 @@ const pumpPlan = SearchIntentPlan.parse({
   excluded_actions: ["монтаж", "ремонт", "обслуживание", "проектирование", "пусконаладка"],
   intent: "equipment_purchase",
 });
+
+function procedureCard(title: string, lotTitle: string) {
+  return ProcedureCard.parse({
+    sourceId: "goszakupki_by",
+    sourceProcurementId: "auction/1",
+    url: "https://goszakupki.by/auction/view/1",
+    title,
+    lots: [{ number: "1", title: lotTitle }],
+    fetchedAt: "2026-09-15T00:00:00.000Z",
+  });
+}
 
 describe("scoreSearchIntent", () => {
   it("scores a supply of NCU for a pump station high", () => {
@@ -139,6 +154,57 @@ describe("scoreSearchIntent", () => {
     );
     expect(result.decision).toBe("discard");
     expect(result.contextRole).toBe("mismatch");
+  });
+
+  it("matches a works profile from lot subject when the procedure title is empty of objects", () => {
+    const worksPlan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      excludeKeywords: [],
+    });
+    const result = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+        "Выбор субподрядной организации для выполнения работ по монтажу электрооборудования распределительного пункта с трансформаторной подстанцией (РП с ТП), АСКУЭ, пусконаладочных работ, электрических измерений и сдачи результата работ",
+      ),
+      worksPlan,
+    );
+    expect(worksPlan.intent).toBe("works");
+    expect(result.decision).toBe("match");
+    expect(result.matchedObjects).toContain("электрооборудование");
+    expect(result.matchedDesired).toEqual(expect.arrayContaining(["монтаж", "пусконаладка"]));
+    expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
+  });
+
+  it("does not match a works profile on commissioning alone without the object", () => {
+    const worksPlan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      excludeKeywords: [],
+    });
+    const result = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Пусконаладка зернового комплекса",
+        "Пусконаладочные работы оборудования зерноочистительного комплекса",
+      ),
+      worksPlan,
+    );
+    expect(result.decision).not.toBe("match");
+    expect(result.matchedObjects).toEqual([]);
+  });
+
+  it("scores the same card independently for a supply profile", () => {
+    const worksPlan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      excludeKeywords: [],
+    });
+    const card = procedureCard(
+      "Выбор субподрядной организации по объекту в Жлобине",
+      "работы по монтажу электрооборудования распределительного пункта, пусконаладочных работ",
+    );
+    expect(scoreSearchIntentFromProcedure(card, worksPlan).decision).toBe("match");
+    expect(scoreSearchIntentFromProcedure(card, nkuPlan).decision).not.toBe("match");
   });
 });
 

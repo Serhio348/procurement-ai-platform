@@ -1194,10 +1194,11 @@ describe("specialist API", () => {
     expect(response.statusCode).toBe(200);
     expect(body.profileName).toBe("Электротехническое оборудование");
     expect(body.relevantCount).toBe(1);
-    // Cable has no profile object, so it is discarded rather than sent to review.
+    // Cable has no profile object. It is not a match; review may still open
+    // the card because the platform can return a row matched on lot subject.
     // Finished or announced hits are dropped by the default status filter.
-    expect(body.ambiguousCount).toBe(0);
-    expect(body.discardedCount).toBe(3);
+    expect(body.ambiguousCount).toBe(1);
+    expect(body.discardedCount).toBe(2);
     expect(body.items.map((item) => item.title)).toEqual([
       "Комплектная трансформаторная подстанция",
     ]);
@@ -1205,7 +1206,7 @@ describe("specialist API", () => {
     const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
       (item) => item.title,
     );
-    expect(inboxTitles).not.toContain("Кабель силовой");
+    expect(inboxTitles).toContain("Кабель силовой");
 
     const listed = await app.inject({ method: "GET", url: "/api/procurements" });
     const titles = (JSON.parse(listed.body).items as Array<{ title: string }>).map(
@@ -1261,7 +1262,8 @@ describe("specialist API", () => {
     expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
     expect(JSON.parse(saved.body).keywords).toEqual(["кабель"]);
     expect(searched.statusCode).toBe(200);
-    // A keyword-miss is discarded: it is not a match and not an inbox review.
+    // A title without the object is not a match. It may wait in review so
+    // procurement.get can read lot subject; it is not listed as found.
     expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
       false,
     );
@@ -1270,7 +1272,7 @@ describe("specialist API", () => {
       (JSON.parse(inbox.body).items as Array<{ title: string }>).some(
         (item) => item.title === "Комплектная трансформаторная подстанция",
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(cable).toBeDefined();
     expect(rejected.statusCode).toBe(200);
     expect(remaining.some((item) => item.title === "Кабель силовой")).toBe(false);

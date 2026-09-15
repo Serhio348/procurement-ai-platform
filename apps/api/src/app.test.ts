@@ -654,13 +654,15 @@ describe("specialist API", () => {
     expect(body.ambiguousCount).toBe(3);
     expect(body.run).toMatchObject({
       status: "retrieving",
-      retrievedCount: 4,
+      retrievedCount: 3,
       scoredCount: 0,
+      discardedCount: 0,
+      listingDiscardedCount: 1,
     });
     const progress = await app.inject({ method: "GET", url: "/api/procurements/search/progress" });
     expect(JSON.parse(progress.body)).toMatchObject({
       status: "retrieving",
-      retrievedCount: 4,
+      retrievedCount: 3,
     });
     expect(
       (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{ title: string }>)

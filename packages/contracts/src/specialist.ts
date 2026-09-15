@@ -313,6 +313,8 @@ export const SpecialistSearchRun = z.object({
   matchCount: z.number().int().nonnegative(),
   discardedCount: z.number().int().nonnegative(),
   reviewCount: z.number().int().nonnegative(),
+  /** Listing rows never opened. Not part of discardedCount. */
+  listingDiscardedCount: z.number().int().nonnegative().default(0),
 });
 export type SpecialistSearchRun = z.infer<typeof SpecialistSearchRun>;
 

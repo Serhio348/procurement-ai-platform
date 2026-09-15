@@ -97,7 +97,7 @@ export async function searchProcurements(
     withCredentials({
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 100, offset }),
+      body: JSON.stringify({ limit: 200, offset }),
     }),
   );
   if (!response.ok) {

@@ -729,7 +729,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       excludeKeywords: profile.excludeKeywords,
       intent: plan,
     };
-    const listingDiscarded = searchProgress.snapshot(profile.id)?.discardedCount ?? 0;
     for (const item of pending) {
       const outcome =
         searchReview === undefined
@@ -744,7 +743,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         searchProgress.scored(profile.id, {
           scoredCount,
           matchCount,
-          discardedCount: listingDiscarded + discarded,
+          discardedCount: discarded,
           reviewCount: ambiguousCount,
         });
         logger.info("Specialist search card scored", {
@@ -780,7 +779,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         searchProgress.scored(profile.id, {
           scoredCount,
           matchCount,
-          discardedCount: listingDiscarded + discarded,
+          discardedCount: discarded,
           reviewCount: ambiguousCount,
         });
         logger.info("Specialist search card scored", {
@@ -840,7 +839,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       searchProgress.scored(profile.id, {
         scoredCount,
         matchCount,
-        discardedCount: listingDiscarded + discarded,
+        discardedCount: discarded,
         reviewCount: ambiguousCount,
       });
       logger.info("Specialist search card scored", {
@@ -1109,11 +1108,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       profileId: profile.id,
       profileName: profileDisplayName(profile),
       status: collected.pending.length === 0 ? "done" : background ? "retrieving" : "scoring",
-      retrievedCount: hits.length,
+      retrievedCount: collected.pending.length,
       scoredCount: 0,
       matchCount: 0,
-      discardedCount: listingDiscarded,
-      reviewCount: collected.pending.length + collected.restoredReview,
+      discardedCount: 0,
+      reviewCount: collected.restoredReview,
+      listingDiscardedCount: listingDiscarded,
     });
     let discardedCount = listingDiscarded;
     let ambiguousCount = collected.restoredReview;

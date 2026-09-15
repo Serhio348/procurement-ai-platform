@@ -45,7 +45,7 @@ export function isScoredSearchMatch(card: {
   foundAs?: string | undefined;
   relevanceReason?: string | undefined;
 }): boolean {
-  return card.foundAs === "match" && !isListingPlaceholder(card);
+  return card.foundAs === "match";
 }
 
 /** Profile filters applied to listing hits before classification. */

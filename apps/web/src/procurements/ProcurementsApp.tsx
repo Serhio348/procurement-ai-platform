@@ -241,8 +241,12 @@ export function ProcurementsApp({
       return;
     }
     if (searchRun.status !== "done") return;
+    const listing =
+      searchRun.listingDiscardedCount > 0
+        ? ` В выдаче площадки не открывали ${String(searchRun.listingDiscardedCount)}.`
+        : "";
     setNotice(
-      `По профилю «${searchRun.profileName}»: найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}, сомнительных во входящих ${String(searchRun.reviewCount)}.`,
+      `По профилю «${searchRun.profileName}»: найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}, сомнительных во входящих ${String(searchRun.reviewCount)}.${listing}`,
     );
   }, [searchRun]);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
@@ -301,7 +305,7 @@ export function ProcurementsApp({
         return [...current, ...incoming.filter((item) => !seen.has(item.id))];
       });
       setHasMore(result.hasMore);
-      setNextOffset(offset + 100);
+      setNextOffset(offset + 200);
       const run = result.run;
       const scored = run === undefined ? undefined : `${String(run.scoredCount)} из ${String(run.retrievedCount)}`;
       setNotice(

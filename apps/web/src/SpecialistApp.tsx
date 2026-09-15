@@ -292,11 +292,23 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         void pull()
           .then((next) => {
             setSearchRun(next);
+            if (list === undefined) return;
+            if (next.status !== "done" && next.status !== "failed") return;
+            void list({ tab: "search", limit: 200 })
+              .then((items) => {
+                setProcurements((current) => {
+                  const kept = current.filter(
+                    (item) => isWatchedTriage(item) || isRejectedTriage(item.triage),
+                  );
+                  return mergeProcurementCards(kept, items);
+                });
+              })
+              .catch(() => undefined);
           })
           .catch(() => undefined);
       }
       if (list !== undefined) {
-        void list({ tab: "search", limit: 100 })
+        void list({ tab: "search", limit: 200 })
           .then((items) => {
             setProcurements((current) => {
               const kept = current.filter(

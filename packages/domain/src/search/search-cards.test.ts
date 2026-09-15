@@ -427,10 +427,10 @@ describe("selectRelevantSearchCards with intent", () => {
 });
 
 describe("isScoredSearchMatch", () => {
-  it("rejects a listing placeholder even if it was stamped match", () => {
+  it("treats foundAs match as a scored card, and review as not yet scored", () => {
     expect(
       isScoredSearchMatch({ foundAs: "match", relevanceReason: LISTING_PENDING_REASON }),
-    ).toBe(false);
+    ).toBe(true);
     expect(isScoredSearchMatch({ foundAs: "review", relevanceReason: "неясно" })).toBe(false);
     expect(
       isScoredSearchMatch({ foundAs: "match", relevanceReason: "В лотах есть НКУ для насосов." }),

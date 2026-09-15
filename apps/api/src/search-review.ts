@@ -75,38 +75,43 @@ export function createProcurementSearchReview(
           const hit = hits[index];
           if (hit === undefined) continue;
           const card = await fetchCard(client, hit, logger);
+          const finish = (outcome: ReviewOutcome): void => {
+            results[index] = attachCardStatus(outcome, card);
+          };
           let scored: SearchIntentScore | undefined;
           if (card !== undefined && profile.intent !== undefined) {
             const byIntent = scoreIntentCard(card, profile.intent);
             scored = byIntent.scored;
             if (byIntent.outcome !== undefined) {
-              results[index] = byIntent.outcome;
+              finish(byIntent.outcome);
               continue;
             }
           } else if (card !== undefined) {
             const byCard = outcomeFromCardReview(reviewByCard(card, profile));
             if (byCard !== undefined) {
-              results[index] = byCard;
+              finish(byCard);
               continue;
             }
           }
           if (options.classifier === undefined) {
-            results[index] = unavailableOutcome();
+            finish(unavailableOutcome());
             continue;
           }
           if (modelCalls >= maxModelCalls) {
-            results[index] = quotaOutcome();
+            finish(quotaOutcome());
             continue;
           }
           modelCalls += 1;
-          results[index] = await classify(
-            options.classifier,
-            profile,
-            hit,
-            card,
-            scored,
-            minConfidence,
-            logger,
+          finish(
+            await classify(
+              options.classifier,
+              profile,
+              hit,
+              card,
+              scored,
+              minConfidence,
+              logger,
+            ),
           );
         }
       };
@@ -133,6 +138,11 @@ async function fetchCard(
     });
     return undefined;
   }
+}
+
+function attachCardStatus(outcome: ReviewOutcome, card: ProcedureCard | undefined): ReviewOutcome {
+  if (card === undefined) return outcome;
+  return { ...outcome, status: card.status };
 }
 
 async function classify(

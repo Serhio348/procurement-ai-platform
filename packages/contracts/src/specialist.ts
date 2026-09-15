@@ -267,6 +267,7 @@ export type SpecialistInboxResolveResponse = z.infer<typeof SpecialistInboxResol
 
 export const SpecialistProcurementListTab = z.enum([
   "listed",
+  "search",
   "all",
   "monitor",
   "participate",
@@ -447,6 +448,11 @@ export const SpecialistWorkspaceState = z.object({
   reviewedIrrelevant: z.array(SpecialistReviewVerdict).default([]),
   /** Source ids of cases the specialist moved to the archive. */
   archivedSourceIds: z.array(z.string().min(1)).default([]),
+  /**
+   * Last button-search matches per profile, in list order. «Закупки» shows
+   * this queue, not every case ever stored in the cabinet.
+   */
+  searchIdsByProfile: z.record(z.string().uuid(), z.array(z.string().uuid())).default({}),
 });
 export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
 

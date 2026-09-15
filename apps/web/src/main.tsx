@@ -95,7 +95,7 @@ function LiveConsole() {
   >("loading");
 
   useEffect(() => {
-    void Promise.all([fetchInbox(), fetchProfiles(), fetchProcurements()])
+    void Promise.all([fetchInbox(), fetchProfiles(), fetchProcurements({ tab: "search" })])
       .then(([inbox, listed, procurements]) => {
         setData({
           inbox,

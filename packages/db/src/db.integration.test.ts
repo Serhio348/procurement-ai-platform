@@ -179,6 +179,7 @@ integration("PostgreSQL migrations and invariants", () => {
         },
       ],
       archivedSourceIds: [],
+      searchIdsByProfile: {},
     }, workspaceId);
     await store.saveCases([card], workspaceId);
     await store.saveInbox([

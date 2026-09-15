@@ -43,14 +43,17 @@ import {
   extraPlatformSearchTerms,
   inferSearchIntentPlan,
   mergeSearchIntentPlans,
+  isClosedProcedureStatus,
   isConsoleListedCase,
   partitionHitsByDecision,
   platformSearchTerms,
   isRejectedTriage,
+  isWatchedTriage,
   profileDisplayName,
   scoreIntentCard,
   selectRelevantSearchCards,
   shouldRunDiscovery,
+  statusLabel,
   SpecialistCatalog,
   SpecialistWorkspace,
   type ReviewOutcome,
@@ -203,7 +206,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
     }
     if (options.persistCases !== undefined) {
-      await options.persistCases(cabinet.catalog.storedCases(), cabinet.workspaceId);
+      await options.persistCases(
+        cabinet.catalog
+          .storedCases()
+          .filter(
+            (card) =>
+              card.live !== true ||
+              !isClosedProcedureStatus(card.status) ||
+              card.triage !== undefined,
+          ),
+        cabinet.workspaceId,
+      );
     }
     if (options.persistInbox !== undefined) {
       await options.persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
@@ -218,13 +231,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   }
 
-  // Cases the specialist never touched do not pile up: once a search stops
-  // returning them for caseMaxAgeMs they leave the catalog and the database.
+  // Unused finished procedures are transient search results: an explicit
+  // finished-status search may show them, but they are never persisted.
+  // Watch / participate / reject stay. Untouched old live rows are removed.
   const pruneStaleCases = async (): Promise<void> => {
+    const visibleClosedStatuses = new Set(
+      workspace().profile().statuses.filter((status) => isClosedProcedureStatus(status)),
+    );
     const removed = catalog().prune({
       now: clock(),
       maxAgeMs: caseMaxAgeMs,
       keepSourceIds: workspace().decidedSourceIds(),
+      keepClosedStatuses: visibleClosedStatuses,
     });
     const cutoff = new Date(Date.parse(clock()) - caseMaxAgeMs).toISOString();
     const staleIds = await cabinets.listStaleUndecidedIds(
@@ -234,12 +252,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
     const ids = [...new Set([...removed, ...staleIds])];
     if (ids.length === 0) return;
+    const retainedInMemory = new Set<string>(catalog().storedCases().map((card) => card.id));
+    for (const id of ids) {
+      if (!retainedInMemory.has(id)) workspace().removeSearchId(id);
+    }
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     logger.info("Specialist stale cases pruned", { count: ids.length });
     if (options.removeCases !== undefined) {
       await options.removeCases(ids, currentCabinet().workspaceId);
     }
     await cabinets.removeCases(currentCabinet().workspaceId, ids);
+    await persistWorkspaceOnly();
   };
 
   async function hydrateSourceCard(
@@ -321,13 +344,30 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   const listPage = async (
     query: {
-      tab?: "listed" | "all" | "monitor" | "participate" | "archive" | "trash";
+      tab?: "listed" | "search" | "all" | "monitor" | "participate" | "archive" | "trash";
       limit?: number;
       offset?: number;
     } = {},
   ) => {
     const tab = query.tab ?? "listed";
     const offset = query.offset ?? 0;
+    const limit = query.limit ?? 100;
+    await pruneStaleCases();
+    if (tab === "search") {
+      const items: SpecialistProcurementCardValue[] = [];
+      for (const id of workspace().searchIds(workspace().profile().id)) {
+        const card = await resolveCase(id);
+        if (card === undefined) continue;
+        if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
+        items.push(slimListedCard(card));
+      }
+      return SpecialistProcurementListResponse.parse({
+        items: items.slice(offset, offset + limit),
+        total: items.length,
+        tab,
+        hasMore: offset + limit < items.length,
+      });
+    }
     const liveOnly = liveProcurementsOnly && tab === "listed";
     const page = await cabinets.listCases(currentCabinet().workspaceId, {
       tab,
@@ -493,6 +533,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     };
   }
 
+  async function findExistingCase(
+    sourceProcurementId: string,
+  ): Promise<SpecialistProcurementCardValue | undefined> {
+    return (
+      catalog()
+        .procurements()
+        .find((item) => item.sourceProcurementId === sourceProcurementId) ??
+      (await cabinets.findCaseBySource(currentCabinet().workspaceId, sourceProcurementId))
+    );
+  }
+
   /**
    * Puts a found card into the catalog. A case seen before keeps its
    * documents and facts; only the listing fields, lastSeenAt and the profile
@@ -504,14 +555,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     profileId: string,
     now: string,
   ): Promise<{ card: SpecialistProcurementCardValue; isNew: boolean }> {
-    const existing =
-      catalog()
-        .procurements()
-        .find((item) => item.sourceProcurementId === card.sourceProcurementId) ??
-      (await cabinets.findCaseBySource(
-        currentCabinet().workspaceId,
-        card.sourceProcurementId,
-      ));
+    const existing = await findExistingCase(card.sourceProcurementId);
     const foundAs = card.foundAs === "match" || existing?.foundAs === "match" ? "match" : card.foundAs;
     const merged: SpecialistProcurementCardValue =
       existing === undefined
@@ -519,6 +563,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         : {
             ...existing,
             title: card.title,
+            status: card.status,
             statusLabel: card.statusLabel,
             live: existing.live === true || card.live === true,
             ...(card.buyerName === undefined ? {} : { buyerName: card.buyerName }),
@@ -709,11 +754,41 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         }
         continue;
       }
+      const existing = await findExistingCase(item.card.sourceProcurementId);
+      const procedureStatus = outcome?.status ?? item.hit.status ?? item.card.status;
+      const requestedClosedStatus =
+        isClosedProcedureStatus(procedureStatus) && profile.statuses.includes(procedureStatus);
+      if (
+        isClosedProcedureStatus(procedureStatus) &&
+        !requestedClosedStatus &&
+        existing?.triage === undefined
+      ) {
+        discarded += 1;
+        catalog().forgetCase(item.card.id);
+        dropped.push(item.card.id);
+        searchProgress.scored(profile.id, {
+          scoredCount,
+          matchCount,
+          discardedCount: listingDiscarded + discarded,
+          reviewCount: ambiguousCount,
+        });
+        if (scoring.persistEach) {
+          workspace().setDismissedInboxIds(catalog().dismissedIds());
+          await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
+          if (options.removeCases !== undefined) {
+            await options.removeCases([item.card.id], cabinet.workspaceId);
+          }
+          await persist(cabinet);
+        }
+        continue;
+      }
       const reviewedCard: SpecialistProcurementCardValue =
         outcome === undefined
-          ? item.card
+          ? { ...item.card, status: procedureStatus, statusLabel: statusLabel(procedureStatus) }
           : {
               ...item.card,
+              status: procedureStatus,
+              statusLabel: statusLabel(procedureStatus),
               ...(outcome.verdict === "relevant" ? { foundAs: "match" as const } : {}),
               ...(outcome.reason.length === 0
                 ? {}
@@ -734,6 +809,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       if (outcome?.verdict === "relevant") {
         matchCount += 1;
         matched.push(remembered.card);
+        workspace().appendSearchId(profile.id, remembered.card.id);
         catalog().dismissByProcurementId(item.card.id);
         if (scoring.inboxForMatches && remembered.isNew) {
           catalog().record(inboxItemFromFoundCard(remembered.card, now));
@@ -807,15 +883,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   }
 
-  function profileMatchCards(profileId: string): SpecialistProcurementCardValue[] {
-    return catalog()
-      .procurements()
-      .filter(
-        (card) =>
-          card.profileIds.includes(profileId) &&
-          card.foundAs === "match" &&
-          !isRejectedTriage(card.triage),
-      );
+  function searchQueueCards(profileId: string): SpecialistProcurementCardValue[] {
+    const ids = workspace().searchIds(profileId);
+    const byId = new Map<string, SpecialistProcurementCardValue>();
+    for (const item of catalog().procurements()) byId.set(item.id, item);
+    return ids
+      .map((id) => byId.get(id))
+      .filter((card): card is SpecialistProcurementCardValue => card !== undefined)
+      .filter((card) => !isRejectedTriage(card.triage) && !isWatchedTriage(card));
   }
 
   /**
@@ -860,7 +935,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       const already = known.get(card.sourceProcurementId);
       if (already?.foundAs === "match") {
-        await rememberFound({ ...card, foundAs: "match" }, profile.id, now);
+        const remembered = await rememberFound({ ...card, foundAs: "match" }, profile.id, now);
+        workspace().appendSearchId(profile.id, remembered.card.id);
         continue;
       }
       if (already?.foundAs === "review") {
@@ -986,6 +1062,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
     logSearchTrace(profile, selected);
     const now = clock();
+    if (offset === 0) workspace().replaceSearchIds(profile.id, []);
     const collected = await collectPendingHits(selected, profile, now, {
       restoreReviewInbox: true,
     });
@@ -1002,7 +1079,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: listingDiscarded,
       reviewCount: collected.pending.length + collected.restoredReview,
     });
-    let matchedCount = 0;
     let discardedCount = listingDiscarded;
     let ambiguousCount = collected.restoredReview;
     if (!background) {
@@ -1010,7 +1086,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         inboxForMatches: false,
         persistEach: false,
       });
-      matchedCount = scored.matched.length;
       discardedCount += scored.discarded;
       ambiguousCount += scored.ambiguousCount;
       searchProgress.finish(profile.id, "done");
@@ -1021,17 +1096,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await persist();
       startListingReviewJob(collected.pending, profile, now, plan);
     }
-    const items = profileMatchCards(profile.id);
+    const items = searchQueueCards(profile.id);
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
-      relevantCount: background ? items.length : matchedCount,
+      relevantCount: items.length,
       discardedCount,
       ambiguousCount,
     });
     const run = searchProgress.snapshot(profile.id);
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
-      relevantCount: background ? items.length : matchedCount,
+      relevantCount: items.length,
       discardedCount,
       ambiguousCount,
       hasMore: hits.length >= limit,
@@ -1509,6 +1584,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           : card;
       card = withTriage(attachProfileToCard(listed, workspace().profile().id), workspace());
       catalog().upsertCase(card);
+      workspace().appendSearchId(workspace().profile().id, card.id);
     }
     if (action === "refresh" && card !== undefined) {
       card = withTriage(applyInboxChangeToCard(card, item.change), workspace());
@@ -1601,6 +1677,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     workspace().recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
+    if (
+      parsed.data.kind === "monitor" ||
+      parsed.data.kind === "participate" ||
+      parsed.data.kind === "reject"
+    ) {
+      workspace().removeSearchId(card.id);
+    }
     let next = withTriage(card, workspace());
     // Hydrate the platform card before returning; file ingest continues after.
     if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {

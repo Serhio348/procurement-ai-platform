@@ -9,6 +9,7 @@ import {
   DomainSearchCandidate,
   SearchClassifierInput,
   type ProcedureCard,
+  type ProcedureStatus,
   type SearchHit,
   type SearchClassifierInput as SearchClassifierInputValue,
   type SearchIntentPlan,
@@ -37,6 +38,8 @@ export interface ReviewOutcome {
   reason: string;
   matchedTerms: readonly string[];
   confidence: number;
+  /** Procedure status from procurement.get when the card was fetched. */
+  status?: ProcedureStatus;
 }
 
 /** Text from the platform card that a keyword may legitimately appear in. */

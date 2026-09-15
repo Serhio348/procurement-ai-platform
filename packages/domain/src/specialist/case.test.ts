@@ -1,6 +1,11 @@
 import { ProcedureCard, SearchHit } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { compileSpecialistCase, uuidFromHex } from "./case.js";
+import {
+  compileSpecialistCase,
+  isClosedProcedureStatus,
+  isPrunableUndecidedCase,
+  uuidFromHex,
+} from "./case.js";
 
 const hash = "a".repeat(64);
 const now = "2026-09-03T10:00:00.000Z";
@@ -198,6 +203,63 @@ describe("compileSpecialistCase", () => {
     expect(card.actions.find((item) => item.actor === "CommercialTermsAgent")?.detail).toContain(
       "Подтверждённые числа",
     );
+  });
+});
+
+describe("isClosedProcedureStatus", () => {
+  it("treats completed, cancelled and failed as finished, not bidding_closed", () => {
+    expect(isClosedProcedureStatus("completed")).toBe(true);
+    expect(isClosedProcedureStatus("cancelled")).toBe(true);
+    expect(isClosedProcedureStatus("failed")).toBe(true);
+    expect(isClosedProcedureStatus("bidding_closed")).toBe(false);
+    expect(isClosedProcedureStatus("accepting_bids")).toBe(false);
+  });
+});
+
+describe("isPrunableUndecidedCase", () => {
+  const cutoff = Date.parse("2026-09-16T00:00:00.000Z");
+
+  it("drops a finished unused case and keeps watch / participate", () => {
+    expect(
+      isPrunableUndecidedCase(
+        {
+          status: "completed",
+          sourceProcurementId: "auction/1",
+          live: true,
+          lastSeenAt: "2026-09-16T12:00:00.000Z",
+        },
+        cutoff,
+        new Set(),
+      ),
+    ).toBe(true);
+    expect(
+      isPrunableUndecidedCase(
+        {
+          status: "completed",
+          sourceProcurementId: "auction/1",
+          triage: "participate",
+          live: true,
+        },
+        cutoff,
+        new Set(),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps finished cases while the profile explicitly watches that status", () => {
+    expect(
+      isPrunableUndecidedCase(
+        {
+          status: "completed",
+          sourceProcurementId: "auction/1",
+          live: true,
+          lastSeenAt: "2026-09-16T12:00:00.000Z",
+        },
+        cutoff,
+        new Set(),
+        new Set(["completed"]),
+      ),
+    ).toBe(false);
   });
 });
 

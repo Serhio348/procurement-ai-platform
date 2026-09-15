@@ -1,5 +1,6 @@
 import {
   countCabinetCases,
+  isPrunableUndecidedCase,
   isWatchedTriage,
   pageListedCases,
   SpecialistCatalog,
@@ -195,13 +196,7 @@ export function createMemoryCabinetRegistry(options: {
       const cutoff = Date.parse(cutoffIso);
       const keep = new Set(keepSourceIds);
       return casesOf(workspaceId)
-        .filter((card) => {
-          if (card.live !== true || card.triage !== undefined) return false;
-          if (keep.has(card.sourceProcurementId)) return false;
-          const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
-          if (Number.isFinite(seen) && seen >= cutoff) return false;
-          return true;
-        })
+        .filter((card) => isPrunableUndecidedCase(card, cutoff, keep))
         .map((card) => card.id);
     },
     async findDocument(workspaceId, hash) {

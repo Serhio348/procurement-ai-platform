@@ -207,6 +207,43 @@ describe("SpecialistCatalog", () => {
     expect(catalog.urgentInbox()).toEqual([]);
   });
 
+  it("prunes a finished procedure the specialist never took, even if it was seen today", () => {
+    const catalog = new SpecialistCatalog();
+    const closed = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000a05",
+      title: "Завершённая поставка",
+      status: "completed",
+      statusLabel: "завершена",
+      url: "https://goszakupki.by/auction/view/5",
+      sourceProcurementId: "auction/5",
+      live: true,
+      foundAs: "match",
+      lastSeenAt: "2026-09-16T12:00:00.000Z",
+    });
+    const watched = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000a06",
+      title: "Слежу за завершённой",
+      status: "completed",
+      statusLabel: "завершена",
+      url: "https://goszakupki.by/auction/view/6",
+      sourceProcurementId: "auction/6",
+      live: true,
+      triage: "monitor",
+      lastSeenAt: "2026-09-16T12:00:00.000Z",
+    });
+    catalog.upsertCase(closed);
+    catalog.upsertCase(watched);
+
+    const removed = catalog.prune({
+      now: "2026-09-16T12:00:00.000Z",
+      maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+      keepSourceIds: new Set(),
+    });
+
+    expect(removed).toEqual([closed.id]);
+    expect(catalog.storedCases().map((card) => card.id)).toEqual([watched.id]);
+  });
+
   it("drops a purged case so persist cannot recreate it from the inbox stub", () => {
     const catalog = SpecialistCatalog.parse(fixture);
     const card = SpecialistProcurementCard.parse({

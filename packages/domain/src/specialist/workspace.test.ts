@@ -145,6 +145,28 @@ describe("remembered review verdicts", () => {
   });
 });
 
+describe("search queue ids", () => {
+  it("replaces the last search per profile and forgets ids of a removed profile", () => {
+    const workspace = new SpecialistWorkspace();
+    const first = workspace.profile().id;
+    workspace.replaceSearchIds(first, ["00000000-0000-4000-8000-000000000001"]);
+    workspace.appendSearchId(first, "00000000-0000-4000-8000-000000000002");
+    expect(workspace.searchIds(first)).toEqual([
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ]);
+    const second = workspace.addProfile().id;
+    workspace.replaceSearchIds(second, ["00000000-0000-4000-8000-000000000003"]);
+    workspace.removeProfile(second);
+    const restored = SpecialistWorkspace.parse(workspace.snapshot());
+    expect(restored.searchIds(first)).toEqual([
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ]);
+    expect(restored.searchIds(second)).toEqual([]);
+  });
+});
+
 describe("lastWorkingKind", () => {
   it("restores the last Слежу/Участвую after «Убрать», otherwise Слежу", () => {
     const workspace = new SpecialistWorkspace();

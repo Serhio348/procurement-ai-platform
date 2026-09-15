@@ -275,8 +275,8 @@ function foundCard(
   return SpecialistProcurementCard.parse({
     id: ProcurementId.parse(uuidFromHex(`${hit.sourceId}:${hit.sourceProcurementId}`)),
     title: hit.title,
-    status: "unknown",
-    statusLabel: hit.sourceStatus ?? statusLabel("unknown"),
+    status: hit.status ?? "unknown",
+    statusLabel: hit.sourceStatus ?? statusLabel(hit.status ?? "unknown"),
     url: hit.url,
     sourceProcurementId: hit.sourceProcurementId,
     live: hit.sourceId === "goszakupki_by",

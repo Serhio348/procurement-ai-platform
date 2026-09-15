@@ -56,6 +56,7 @@ describe("createProcurementSearchReview", () => {
 
     expect(outcome?.verdict).toBe("relevant");
     expect(outcome?.decidedBy).toBe("card");
+    expect(outcome?.status).toBe("unknown");
     expect(classify).not.toHaveBeenCalled();
   });
 

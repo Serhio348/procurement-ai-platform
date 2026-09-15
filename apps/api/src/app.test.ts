@@ -200,6 +200,55 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("search tab is this run, not every stored case in the cabinet", async () => {
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000701",
+        title: "Закупка взрывозащищенной пусковой аппаратуры",
+        status: "completed",
+        statusLabel: "Завершен",
+        url: "https://goszakupki.by/request/view/old-1",
+        sourceProcurementId: "request/old-1",
+        foundAs: "match",
+        live: true,
+      }),
+    );
+    const app = await buildSpecialistApi({
+      catalog,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/page-1",
+            url: "https://goszakupki.by/auction/view/page-1",
+            title: "КТПБ из поиска",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const queue = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    const queueTitles = (JSON.parse(queue.body).items as Array<{ title: string }>).map(
+      (item) => item.title,
+    );
+
+    expect(JSON.parse(searched.body).items).toHaveLength(1);
+    expect(queueTitles).toEqual(["КТПБ из поиска"]);
+    expect(queueTitles).not.toContain("Закупка взрывозащищенной пусковой аппаратуры");
+
+    await app.close();
+  });
+
   it("shows a watched case in My procurements even when live-only listing is on", async () => {
     const catalog = new SpecialistCatalog();
     const stored = SpecialistProcurementCard.parse({
@@ -1160,15 +1209,116 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("drops a finished unused case from the cabinet and keeps one the specialist watches", async () => {
+    const catalog = new SpecialistCatalog();
+    const closed = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000b01",
+      title: "Завершённые взрывчатые вещества",
+      status: "completed",
+      statusLabel: "завершена",
+      url: "https://goszakupki.by/auction/view/closed-dump",
+      sourceProcurementId: "auction/closed-dump",
+      live: true,
+      foundAs: "match",
+      lastSeenAt: "2026-09-16T10:00:00.000Z",
+    });
+    const watched = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000b02",
+      title: "Слежу за завершённой КТПБ",
+      status: "completed",
+      statusLabel: "завершена",
+      url: "https://goszakupki.by/auction/view/closed-watch",
+      sourceProcurementId: "auction/closed-watch",
+      live: true,
+      foundAs: "match",
+      triage: "monitor",
+      lastSeenAt: "2026-09-16T10:00:00.000Z",
+    });
+    catalog.upsertCase(closed);
+    catalog.upsertCase(watched);
+    const removeCases = vi.fn(async (_ids: readonly string[]) => undefined);
+    const app = await buildSpecialistApi({
+      catalog,
+      removeCases,
+      clock: () => "2026-09-16T12:00:00.000Z",
+    });
+
+    const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+    const items = JSON.parse(listed.body).items as Array<{ title: string; triage?: string }>;
+
+    expect(items.map((item) => item.title)).toEqual(["Слежу за завершённой КТПБ"]);
+    expect(removeCases).toHaveBeenCalledWith([closed.id], expect.any(String));
+
+    await app.close();
+  });
+
+  it("shows an explicitly requested finished match without storing it", async () => {
+    const persistCases = vi.fn(async (_cards: readonly unknown[]) => undefined);
+    const review = vi.fn(async (): Promise<ReviewOutcome[]> => [
+      {
+        verdict: "relevant",
+        decidedBy: "card",
+        reason: "В лотах есть НКУ.",
+        matchedTerms: ["НКУ"],
+        confidence: 1,
+        status: "completed",
+      },
+    ]);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      persistCases,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/closed-hit",
+            url: "https://goszakupki.by/auction/view/closed-hit",
+            title: "Поставка НКУ для насосов",
+          }),
+        ],
+      },
+      searchReview: { review },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "НКУ для управления насосами",
+        keywords: ["НКУ"],
+        statuses: ["completed"],
+      },
+    });
+    persistCases.mockClear();
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(async () => {
+      const progress = JSON.parse(
+        (await app.inject({ method: "GET", url: "/api/procurements/search/progress" })).body,
+      ) as { status: string };
+      expect(progress.status).toBe("done");
+    });
+    const searched = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    const stored = persistCases.mock.calls.flatMap(
+      (call) => call[0] as Array<{ sourceProcurementId?: string }>,
+    );
+
+    expect(JSON.parse(searched.body).items).toEqual([
+      expect.objectContaining({
+        sourceProcurementId: "auction/closed-hit",
+        status: "completed",
+      }),
+    ]);
+    expect(stored.some((card) => card.sourceProcurementId === "auction/closed-hit")).toBe(false);
+
+    await app.close();
+  });
+
   it("returns delivery and warranty from the live Word TZ and does not treat 99.5% cap as advance", async () => {
-    const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
-    const list = await app.inject({ method: "GET", url: "/api/procurements" });
-    const items = JSON.parse(list.body).items as Array<{
-      id: string;
-      sourceProcurementId: string;
-    }>;
-    const live = items.find((item) => item.sourceProcurementId === "auction/3629820");
+    const catalog = await loadFixtureCatalog();
+    const live = catalog
+      .procurements()
+      .find((item) => item.sourceProcurementId === "auction/3629820");
     expect(live).toBeDefined();
+    const app = await buildSpecialistApi({ catalog });
     const card = await app.inject({ method: "GET", url: `/api/procurements/${live?.id ?? ""}` });
     const body = JSON.parse(card.body) as { termsDetail?: string; paymentQuote?: string };
 

@@ -15,6 +15,8 @@ import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
 import {
   countCabinetCases,
+  isClosedProcedureStatus,
+  isPrunableUndecidedCase,
   isWatchedTriage,
   pageListedCases,
   SpecialistCatalog,
@@ -240,7 +242,17 @@ export async function openSpecialistPersistence(options: {
     async persist(cabinet) {
       cache.set(cabinet.workspaceId, cabinet);
       await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
-      await persistCases(cabinet.catalog.storedCases(), cabinet.workspaceId);
+      await persistCases(
+        cabinet.catalog
+          .storedCases()
+          .filter(
+            (card) =>
+              card.live !== true ||
+              !isClosedProcedureStatus(card.status) ||
+              card.triage !== undefined,
+          ),
+        cabinet.workspaceId,
+      );
       await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
     },
     async persistWorkspaceOnly(cabinet) {
@@ -326,13 +338,7 @@ export async function openSpecialistPersistence(options: {
       const keep = new Set(keepSourceIds);
       return cabinet.catalog
         .procurements()
-        .filter((card) => {
-          if (card.live !== true || card.triage !== undefined) return false;
-          if (keep.has(card.sourceProcurementId)) return false;
-          const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
-          if (Number.isFinite(seen) && seen >= cutoff) return false;
-          return true;
-        })
+        .filter((card) => isPrunableUndecidedCase(card, cutoff, keep))
         .map((card) => card.id);
     },
     async findDocument(workspaceId, hash) {

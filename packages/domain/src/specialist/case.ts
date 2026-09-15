@@ -331,6 +331,39 @@ function fnvHex(seed: string): string {
   return parts.join("");
 }
 
+/** Finished on the platform: keep only if the specialist took or watched it. */
+export function isClosedProcedureStatus(status: ProcedureStatus): boolean {
+  return status === "completed" || status === "cancelled" || status === "failed";
+}
+
+/**
+ * Undecided catalog rows that must leave the cabinet: a finished procedure
+ * the specialist never took, or a live row a search has not returned for a
+ * while. Decided (watch / participate / reject) rows stay.
+ */
+export function isPrunableUndecidedCase(
+  card: {
+    live?: boolean | undefined;
+    triage?: string | undefined;
+    status: ProcedureStatus;
+    lastSeenAt?: string | undefined;
+    sourceProcurementId: string;
+  },
+  cutoffMs: number,
+  keepSourceIds: ReadonlySet<string>,
+  keepClosedStatuses: ReadonlySet<ProcedureStatus> = new Set(),
+): boolean {
+  if (card.triage !== undefined) return false;
+  if (keepSourceIds.has(card.sourceProcurementId)) return false;
+  if (isClosedProcedureStatus(card.status)) {
+    return card.live === true && !keepClosedStatuses.has(card.status);
+  }
+  if (card.live !== true) return false;
+  const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
+  if (Number.isFinite(seen) && seen >= cutoffMs) return false;
+  return true;
+}
+
 export function statusLabel(status: ProcedureStatus): string {
   switch (status) {
     case "announced":

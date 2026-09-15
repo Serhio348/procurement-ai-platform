@@ -40,9 +40,9 @@ afterEach(() => {
 });
 
 describe("SpecialistApp search list", () => {
-  it("keeps the profile list after remount instead of an empty Закупки tab", async () => {
+  it("replaces the cabinet dump with this search and remount keeps only last search", async () => {
     const user = userEvent.setup();
-    const props = {
+    const searchProps = {
       inbox: [],
       procurements: [stale, found],
       profiles: [profile],
@@ -55,15 +55,16 @@ describe("SpecialistApp search list", () => {
       }),
     };
 
-    const first = render(<SpecialistApp {...props} />);
+    const first = render(<SpecialistApp {...searchProps} />);
     expect(screen.getByRole("button", { name: /Старая из базы/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Искать по профилю" }));
     expect(screen.getByRole("button", { name: /Найденная поиском/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Старая из базы/ })).toBeNull();
     first.unmount();
 
-    render(<SpecialistApp {...props} />);
+    render(<SpecialistApp {...searchProps} procurements={[found]} />);
     expect(screen.getByRole("button", { name: /Найденная поиском/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Старая из базы/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Старая из базы/ })).toBeNull();
   });
 
   it("keeps a watched case out of Закупки", () => {

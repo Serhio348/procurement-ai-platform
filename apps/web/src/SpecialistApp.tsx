@@ -96,10 +96,8 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     return () => clearInterval(timer);
   }, [refreshInbox]);
 
-  // Ids of the last profile search per profile, in source order. The search
-  // pane is unmounted on every tab switch and the whole app on reload; without
-  // this it would come back showing the whole catalog (old completed cases)
-  // instead of what was just found. Kept in localStorage so a refresh keeps it.
+  // Ids of the last profile search. The search pane unmounts on tab switch;
+  // parent state plus GET ?tab=search keep this run, not the cabinet dump.
   const [searchRun, setSearchRun] = useState<SpecialistSearchRun | undefined>();
   const ingestingIds = useRef(new Set<string>());
   const [ingestById, setIngestById] = useState<Record<string, SpecialistIngestProgress>>(
@@ -119,7 +117,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       ? undefined
       : async (offset?: number) => {
           const result = await searchProfile(offset);
-          setProcurements((current) => mergeProcurementCards(current, result.items));
+          setProcurements((current) => {
+            if (offset === undefined || offset === 0) {
+              const kept = current.filter(
+                (item) => isWatchedTriage(item) || isRejectedTriage(item.triage),
+              );
+              return mergeProcurementCards(kept, result.items);
+            }
+            return mergeProcurementCards(current, result.items);
+          });
           setSearchRun(result.run);
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
@@ -282,7 +288,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           .catch(() => undefined);
       }
       if (list !== undefined) {
-        void list({ tab: "listed", limit: 100 })
+        void list({ tab: "search", limit: 100 })
           .then((items) => {
             setProcurements((current) => mergeProcurementCards(current, items));
           })

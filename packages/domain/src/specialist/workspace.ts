@@ -60,6 +60,7 @@ export class SpecialistWorkspace {
   #dismissedInboxIds: string[] = [];
   #reviewedIrrelevant: SpecialistReviewVerdict[] = [];
   #archivedSourceIds = new Set<string>();
+  #searchIdsByProfile: Record<string, string[]> = {};
 
   constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
     const parsed = SpecialistWorkingProfile.parse(profile);
@@ -86,6 +87,9 @@ export class SpecialistWorkspace {
       (item) => item.algorithmVersion === REVIEW_ALGORITHM_VERSION,
     );
     workspace.#archivedSourceIds = new Set(state.archivedSourceIds);
+    workspace.#searchIdsByProfile = Object.fromEntries(
+      Object.entries(state.searchIdsByProfile).map(([profileId, ids]) => [profileId, [...ids]]),
+    );
     return workspace;
   }
 
@@ -97,6 +101,9 @@ export class SpecialistWorkspace {
       dismissedInboxIds: this.#dismissedInboxIds,
       reviewedIrrelevant: this.#reviewedIrrelevant,
       archivedSourceIds: [...this.#archivedSourceIds],
+      searchIdsByProfile: Object.fromEntries(
+        Object.entries(this.#searchIdsByProfile).map(([profileId, ids]) => [profileId, [...ids]]),
+      ),
     });
   }
 
@@ -192,6 +199,7 @@ export class SpecialistWorkspace {
       throw new Error("last_profile");
     }
     this.#profiles = this.#profiles.filter((item) => item.id !== id);
+    delete this.#searchIdsByProfile[id];
     if (this.#activeProfileId === id) {
       const next = this.#profiles[0];
       if (next === undefined) {
@@ -200,6 +208,28 @@ export class SpecialistWorkspace {
       this.#activeProfileId = next.id;
     }
     return this.profile();
+  }
+
+  replaceSearchIds(profileId: string, ids: readonly string[]): void {
+    this.profileById(profileId);
+    this.#searchIdsByProfile[profileId] = [...new Set(ids)];
+  }
+
+  appendSearchId(profileId: string, id: string): void {
+    this.profileById(profileId);
+    const current = this.#searchIdsByProfile[profileId] ?? [];
+    if (current.includes(id)) return;
+    this.#searchIdsByProfile[profileId] = [...current, id];
+  }
+
+  removeSearchId(id: string): void {
+    for (const [profileId, ids] of Object.entries(this.#searchIdsByProfile)) {
+      this.#searchIdsByProfile[profileId] = ids.filter((item) => item !== id);
+    }
+  }
+
+  searchIds(profileId: string): readonly string[] {
+    return this.#searchIdsByProfile[profileId] ?? [];
   }
 
   replaceProfile(input: SpecialistProfileWrite): void {
@@ -325,10 +355,17 @@ function migrateWorkspaceState(raw: unknown): unknown {
     dismissedInboxIds?: unknown;
     reviewedIrrelevant?: unknown;
     archivedSourceIds?: unknown;
+    searchIdsByProfile?: unknown;
   };
   const dismissedInboxIds = Array.isArray(record.dismissedInboxIds) ? record.dismissedInboxIds : [];
   const reviewedIrrelevant = Array.isArray(record.reviewedIrrelevant) ? record.reviewedIrrelevant : [];
   const archivedSourceIds = Array.isArray(record.archivedSourceIds) ? record.archivedSourceIds : [];
+  const searchIdsByProfile =
+    typeof record.searchIdsByProfile === "object" &&
+    record.searchIdsByProfile !== null &&
+    !Array.isArray(record.searchIdsByProfile)
+      ? record.searchIdsByProfile
+      : {};
   if (Array.isArray(record.profiles) && record.profiles.length > 0) {
     const profiles = record.profiles.map((item) => SpecialistWorkingProfile.parse(item));
     const active =
@@ -340,6 +377,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       dismissedInboxIds,
       reviewedIrrelevant,
       archivedSourceIds,
+      searchIdsByProfile,
     };
   }
   if (record.profile !== undefined) {
@@ -351,6 +389,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       dismissedInboxIds,
       reviewedIrrelevant,
       archivedSourceIds,
+      searchIdsByProfile,
     };
   }
   const created = emptySpecialistWorkingProfile();
@@ -361,6 +400,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
     dismissedInboxIds,
     reviewedIrrelevant,
     archivedSourceIds,
+    searchIdsByProfile,
   };
 }
 

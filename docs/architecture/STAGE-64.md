@@ -41,8 +41,15 @@ procurement.search (фразы профиля)
 
 Кнопка «Поиск» отвечает после listing: `items` — уже сохранённые match
 профиля, `run` — счётчики. Фон дочитывает карточки в том же кабинете
-(`AsyncLocalStorage`), каждая match сразу `persist`. Консоль поллит
-прогресс и `GET /api/procurements` (tab listed) и дописывает строки.
+(`AsyncLocalStorage`), каждая match сразу `persist`. Консоль поллит прогресс и `GET /api/procurements?tab=search` — только
+карточки **этого** нажатия «Искать», не весь кабинет. Завершённые,
+отменённые и несостоявшиеся live-процедуры **не пишутся** в
+`workspace_procurements`, пока специалист не нажал «Участвовать» или
+«Отслеживать». Если в профиле явно выбран такой статус, поиск всё равно
+показывает их во вкладке «Закупки» как временную выдачу текущего запуска.
+Уже лежавшие там незатронутые строки снимаются при поиске и при открытии
+списка. Reload после поиска поднимает тот же список из
+`workspace_settings.settings.searchIdsByProfile`.
 
 Без review-порта (fixture-тесты) title стоит вместо карточки: тот же
 scorer, синхронный ответ. Живой путь всегда идёт через `procurement.get`.
@@ -79,9 +86,12 @@ match. Оценка в коде (`scoreSearchIntent`), модель только
 - `packages/domain/src/specialist/workspace.ts` — `search-review-v4`
 - `apps/api/src/search-progress.ts` — in-memory прогресс по профилю
 - `apps/api/src/app.ts` — score после get, persist каждой match,
-  `GET /api/procurements/search/progress`, discovery только новых id
+  `GET /api/procurements/search/progress`, discovery только новых id;
+  завершённые без triage не persist, prune снимает их из SQL
+- `packages/domain/src/specialist/catalog.ts` — prune закрытых undecided
 - `apps/web` — список из SQL, полл прогресса, без wipe localStorage
-- тесты: listing не вердикт; фон пишет match по одной; reload не пустой
+- тесты: listing не вердикт; фон пишет match по одной; reload не пустой;
+  завершённая без «Участвовать»/«Отслеживать» не остаётся в кабинете
 
 ## 5. БД и контракты
 
@@ -122,3 +132,4 @@ match. Оценка в коде (`scoreSearchIntent`), модель только
 - [x] Файлы только у «Участвовать»
 - [x] 20 запросов/мин к площадке
 - [x] Кабинеты изолированы
+- [x] Завершённые без «Участвовать»/«Отслеживать» не копятся в SQL

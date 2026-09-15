@@ -246,6 +246,7 @@ export function createSpecialistStore(db: Database) {
           archivedSourceIds: caseRows
             .filter((row) => row.archived)
             .map((row) => row.sourceProcurementId),
+          searchIdsByProfile: searchIdsFromSettings(settingRows[0]?.settings),
         });
       });
     },
@@ -308,11 +309,16 @@ export function createSpecialistStore(db: Database) {
           .values({
             workspaceId,
             activeProfileId: state.activeProfileId,
+            settings: { searchIdsByProfile: state.searchIdsByProfile },
             updatedAt: now,
           })
           .onConflictDoUpdate({
             target: workspaceSettings.workspaceId,
-            set: { activeProfileId: state.activeProfileId, updatedAt: now },
+            set: {
+              activeProfileId: state.activeProfileId,
+              settings: { searchIdsByProfile: state.searchIdsByProfile },
+              updatedAt: now,
+            },
           });
 
         await tx
@@ -550,8 +556,16 @@ export function createSpecialistStore(db: Database) {
         const filters = [
           eq(workspaceProcurements.workspaceId, workspaceId),
           isNull(workspaceProcurements.triage),
-          sql`${workspaceProcurements.card} ->> 'live' = 'true'`,
-          or(isNull(workspaceProcurements.lastSeenAt), lt(workspaceProcurements.lastSeenAt, cutoffIso)),
+          or(
+            and(
+              sql`${workspaceProcurements.card} ->> 'live' = 'true'`,
+              sql`${workspaceProcurements.card} ->> 'status' in ('completed', 'cancelled', 'failed')`,
+            ),
+            and(
+              sql`${workspaceProcurements.card} ->> 'live' = 'true'`,
+              or(isNull(workspaceProcurements.lastSeenAt), lt(workspaceProcurements.lastSeenAt, cutoffIso)),
+            ),
+          ),
         ];
         if (keepSourceIds.length > 0) {
           filters.push(notInArray(workspaceProcurements.sourceProcurementId, [...keepSourceIds]));
@@ -1195,6 +1209,17 @@ async function upsertDocumentHash(
 function pgInt(value: number | undefined): number | undefined {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   return Math.min(Math.max(Math.trunc(value), 0), 2_147_483_647);
+}
+
+function searchIdsFromSettings(settings: Record<string, unknown> | undefined): Record<string, string[]> {
+  const raw = settings?.["searchIdsByProfile"];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const result: Record<string, string[]> = {};
+  for (const [profileId, ids] of Object.entries(raw)) {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) continue;
+    result[profileId] = ids.filter((id): id is string => typeof id === "string");
+  }
+  return result;
 }
 
 export function latestTriage(

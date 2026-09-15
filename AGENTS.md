@@ -70,7 +70,7 @@
 - [`docs/architecture/STAGE-61.md`](docs/architecture/STAGE-61.md) — предмет лота в оценке поиска
 - [`docs/architecture/STAGE-62.md`](docs/architecture/STAGE-62.md) — поиск по каждому терму, честный merge и provenance
 - [`docs/architecture/STAGE-63.md`](docs/architecture/STAGE-63.md) — план не сужается моделью, услуги ≠ поставка, кандидат ≠ новая закупка
-- [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score
+- [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score; завершённые без решения не хранятся
 
 ---
 
@@ -261,7 +261,8 @@ docs/architecture/ Документы этапов
 - Этап 63 — план модели не сужает детерминированный; услуга в голове
   заголовка ≠ поставка; кандидат во входящих без «срочно»
 - Этап 64 — listing не вердикт: score после `procurement.get` (title +
-  лот); match пишется в SQL сразу; «Закупки» из кабинета, без wipe
+  лот); match пишется в SQL сразу; «Закупки» из кабинета, без wipe;
+  завершённые без «Участвовать»/«Отслеживать» из кабинета уходят
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

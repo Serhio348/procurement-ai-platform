@@ -2,6 +2,7 @@ import type { SpecialistProcurementCard } from "@procurement/contracts";
 
 export const SPECIALIST_CASE_LIST_TABS = [
   "listed",
+  "search",
   "all",
   "monitor",
   "participate",
@@ -45,6 +46,7 @@ export function caseMatchesListTab(
 ): boolean {
   switch (tab) {
     case "listed":
+    case "search":
       return true;
     case "all":
       return (card.triage === "monitor" || card.triage === "participate") && card.archived !== true;

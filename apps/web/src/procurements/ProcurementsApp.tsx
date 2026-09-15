@@ -289,18 +289,7 @@ export function ProcurementsApp({
       showingSearch.current = true;
       setCatalogItems((current) => {
         const incoming = result.items.filter(isSearchQueueCard);
-        if (offset === 0) {
-          const byId = new Map(current.map((item) => [item.id, item] as const));
-          for (const item of incoming) byId.set(item.id, item);
-          const order = [...current.map((item) => item.id)];
-          for (const item of incoming) {
-            if (!order.includes(item.id)) order.push(item.id);
-          }
-          return order
-            .map((id) => byId.get(id))
-            .filter((item): item is SpecialistProcurementCard => item !== undefined)
-            .filter(isSearchQueueCard);
-        }
+        if (offset === 0) return incoming;
         const seen = new Set(current.map((item) => item.id));
         return [...current, ...incoming.filter((item) => !seen.has(item.id))];
       });

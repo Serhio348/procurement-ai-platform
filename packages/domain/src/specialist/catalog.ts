@@ -4,10 +4,11 @@ import {
   SpecialistInboxEntry,
   SpecialistProcurementCard,
   type InboxFixtureItem as InboxFixtureItemValue,
+  type ProcedureStatus,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
 import { compileChangeAlert } from "../notification/message.js";
-import { statusLabel } from "./case.js";
+import { isPrunableUndecidedCase, statusLabel } from "./case.js";
 import { inboxTopic, inboxTopicLabel } from "./inbox-action.js";
 import { mergeProfileIds } from "./profile-cases.js";
 
@@ -110,19 +111,31 @@ export class SpecialistCatalog {
   }
 
   /**
-   * Drops undecided live cases a search has not returned for `maxAgeMs`.
-   * Cases from a fixture inbox are left alone; a legacy live case without
-   * lastSeenAt counts as stale. Inbox rows of pruned cases are dismissed so the
-   * inbox cannot point at a card that no longer exists.
+   * Drops unused finished procedures and undecided live cases a search has not
+   * returned for `maxAgeMs`. Watch / participate / reject stay. A finished
+   * procedure is not kept just because it was seen today — the specialist can
+   * find it again on the platform with a status filter. Inbox rows of pruned
+   * cases are dismissed so the inbox cannot point at a card that no longer exists.
    */
-  prune(input: { now: string; maxAgeMs: number; keepSourceIds: ReadonlySet<string> }): string[] {
+  prune(input: {
+    now: string;
+    maxAgeMs: number;
+    keepSourceIds: ReadonlySet<string>;
+    keepClosedStatuses?: ReadonlySet<ProcedureStatus>;
+  }): string[] {
     const cutoff = Date.parse(input.now) - input.maxAgeMs;
     const removed: string[] = [];
     for (const card of this.#cases.values()) {
-      if (!card.live || card.triage !== undefined) continue;
-      if (input.keepSourceIds.has(card.sourceProcurementId)) continue;
-      const seen = card.lastSeenAt === undefined ? Number.NaN : Date.parse(card.lastSeenAt);
-      if (Number.isFinite(seen) && seen >= cutoff) continue;
+      if (
+        !isPrunableUndecidedCase(
+          card,
+          cutoff,
+          input.keepSourceIds,
+          input.keepClosedStatuses,
+        )
+      ) {
+        continue;
+      }
       removed.push(card.id);
     }
     for (const id of removed) {

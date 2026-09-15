@@ -317,6 +317,40 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(await store.hasDocumentHash(workspaceB, "c".repeat(64))).toBe(false);
   });
 
+  it("lets two cabinets persist the same listing card UUID", async () => {
+    const store = createSpecialistStore(db);
+    const userA = "00000000-0000-4000-8000-000000000931";
+    const userB = "00000000-0000-4000-8000-000000000932";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values
+        (${userA}, 'a-pk@test.local', 'A', 'x', 'specialist', 'active'),
+        (${userB}, 'b-pk@test.local', 'B', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceA = await store.ensurePersonalWorkspace(userA, "A");
+    const workspaceB = await store.ensurePersonalWorkspace(userB, "B");
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000941",
+      title: "Одинаковый UUID карточки",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/3651756",
+      sourceProcurementId: "auction/3651756",
+      live: true,
+      foundAs: "review",
+    });
+    await store.saveCases([card], workspaceA);
+    await store.saveCases([{ ...card, foundAs: "match" }], workspaceB);
+    const loadedA = await store.getCase(workspaceA, card.id);
+    const loadedB = await store.getCase(workspaceB, card.id);
+    await store.removeCases([card.id], workspaceA);
+    expect(loadedA?.foundAs).toBe("review");
+    expect(loadedB?.foundAs).toBe("match");
+    expect(await store.getCase(workspaceA, card.id)).toBeUndefined();
+    expect((await store.getCase(workspaceB, card.id))?.foundAs).toBe("match");
+  });
+
   it("rejects a fact that is committed without evidence", async () => {
     const procurementRows = await db
       .select({ id: procurements.id })

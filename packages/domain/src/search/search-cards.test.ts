@@ -326,4 +326,37 @@ describe("selectRelevantSearchCards with intent", () => {
     expect(selected.cards).toEqual([]);
     expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["zhlobin"]);
   });
+
+  it("reviews a lot-only platform hit before title-object rows that already scored", () => {
+    const works = {
+      keywords: ["электрооборудование"],
+      excludeKeywords: [] as string[],
+      intent: {
+        objects: ["электрооборудование"],
+        required_context: [],
+        excluded_context: [],
+        desired_actions: ["монтаж", "пусконаладка"],
+        excluded_actions: [],
+        intent: "works" as const,
+      },
+    };
+    const titleHits = Array.from({ length: 50 }, (_item, index) =>
+      hit(`supply-${String(index)}`, `Поставка электрооборудования ${String(index)}`),
+    );
+    const selected = selectRelevantSearchCards(
+      [
+        ...titleHits,
+        hit(
+          "limited/3669746",
+          "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+        ),
+      ],
+      works,
+      20,
+    );
+    expect(selected.ambiguousCards).toHaveLength(50);
+    expect(selected.ambiguousCards.some((card) => card.sourceProcurementId === "limited/3669746")).toBe(
+      true,
+    );
+  });
 });

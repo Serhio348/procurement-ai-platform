@@ -11,6 +11,7 @@ import {
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import type { Database } from "./client.js";
 import {
   documentVersions,
@@ -458,7 +459,7 @@ export function createSpecialistStore(db: Database) {
         const rows = await tx
           .select()
           .from(workspaceProcurements)
-          .where(and(eq(workspaceProcurements.workspaceId, workspaceId), eq(workspaceProcurements.id, id)))
+          .where(and(eq(workspaceProcurements.workspaceId, workspaceId), caseIdentityMatch(id)))
           .limit(1);
         return rows[0] === undefined ? undefined : parseCaseRow(rows[0]);
       });
@@ -613,15 +614,21 @@ export function createSpecialistStore(db: Database) {
       // joins back to the parent row; once the parent is gone the policy
       // hides the child and the whole delete is rolled back.
       await withWorkspace(db, workspaceId, async (tx) => {
+        const matched = await tx
+          .select({ id: workspaceProcurements.id })
+          .from(workspaceProcurements)
+          .where(and(eq(workspaceProcurements.workspaceId, workspaceId), caseIdentityMatch(idList)));
+        const rowIds = matched.map((row) => row.id);
+        if (rowIds.length === 0) return;
         await tx
           .delete(workspaceProcurementProfiles)
-          .where(inArray(workspaceProcurementProfiles.workspaceProcurementId, idList));
+          .where(inArray(workspaceProcurementProfiles.workspaceProcurementId, rowIds));
         await tx
           .delete(workspaceInbox)
           .where(
             and(
               eq(workspaceInbox.workspaceId, workspaceId),
-              inArray(workspaceInbox.workspaceProcurementId, idList),
+              inArray(workspaceInbox.workspaceProcurementId, rowIds),
             ),
           );
         await tx
@@ -629,18 +636,16 @@ export function createSpecialistStore(db: Database) {
           .where(
             and(
               eq(workspaceProcurements.workspaceId, workspaceId),
-              inArray(workspaceProcurements.id, idList),
+              inArray(workspaceProcurements.id, rowIds),
             ),
           );
-        // A policy that hides the row makes DELETE a silent no-op: Postgres
-        // reports success, the API answers 204 and the card returns on reload.
         const left = await tx
           .select({ id: workspaceProcurements.id })
           .from(workspaceProcurements)
           .where(
             and(
               eq(workspaceProcurements.workspaceId, workspaceId),
-              inArray(workspaceProcurements.id, idList),
+              inArray(workspaceProcurements.id, rowIds),
             ),
           );
         if (left.length > 0) {
@@ -889,6 +894,45 @@ export function postgresErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Row PK must not be the global card UUID: two cabinets searching the same
+ * goszakupki id would collide on workspace_procurements_pkey.
+ */
+export function workspaceProcurementRowId(
+  workspaceId: string,
+  sourceProcurementId: string,
+): string {
+  const hex = createHash("sha256")
+    .update(`workspace-case:${workspaceId}:${sourceProcurementId}`)
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current !== undefined && current !== null; depth += 1) {
+    if (typeof current === "object") {
+      const record = current as { code?: unknown; cause?: unknown };
+      if (record.code === "23505") return true;
+      current = record.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
+function caseIdentityMatch(ids: string | readonly string[]) {
+  const idList = typeof ids === "string" ? [ids] : [...ids];
+  return or(
+    inArray(workspaceProcurements.id, idList),
+    sql`(${workspaceProcurements.card}->>'id') in (${sql.join(
+      idList.map((id) => sql`${id}`),
+      sql`, `,
+    )})`,
+  );
+}
+
 type StoreTx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export function caseListTimeShouldBump(
@@ -913,13 +957,13 @@ async function saveWorkspaceCase(
   const parsed = SpecialistProcurementCard.parse(jsonbSafe(card));
   const now = new Date().toISOString();
   const canonicalId = await upsertCanonicalProcurement(tx, parsed, now);
-  const caseId = parsed.id;
   const stored = SpecialistProcurementCard.parse({
     ...parsed,
     canonicalProcurementId: canonicalId,
   });
   const existing = await tx
     .select({
+      id: workspaceProcurements.id,
       triage: workspaceProcurements.triage,
       archived: workspaceProcurements.archived,
       foundAs: workspaceProcurements.foundAs,
@@ -938,24 +982,24 @@ async function saveWorkspaceCase(
     previous === undefined || caseListTimeShouldBump(previous, stored)
       ? now
       : toIsoDateTime(previous.updatedAt);
-  await tx
-    .insert(workspaceProcurements)
-    .values({
-      id: caseId,
-      workspaceId,
-      procurementId: canonicalId,
-      sourceProcurementId: stored.sourceProcurementId,
-      triage: stored.triage,
-      foundAs: stored.foundAs,
-      archived: stored.archived,
-      lastSeenAt: stored.lastSeenAt,
-      watchSnapshot: stored.watchSnapshot,
-      card: stored,
-      updatedAt,
-    })
-    .onConflictDoUpdate({
-      target: [workspaceProcurements.workspaceId, workspaceProcurements.sourceProcurementId],
-      set: {
+  let rowId = previous?.id ?? workspaceProcurementRowId(workspaceId, stored.sourceProcurementId);
+  const values = {
+    id: rowId,
+    workspaceId,
+    procurementId: canonicalId,
+    sourceProcurementId: stored.sourceProcurementId,
+    triage: stored.triage,
+    foundAs: stored.foundAs,
+    archived: stored.archived,
+    lastSeenAt: stored.lastSeenAt,
+    watchSnapshot: stored.watchSnapshot,
+    card: stored,
+    updatedAt,
+  };
+  if (previous !== undefined) {
+    await tx
+      .update(workspaceProcurements)
+      .set({
         procurementId: canonicalId,
         triage: stored.triage,
         foundAs: stored.foundAs,
@@ -964,15 +1008,56 @@ async function saveWorkspaceCase(
         watchSnapshot: stored.watchSnapshot,
         card: stored,
         updatedAt,
-      },
-    });
+      })
+      .where(
+        and(
+          eq(workspaceProcurements.workspaceId, workspaceId),
+          eq(workspaceProcurements.sourceProcurementId, stored.sourceProcurementId),
+        ),
+      );
+  } else {
+    try {
+      await tx.insert(workspaceProcurements).values(values);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const raced = await tx
+        .select({ id: workspaceProcurements.id })
+        .from(workspaceProcurements)
+        .where(
+          and(
+            eq(workspaceProcurements.workspaceId, workspaceId),
+            eq(workspaceProcurements.sourceProcurementId, stored.sourceProcurementId),
+          ),
+        )
+        .limit(1);
+      if (raced[0] !== undefined) {
+        rowId = raced[0].id;
+        await tx
+          .update(workspaceProcurements)
+          .set({
+            procurementId: canonicalId,
+            triage: stored.triage,
+            foundAs: stored.foundAs,
+            archived: stored.archived,
+            lastSeenAt: stored.lastSeenAt,
+            watchSnapshot: stored.watchSnapshot,
+            card: stored,
+            updatedAt,
+          })
+          .where(eq(workspaceProcurements.id, rowId));
+      } else {
+        rowId = globalThis.crypto.randomUUID();
+        await tx.insert(workspaceProcurements).values({ ...values, id: rowId });
+      }
+    }
+  }
   await tx
     .delete(workspaceProcurementProfiles)
-    .where(eq(workspaceProcurementProfiles.workspaceProcurementId, caseId));
+    .where(eq(workspaceProcurementProfiles.workspaceProcurementId, rowId));
   for (const profileId of stored.profileIds) {
     await tx
       .insert(workspaceProcurementProfiles)
-      .values({ workspaceProcurementId: caseId, domainProfileId: profileId })
+      .values({ workspaceProcurementId: rowId, domainProfileId: profileId })
       .onConflictDoNothing();
   }
   try {

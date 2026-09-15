@@ -72,7 +72,6 @@ export function selectRelevantSearchCards(
         cards.push(ranked.card);
         continue;
       }
-      if (ambiguousCards.length >= MAX_AMBIGUOUS_PER_SEARCH) continue;
       ambiguousCards.push(ranked.card);
       ambiguousHits.push(hit);
       continue;
@@ -101,9 +100,37 @@ export function selectRelevantSearchCards(
   if (profile.intent !== undefined) {
     cards.sort((left, right) => (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0));
     if (cards.length > limit) cards.length = limit;
+    capAmbiguousByLotSubjectFirst(ambiguousCards, ambiguousHits);
   }
   const discardedCount = hits.length - cards.length - ambiguousCards.length;
   return { cards, ambiguousCards, ambiguousHits, discardedCount };
+}
+
+/**
+ * Title-only object hits score ~40 and would fill MAX_AMBIGUOUS before a
+ * platform lot-match whose listing title has no object (score 0). Those
+ * lot-only rows are why we open the card; give them the review slots.
+ */
+function capAmbiguousByLotSubjectFirst(
+  ambiguousCards: SpecialistProcurementCardValue[],
+  ambiguousHits: SearchHitValue[],
+): void {
+  if (ambiguousCards.length <= MAX_AMBIGUOUS_PER_SEARCH) return;
+  const ranked = ambiguousCards.map((card, index) => ({
+    card,
+    hit: ambiguousHits[index],
+    score: card.relevanceScore ?? 0,
+    index,
+  }));
+  ranked.sort((left, right) => left.score - right.score || left.index - right.index);
+  ranked.length = MAX_AMBIGUOUS_PER_SEARCH;
+  ambiguousCards.length = 0;
+  ambiguousHits.length = 0;
+  for (const row of ranked) {
+    if (row.hit === undefined) continue;
+    ambiguousCards.push(row.card);
+    ambiguousHits.push(row.hit);
+  }
 }
 
 export function hitMatchesProfileKeywords(

@@ -527,7 +527,7 @@ describe("specialist API", () => {
       (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{ title: string }>)
         .map((item) => item.title)
         .sort(),
-    ).toEqual(["Закупка НКУ", "НКУ щитовое", "Поставка НКУ 0,4 кВ"].sort());
+    ).toEqual([]);
 
     releaseReview();
     await vi.waitFor(async () => {

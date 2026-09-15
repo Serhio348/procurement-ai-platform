@@ -359,4 +359,34 @@ describe("selectRelevantSearchCards with intent", () => {
       true,
     );
   });
+
+  it("uses review capacity for the unexamined tail after earlier candidates were rejected", () => {
+    const works = {
+      keywords: ["электрооборудование"],
+      excludeKeywords: [] as string[],
+      intent: {
+        objects: ["электрооборудование"],
+        required_context: [],
+        excluded_context: [],
+        desired_actions: ["монтаж"],
+        excluded_actions: [],
+        intent: "works" as const,
+      },
+      skipReviewSourceIds: new Set(
+        Array.from({ length: 50 }, (_item, index) => `old-${String(index)}`),
+      ),
+    };
+    const selected = selectRelevantSearchCards(
+      [
+        ...Array.from({ length: 50 }, (_item, index) =>
+          hit(`old-${String(index)}`, `Объект без предмета ${String(index)}`),
+        ),
+        hit("fresh", "Новый объект без предмета"),
+      ],
+      works,
+      20,
+    );
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["fresh"]);
+    expect(selected.discardedCount).toBe(50);
+  });
 });

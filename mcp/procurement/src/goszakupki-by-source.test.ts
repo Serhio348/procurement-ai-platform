@@ -197,26 +197,34 @@ describe("GoszakupkiBySource", () => {
     );
   });
 
-  it("does not query the next profile keyword after the requested limit is filled", async () => {
-    const get = vi.fn(async (path: string) => ({
-      status: 200,
-      url: `https://goszakupki.by${path}`,
-      body: searchHtml.replace('class="next"', 'class="next disabled"'),
-    }));
+  it("queries every profile phrase even when the first phrase fills the result limit", async () => {
+    const get = vi.fn(async (path: string) => {
+      const body = path.includes(encodeURIComponent("кабель"))
+        ? searchHtml.replaceAll("900010", "900020")
+        : searchHtml;
+      return {
+        status: 200,
+        url: `https://goszakupki.by${path}`,
+        body: body.replace('class="next"', 'class="next disabled"'),
+      };
+    });
     const source = new GoszakupkiBySource({ client: { get } });
 
     const result = await source.search(
       SearchQuery.parse({
         sourceId: "goszakupki_by",
         keywords: ["трансформатор", "кабель"],
-        limit: 1,
+        limit: 2,
       }),
     );
 
-    expect(result.hits).toHaveLength(1);
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(result.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "single-source/9000104",
+      "single-source/9000204",
+    ]);
+    expect(get).toHaveBeenCalledTimes(2);
     expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).toContain("трансформатор");
-    expect(decodeURIComponent(String(get.mock.calls[0]?.[0]))).not.toContain("кабель");
+    expect(decodeURIComponent(String(get.mock.calls[1]?.[0]))).toContain("кабель");
   });
 
   it("keeps a listing row the site returned when the keyword is not in the title", async () => {

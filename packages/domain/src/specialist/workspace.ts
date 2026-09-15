@@ -118,6 +118,14 @@ export class SpecialistWorkspace {
     );
   }
 
+  reviewedIrrelevantSourceIds(profileId: string): ReadonlySet<string> {
+    return new Set(
+      this.#reviewedIrrelevant
+        .filter((item) => item.profileId === profileId)
+        .map((item) => item.sourceProcurementId),
+    );
+  }
+
   /** Forgets verdicts older than `maxAgeMs` and verdicts of profiles that no longer exist. */
   forgetStaleVerdicts(now: string, maxAgeMs = REVIEW_VERDICT_MAX_AGE_MS): number {
     const cutoff = Date.parse(now) - maxAgeMs;

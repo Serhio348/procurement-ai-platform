@@ -1,6 +1,11 @@
 import { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { extraPlatformSearchTerms, inferSearchIntentPlan, parseSearchIntentPlan } from "./intent-plan.js";
+import {
+  extraPlatformSearchTerms,
+  inferSearchIntentPlan,
+  parseSearchIntentPlan,
+  platformSearchTerms,
+} from "./intent-plan.js";
 import {
   scoreSearchIntent,
   scoreSearchIntentFromProcedure,
@@ -289,6 +294,17 @@ describe("inferSearchIntentPlan", () => {
 });
 
 describe("extraPlatformSearchTerms", () => {
+  it("keeps every saved phrase and adds distinct plan objects", () => {
+    const plan = SearchIntentPlan.parse({
+      objects: ["электрооборудование", "КТП"],
+      desired_actions: ["монтаж"],
+      intent: "works",
+    });
+    expect(
+      platformSearchTerms(plan, ["КТПБ", "КТП", "сети электроснабжения"]),
+    ).toEqual(["КТПБ", "КТП", "сети электроснабжения", "электрооборудование"]);
+  });
+
   it("returns only objects the cheap listing has not already queried", () => {
     const inferred = inferSearchIntentPlan({
       name: "НКУ для управления насосами",

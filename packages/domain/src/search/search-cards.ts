@@ -39,6 +39,8 @@ export interface SearchSelectionProfile extends CheapClassifyProfile {
    * scores object vs action vs excluded action; the model never writes this.
    */
   intent?: SearchIntentPlan;
+  /** Review verdicts already settled for this exact profile version. */
+  skipReviewSourceIds?: ReadonlySet<string>;
 }
 
 /**
@@ -72,6 +74,7 @@ export function selectRelevantSearchCards(
         cards.push(ranked.card);
         continue;
       }
+      if (profile.skipReviewSourceIds?.has(hit.sourceProcurementId) === true) continue;
       ambiguousCards.push(ranked.card);
       ambiguousHits.push(hit);
       continue;
@@ -107,9 +110,8 @@ export function selectRelevantSearchCards(
 }
 
 /**
- * Title-only object hits score ~40 and would fill MAX_AMBIGUOUS before a
- * platform lot-match whose listing title has no object (score 0). Those
- * lot-only rows are why we open the card; give them the review slots.
+ * Keep capacity for both visible object candidates and rows whose match is
+ * hidden in the lot. Neither class may consume the whole get budget.
  */
 function capAmbiguousByLotSubjectFirst(
   ambiguousCards: SpecialistProcurementCardValue[],
@@ -122,11 +124,21 @@ function capAmbiguousByLotSubjectFirst(
     score: card.relevanceScore ?? 0,
     index,
   }));
-  ranked.sort((left, right) => left.score - right.score || left.index - right.index);
-  ranked.length = MAX_AMBIGUOUS_PER_SEARCH;
+  const visible = ranked.filter((row) => row.score > 0);
+  const lotOnly = ranked.filter((row) => row.score === 0);
+  const perClass = Math.floor(MAX_AMBIGUOUS_PER_SEARCH / 2);
+  const selected = [...visible.slice(0, perClass), ...lotOnly.slice(0, perClass)];
+  const selectedIndexes = new Set(selected.map((row) => row.index));
+  for (const row of ranked) {
+    if (selected.length >= MAX_AMBIGUOUS_PER_SEARCH) break;
+    if (selectedIndexes.has(row.index)) continue;
+    selectedIndexes.add(row.index);
+    selected.push(row);
+  }
+  selected.sort((left, right) => left.index - right.index);
   ambiguousCards.length = 0;
   ambiguousHits.length = 0;
-  for (const row of ranked) {
+  for (const row of selected) {
     if (row.hit === undefined) continue;
     ambiguousCards.push(row.card);
     ambiguousHits.push(row.hit);

@@ -107,4 +107,10 @@ describe("listingKeepsPlatformHit", () => {
     expect(listingKeepsPlatformHit("Открытый конкурс", ["НКУ"])).toBe(false);
     expect(listingKeepsPlatformHit("инкубатор", ["НКУ"])).toBe(false);
   });
+
+  it("keeps an abbreviation embedded in another uppercase equipment code", () => {
+    expect(
+      listingKeepsPlatformHit("Блочная комплектная подстанция БКТПБ №3", ["КТПБ"]),
+    ).toBe(true);
+  });
 });

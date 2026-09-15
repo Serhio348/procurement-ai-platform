@@ -11,7 +11,6 @@ import {
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
 import type { Database } from "./client.js";
 import {
   documentVersions,
@@ -894,20 +893,6 @@ export function postgresErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Row PK must not be the global card UUID: two cabinets searching the same
- * goszakupki id would collide on workspace_procurements_pkey.
- */
-export function workspaceProcurementRowId(
-  workspaceId: string,
-  sourceProcurementId: string,
-): string {
-  const hex = createHash("sha256")
-    .update(`workspace-case:${workspaceId}:${sourceProcurementId}`)
-    .digest("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
-
 function isUniqueViolation(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 6 && current !== undefined && current !== null; depth += 1) {
@@ -982,7 +967,9 @@ async function saveWorkspaceCase(
     previous === undefined || caseListTimeShouldBump(previous, stored)
       ? now
       : toIsoDateTime(previous.updatedAt);
-  let rowId = previous?.id ?? workspaceProcurementRowId(workspaceId, stored.sourceProcurementId);
+  // The API card id is global for a source record. The SQL row id is local
+  // identity, otherwise two cabinets collide on workspace_procurements_pkey.
+  let rowId = previous?.id ?? globalThis.crypto.randomUUID();
   const values = {
     id: rowId,
     workspaceId,

@@ -74,13 +74,24 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
   });
 }
 
-/** Platform queries: objects when we have them, otherwise the saved keywords. */
+/**
+ * Every saved phrase remains a platform query. Plan objects broaden recall;
+ * they never replace the specialist's explicit search directions.
+ */
 export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
 ): string[] {
-  if (plan.objects.length > 0) return [...plan.objects];
-  return [...fallbackKeywords];
+  const terms: string[] = [];
+  const seen = new Set<string>();
+  for (const value of [...fallbackKeywords, ...plan.objects]) {
+    const term = value.trim();
+    const key = term.toLocaleLowerCase("ru-BY");
+    if (term.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    terms.push(term);
+  }
+  return terms;
 }
 
 /**

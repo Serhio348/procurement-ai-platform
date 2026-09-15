@@ -6,7 +6,6 @@ import {
   postgresErrorMessage,
   toIsoDateTime,
   uniqueBySource,
-  workspaceProcurementRowId,
 } from "./specialist-store.js";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 
@@ -108,22 +107,5 @@ describe("postgresErrorMessage", () => {
     });
     const wrapped = Object.assign(new Error("Failed query"), { cause });
     expect(postgresErrorMessage(wrapped)).toContain("specialist_cases_source_uq");
-  });
-});
-
-describe("workspaceProcurementRowId", () => {
-  it("gives two cabinets different primary keys for the same source id", () => {
-    const left = workspaceProcurementRowId(
-      "00000000-0000-4000-8000-000000000001",
-      "auction/3651756",
-    );
-    const right = workspaceProcurementRowId(
-      "00000000-0000-4000-8000-000000000002",
-      "auction/3651756",
-    );
-    expect(left).not.toBe(right);
-    expect(left).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u,
-    );
   });
 });

@@ -558,8 +558,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   /**
    * Card look for listing-score review hits. The HTTP search already returned
-   * matches and queued the rest in the inbox; this pass may promote, drop, or
-   * leave a reason on the same cards.
+   * title matches; this pass promotes full-card matches, drops irrelevant
+   * candidates, and queues only unresolved cases in the inbox.
    */
   function startListingReviewJob(
     pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>,
@@ -608,9 +608,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
                     },
                   ],
                 };
-          await rememberFound(reviewedCard, profile.id, now);
+          const remembered = await rememberFound(reviewedCard, profile.id, now);
           if (outcome?.verdict === "relevant") {
             catalog().dismissByProcurementId(card.id);
+          } else {
+            queueFoundInbox(remembered.card, now);
           }
         }
         workspace().setDismissedInboxIds(catalog().dismissedIds());
@@ -838,6 +840,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         statuses: profile.statuses,
         excludeSingleSource: profile.excludeSingleSource,
         intent: plan,
+        skipReviewSourceIds: workspace().reviewedIrrelevantSourceIds(profile.id),
       },
       limit,
     );
@@ -875,11 +878,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         await rememberFound({ ...card, foundAs: "match" }, profile.id, now);
         continue;
       }
-      const remembered = await rememberFound(card, profile.id, now);
-      queueFoundInbox(remembered.card, now);
       ambiguousCount += 1;
-      if (already?.foundAs === "review") continue;
-      pending.push({ card: remembered.card, hit });
+      if (already?.foundAs === "review") {
+        const remembered = await rememberFound(card, profile.id, now);
+        queueFoundInbox(remembered.card, now);
+        continue;
+      }
+      if (searchReview === undefined) {
+        const remembered = await rememberFound(card, profile.id, now);
+        queueFoundInbox(remembered.card, now);
+        continue;
+      }
+      pending.push({ card, hit });
     }
     const relevantCount = resultItems.length;
     const discardedCount =
@@ -984,6 +994,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             statuses: profile.statuses,
             excludeSingleSource: profile.excludeSingleSource,
             intent: plan,
+            skipReviewSourceIds: workspace().reviewedIrrelevantSourceIds(profile.id),
           },
           limit,
         );

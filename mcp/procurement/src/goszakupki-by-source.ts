@@ -55,16 +55,19 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     // matches a substring, so joining several lines into one phrase returns
     // nothing.
     const terms = query.keywords.length === 0 ? [undefined] : query.keywords;
-    const rows = new Map<
-      string,
-      ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]
-    >();
+    const buckets: Array<
+      Array<ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]>
+    > = [];
     const pagesPerTerm = Math.min(
       30,
       Math.max(1, Math.ceil((query.offset + query.limit) / 20) + 1),
     );
 
     for (const term of terms) {
+      const termRows = new Map<
+        string,
+        ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]
+      >();
       for (let page = 1; page <= pagesPerTerm; page += 1) {
         const path = searchPath(query, term, page);
         const response = await this.#client.get(path);
@@ -76,18 +79,22 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
         }
         const parsed = parseGoszakupkiSearchPage(response.body, response.url);
         for (const row of parsed.rows) {
-          if (!matchesSearchRow(row, query)) continue;
-          rows.set(row.hit.sourceProcurementId, row);
+          if (!matchesSearchRow(row, query, term)) continue;
+          termRows.set(row.hit.sourceProcurementId, row);
         }
         if (!parsed.hasNextPage) break;
-        if (rows.size >= query.offset + query.limit) break;
+        if (termRows.size >= query.offset + query.limit) break;
       }
-      if (rows.size >= query.offset + query.limit) break;
+      buckets.push(
+        [...termRows.values()].sort(
+          (left, right) =>
+            sourceSequence(right.hit.sourceProcurementId) -
+            sourceSequence(left.hit.sourceProcurementId),
+        ),
+      );
     }
 
-    const hits = [...rows.values()]
-      .sort((left, right) => sourceSequence(right.hit.sourceProcurementId) -
-        sourceSequence(left.hit.sourceProcurementId))
+    const hits = interleaveSearchBuckets(buckets)
       .map((row) => row.hit)
       .slice(query.offset, query.offset + query.limit);
     return ProcurementSearchResponse.parse({ hits });
@@ -256,6 +263,7 @@ function sourceDate(value: string | undefined): string | undefined {
 function matchesSearchRow(
   row: ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number],
   query: SearchQuery,
+  searchedTerm: string | undefined,
 ): boolean {
   if (query.kinds.length > 0 && !query.kinds.includes(row.kind)) return false;
   const haystack = [
@@ -268,10 +276,27 @@ function matchesSearchRow(
   // The site's text filter is a substring. Drop «НКУ» inside «конкурс».
   // Keep a row whose listing text has no keyword at all: the site may have
   // matched lot subject, which this HTML does not show.
-  if (query.keywords.length > 0 && !listingKeepsPlatformHit(haystack, query.keywords)) {
+  if (searchedTerm !== undefined && !listingKeepsPlatformHit(haystack, [searchedTerm])) {
     return false;
   }
   return true;
+}
+
+function interleaveSearchBuckets<T extends { hit: { sourceProcurementId: string } }>(
+  buckets: readonly (readonly T[])[],
+): T[] {
+  const merged: T[] = [];
+  const seen = new Set<string>();
+  const size = Math.max(0, ...buckets.map((bucket) => bucket.length));
+  for (let index = 0; index < size; index += 1) {
+    for (const bucket of buckets) {
+      const row = bucket[index];
+      if (row === undefined || seen.has(row.hit.sourceProcurementId)) continue;
+      seen.add(row.hit.sourceProcurementId);
+      merged.push(row);
+    }
+  }
+  return merged;
 }
 
 function sourceSequence(id: string): number {

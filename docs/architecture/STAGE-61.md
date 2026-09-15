@@ -20,10 +20,14 @@ actions / context), без словарей под НКУ, насосы или �
 ## 2. Архитектурное решение
 
 ```
-procurement.search (как раньше, pagesPerTerm не режем)
+procurement.search
+  → каждая сохранённая фраза профиля + новые объекты плана
+  → отдельный запрос площадке на каждую фразу
+  → round-robin объединение строк (первый широкий термин не съедает лимит)
   → listingKeepsPlatformHit
        термин в строке списка → оставить
        «НКУ» внутри «конкурс» → выкинуть
+       «КТПБ» внутри кода «БКТПБ» → слабый кандидат
        термина в строке нет   → оставить (площадка могла сматчить лот)
   → selectRelevantSearchCards / scoreSearchIntent({ title: hit.title })
        match → сразу в выдачу, get нет
@@ -39,6 +43,8 @@ procurement.search (как раньше, pagesPerTerm не режем)
 слабее subject и не дал бы match.
 
 Кнопка «Поиск» по-прежнему не ждёт get: сомнительные в фоне, как этап 59.
+Непроверенная строка не показывается во входящих до завершения review:
+нерелевантная исчезает без мигания, `needs_human` появляется специалисту.
 Слежение профиля — тот же reviewAmbiguous до persist.
 
 Профили независимы: одна карточка может быть match для монтажа и discard
@@ -62,11 +68,14 @@ HTTP/MCP контракты не меняли.
 Изменённые:
 
 - `packages/domain/src/search/query-terms.ts` — `listingKeepsPlatformHit`
+- `packages/domain/src/search/intent-plan.ts` — фразы профиля не заменяются
+  объектами плана
 - `packages/domain/src/search/intent-score.ts` — `procedureIntentText`,
   `scoreSearchIntentFromProcedure`
 - `packages/domain/src/search/search-cards.ts` — нет объекта в title → review
 - `packages/domain/src/search/review.ts` — `reviewByIntentCard`
-- `mcp/procurement/src/goszakupki-by-source.ts` — фильтр строки списка
+- `mcp/procurement/src/goszakupki-by-source.ts` — фильтр строки списка и
+  справедливое объединение результатов всех фраз
 - `apps/api/src/search-review.ts` — intent по карточке до cheapClassify
 - `apps/api/src/app.ts` — план в review job и discovery
 
@@ -83,6 +92,9 @@ HTTP/MCP контракты не меняли.
 
 - площадка вернула строку без ключевого слова в title — адаптер не режет
 - «НКУ» в «конкурс» по-прежнему отсев
+- «КТПБ» в коде «БКТПБ» остаётся слабым кандидатом
+- каждый термин профиля запрашивается, широкий первый термин не блокирует остальные
+- ранее отклонённые кандидаты освобождают review-лимит для хвоста
 - профиль монтажа/ПНР: предмет лота с электрооборудованием → match
 - тот же профиль: пусконаладка зернового комплекса → не match
 - поставка НКУ на той же карточке — отдельный discard
@@ -91,10 +103,9 @@ HTTP/MCP контракты не меняли.
 ## 8. Риски
 
 - Review-очередь до 50 `procurement.get` на поиск: как раньше, плюс хиты
-  без объекта в названии. Если кандидатов больше 50, слоты сначала
-  получают строки без объекта в title (площадка могла сматчить лот),
-  а не title-only «Поставка …» с оценкой ~40. Match по title по-прежнему
-  без get.
+  без объекта в названии. Половина слотов резервируется кандидатам с
+  видимым объектом, половина — возможным совпадениям только в лоте.
+  Уже отклонённые строки не занимают лимит повторно.
 - PK `workspace_procurements` больше не совпадает с UUID карточки: два
   кабинета с одной закупкой не дерутся за `workspace_procurements_pkey`.
 - Fixture `/tenders/posted` не зависит от `text=`: неизвестное слово теперь

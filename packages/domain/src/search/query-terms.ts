@@ -283,6 +283,11 @@ export function listingKeepsPlatformHit(
 ): boolean {
   if (keywords.length === 0) return true;
   if (listingMatchesAnyKeyword(haystack, keywords)) return true;
+  // A saved abbreviation inside another uppercase equipment code is a weak
+  // candidate (КТПБ in БКТПБ), not ordinary-word noise (НКУ in конкурс).
+  if (keywords.some((keyword) => termMatchStrength(haystack, keyword) === "embedded")) {
+    return true;
+  }
   const foldedHay = compactSearchText(haystack);
   return !keywords.some((keyword) => {
     const foldedNeedle = compactSearchText(keyword);

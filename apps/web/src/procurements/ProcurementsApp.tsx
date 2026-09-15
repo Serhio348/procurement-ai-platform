@@ -272,10 +272,12 @@ export function ProcurementsApp({
     });
   }
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
-  const items = procurementsForProfile(
-    catalogItems.filter(isSearchQueueCard),
-    chosenProfile,
-  );
+  const items = catalogItems.filter((item) => {
+    if (!isSearchQueueCard(item)) return false;
+    if (chosenProfile === undefined) return true;
+    if (item.profileIds.length === 0) return true;
+    return item.profileIds.includes(chosenProfile.id);
+  });
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
   const ingestForSelected =
     selected !== undefined &&
@@ -466,6 +468,25 @@ export function ProcurementsApp({
             </div>
           ) : null}
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}
+          {searchRun !== undefined && searchRun.skipped.length > 0 ? (
+            <details className="search-skipped">
+              <summary>
+                Почему не взяли ({String(searchRun.skipped.length)})
+              </summary>
+              <ul>
+                {searchRun.skipped.map((item) => (
+                  <li key={`${item.stage}:${item.sourceProcurementId}`}>
+                    <span className="search-skipped-stage">
+                      {item.stage === "listing" ? "не открывали" : "открыли"}
+                    </span>
+                    <span className="search-skipped-title">{item.title}</span>
+                    <span className="search-skipped-reason">{item.reason}</span>
+                    <span className="search-skipped-id">{item.sourceProcurementId}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           {listing ? (
             <div className="search-overlay" role="status" aria-live="polite">
               <div className="search-spinner">

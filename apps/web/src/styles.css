@@ -359,6 +359,47 @@ h3 {
   color: #3a5d86;
 }
 
+.search-skipped {
+  margin: 0 0 12px;
+  color: #5c6778;
+  font-size: 13px;
+}
+
+.search-skipped summary {
+  cursor: pointer;
+  color: #3a5d86;
+}
+
+.search-skipped ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.search-skipped li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 1px solid #e4eaf1;
+}
+
+.search-skipped-stage {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.search-skipped-title {
+  color: #1c2430;
+}
+
+.search-skipped-reason,
+.search-skipped-id {
+  color: #7a8494;
+}
+
 .search-read-progress {
   margin: 0 0 12px;
 }

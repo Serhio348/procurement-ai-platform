@@ -7,6 +7,10 @@ export interface SearchProgressHub {
     profileId: string,
     patch: Partial<Pick<SpecialistSearchRunValue, "scoredCount" | "matchCount" | "discardedCount" | "reviewCount">>,
   ) => void;
+  skip: (
+    profileId: string,
+    row: SpecialistSearchRunValue["skipped"][number],
+  ) => void;
   finish: (profileId: string, status: "done" | "failed") => void;
 }
 
@@ -24,6 +28,14 @@ export function createSearchProgressHub(): SearchProgressHub {
       const current = byProfile.get(profileId);
       if (current === undefined) return;
       byProfile.set(profileId, SpecialistSearchRun.parse({ ...current, ...patch, status: "scoring" }));
+    },
+    skip(profileId, row) {
+      const current = byProfile.get(profileId);
+      if (current === undefined) return;
+      byProfile.set(
+        profileId,
+        SpecialistSearchRun.parse({ ...current, skipped: [...current.skipped, row] }),
+      );
     },
     finish(profileId, status) {
       const current = byProfile.get(profileId);

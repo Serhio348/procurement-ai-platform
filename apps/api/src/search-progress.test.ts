@@ -23,7 +23,21 @@ describe("createSearchProgressHub", () => {
       matchCount: 1,
       discardedCount: 2,
     });
+    hub.skip(profileId, {
+      sourceProcurementId: "auction/1",
+      title: "Монтаж НКУ",
+      reason: "услуга в голове заголовка",
+      stage: "card",
+    });
     hub.finish(profileId, "done");
     expect(hub.snapshot(profileId)?.status).toBe("done");
+    expect(hub.snapshot(profileId)?.skipped).toEqual([
+      {
+        sourceProcurementId: "auction/1",
+        title: "Монтаж НКУ",
+        reason: "услуга в голове заголовка",
+        stage: "card",
+      },
+    ]);
   });
 });

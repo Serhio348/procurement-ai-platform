@@ -688,7 +688,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         matchedSearchTerms: item.hit.matchedSearchTerms,
       })),
     ];
-    for (const row of rows) logger.debug("Specialist search candidate", { profileName, ...row });
+    for (const row of rows) {
+      if (row.decision === "discard") {
+        logger.info("Specialist search skipped", { profileName, ...row });
+        continue;
+      }
+      logger.debug("Specialist search candidate", { profileName, ...row });
+    }
   }
 
   function countHitsPerTerm(hits: readonly SearchHit[]): Record<string, number> {
@@ -754,6 +760,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           scoredCount,
           pendingCount: pending.length,
         });
+        searchProgress.skip(profile.id, {
+          sourceProcurementId: item.card.sourceProcurementId,
+          title: item.card.title.slice(0, 160),
+          reason: outcome.reason.length > 0 ? outcome.reason : "карточка не подходит профилю",
+          stage: "card",
+        });
         if (scoring.persistEach) {
           workspace().setDismissedInboxIds(catalog().dismissedIds());
           await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
@@ -789,6 +801,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           verdict: "closed",
           scoredCount,
           pendingCount: pending.length,
+        });
+        searchProgress.skip(profile.id, {
+          sourceProcurementId: item.card.sourceProcurementId,
+          title: item.card.title.slice(0, 160),
+          reason: "завершена или отменена, статус не выбран в профиле",
+          stage: "card",
         });
         if (scoring.persistEach) {
           workspace().setDismissedInboxIds(catalog().dismissedIds());
@@ -884,6 +902,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         });
         await pruneStaleCases();
         await persist(cabinet);
+        searchProgress.scored(profile.id, {
+          matchCount: searchQueueCards(profile.id).length,
+        });
         searchProgress.finish(profile.id, "done");
       } catch (error) {
         searchProgress.finish(profile.id, "failed");
@@ -1114,6 +1135,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: 0,
       reviewCount: collected.restoredReview,
       listingDiscardedCount: listingDiscarded,
+      skipped: selected.discarded.map((item) => ({
+        sourceProcurementId: item.hit.sourceProcurementId,
+        title: item.hit.title.slice(0, 160),
+        reason: item.reason,
+        stage: "listing" as const,
+      })),
     });
     let discardedCount = listingDiscarded;
     let ambiguousCount = collected.restoredReview;
@@ -1124,6 +1151,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
       discardedCount += scored.discarded;
       ambiguousCount += scored.ambiguousCount;
+      searchProgress.scored(profile.id, {
+        matchCount: searchQueueCards(profile.id).length,
+        discardedCount: scored.discarded,
+        reviewCount: scored.ambiguousCount,
+      });
       searchProgress.finish(profile.id, "done");
       await pruneStaleCases();
       await persist();

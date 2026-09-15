@@ -331,6 +331,15 @@ describe("ProcurementsApp", () => {
                   matchCount: 2,
                   discardedCount: 14,
                   reviewCount: 0,
+                  listingDiscardedCount: 0,
+                  skipped: [
+                    {
+                      sourceProcurementId: "auction/skip-1",
+                      title: "Монтаж сетей",
+                      reason: "услуга в голове заголовка",
+                      stage: "card",
+                    },
+                  ],
                 }}
               />
             }
@@ -342,6 +351,7 @@ describe("ProcurementsApp", () => {
     expect(screen.getByRole("status").textContent).toMatch(/Читаем карточки 16 из 80/);
     expect(screen.getByRole("status").textContent).toMatch(/20%/);
     expect(screen.getByText(/Найдено 2, отброшено 14/)).toBeTruthy();
+    expect(screen.getByText("Почему не взяли (1)")).toBeTruthy();
   });
 
   it("lets the specialist pick which profile to search", async () => {

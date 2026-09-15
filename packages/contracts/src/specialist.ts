@@ -315,6 +315,16 @@ export const SpecialistSearchRun = z.object({
   reviewCount: z.number().int().nonnegative(),
   /** Listing rows never opened. Not part of discardedCount. */
   listingDiscardedCount: z.number().int().nonnegative().default(0),
+  skipped: z
+    .array(
+      z.object({
+        sourceProcurementId: z.string().min(1),
+        title: z.string(),
+        reason: z.string().min(1),
+        stage: z.enum(["listing", "card"]),
+      }),
+    )
+    .default([]),
 });
 export type SpecialistSearchRun = z.infer<typeof SpecialistSearchRun>;
 

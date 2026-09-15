@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { createLogger } from "@procurement/observability";
+import { createLogger, type Logger } from "@procurement/observability";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FixtureProcurementSource } from "./fixture-source.js";
 import { GoszakupkiHttpClient } from "./goszakupki-by-http.js";
@@ -9,19 +9,19 @@ import { createProcurementMcpServer } from "./server.js";
 
 async function main(): Promise<void> {
   const mode = process.env["PROCUREMENT_SOURCE_MODE"] ?? "fixture";
-  const source =
-    mode === "fixture"
-      ? await fixtureSource()
-      : mode === "live"
-        ? liveSource()
-        : undefined;
-  if (source === undefined) {
-    throw new Error(`Unsupported PROCUREMENT_SOURCE_MODE: ${mode}`);
-  }
   const logger = createLogger({
     level: process.env["LOG_LEVEL"] === "debug" ? "debug" : "info",
     sink: (record) => process.stderr.write(`${JSON.stringify(record)}\n`),
   });
+  const source =
+    mode === "fixture"
+      ? await fixtureSource()
+      : mode === "live"
+        ? liveSource(logger)
+        : undefined;
+  if (source === undefined) {
+    throw new Error(`Unsupported PROCUREMENT_SOURCE_MODE: ${mode}`);
+  }
   const server = createProcurementMcpServer({ sources: [source], logger });
   await server.connect(new StdioServerTransport());
 }
@@ -35,8 +35,9 @@ async function fixtureSource(): Promise<FixtureProcurementSource> {
   return new FixtureProcurementSource(dataset);
 }
 
-function liveSource(): GoszakupkiBySource {
+function liveSource(logger: Logger): GoszakupkiBySource {
   return new GoszakupkiBySource({
+    logger,
     client: new GoszakupkiHttpClient({
       ...(process.env["GOSZAKUPKI_BY_BASE_URL"] === undefined
         ? {}

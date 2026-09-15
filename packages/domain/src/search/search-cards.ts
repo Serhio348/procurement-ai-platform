@@ -23,6 +23,8 @@ export interface ProfileSearchSelection {
   /** The listing rows behind ambiguousCards, same order, for a second look. */
   ambiguousHits: SearchHitValue[];
   discardedCount: number;
+  /** Why each dropped row was dropped, for the search trace; never shown as a verdict. */
+  discarded: Array<{ hit: SearchHitValue; reason: string; score?: number }>;
 }
 
 /** How many borderline hits one search run may push to the inbox. */
@@ -61,20 +63,33 @@ export function selectRelevantSearchCards(
   const cards: SpecialistProcurementCardValue[] = [];
   const ambiguousCards: SpecialistProcurementCardValue[] = [];
   const ambiguousHits: SearchHitValue[] = [];
+  const discarded: ProfileSearchSelection["discarded"] = [];
   for (const hit of hits) {
     const key = `${hit.sourceId}:${hit.sourceProcurementId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!hitMatchesProfileStatuses(hit, profile.statuses)) continue;
-    if (profile.excludeSingleSource === true && hit.kind === "single_source") continue;
+    if (!hitMatchesProfileStatuses(hit, profile.statuses)) {
+      discarded.push({ hit, reason: "статус процедуры не входит в профиль" });
+      continue;
+    }
+    if (profile.excludeSingleSource === true && hit.kind === "single_source") {
+      discarded.push({ hit, reason: "закупка из одного источника исключена профилем" });
+      continue;
+    }
     if (profile.intent !== undefined) {
       const ranked = rankHitByIntent(hit, profile);
-      if (ranked === undefined) continue;
+      if (ranked.kind === "discard") {
+        discarded.push({ hit, reason: ranked.reason, score: ranked.score });
+        continue;
+      }
       if (ranked.kind === "match") {
         cards.push(ranked.card);
         continue;
       }
-      if (profile.skipReviewSourceIds?.has(hit.sourceProcurementId) === true) continue;
+      if (profile.skipReviewSourceIds?.has(hit.sourceProcurementId) === true) {
+        discarded.push({ hit, reason: "уже проверена и отклонена для этого профиля" });
+        continue;
+      }
       ambiguousCards.push(ranked.card);
       ambiguousHits.push(hit);
       continue;
@@ -87,7 +102,10 @@ export function selectRelevantSearchCards(
       },
       profile,
     );
-    if (classified.verdict === "irrelevant") continue;
+    if (classified.verdict === "irrelevant") {
+      discarded.push({ hit, reason: `исключающее слово: ${classified.excludedBy.join(", ")}` });
+      continue;
+    }
     if (classified.verdict === "relevant") {
       if (cards.length < limit) cards.push(cardFromRelevantHit(hit, classified.matchedTerms));
       continue;
@@ -106,7 +124,7 @@ export function selectRelevantSearchCards(
     capAmbiguousByLotSubjectFirst(ambiguousCards, ambiguousHits);
   }
   const discardedCount = hits.length - cards.length - ambiguousCards.length;
-  return { cards, ambiguousCards, ambiguousHits, discardedCount };
+  return { cards, ambiguousCards, ambiguousHits, discardedCount, discarded };
 }
 
 /**
@@ -216,24 +234,41 @@ export function searchHitFromProcedureCard(card: ProcedureCardValue): SearchHitV
   });
 }
 
-function rankHitByIntent(
-  hit: SearchHitValue,
-  profile: SearchSelectionProfile,
-): { kind: "match" | "review"; card: SpecialistProcurementCardValue } | undefined {
-  if (profile.intent === undefined) return undefined;
+type IntentRank =
+  | { kind: "match" | "review"; card: SpecialistProcurementCardValue }
+  | { kind: "discard"; reason: string; score: number };
+
+function rankHitByIntent(hit: SearchHitValue, profile: SearchSelectionProfile): IntentRank {
+  if (profile.intent === undefined) return { kind: "discard", reason: "нет плана поиска", score: 0 };
   const haystack = [hit.title, hit.buyerName, hit.sourceStatus]
     .filter((part): part is string => part !== undefined)
     .join(" ");
-  if (profile.excludeKeywords.some((term) => termOccurs(haystack, term))) return undefined;
+  const excluded = profile.excludeKeywords.find((term) => termOccurs(haystack, term));
+  if (excluded !== undefined) {
+    return { kind: "discard", reason: `исключающее слово профиля: ${excluded}`, score: 0 };
+  }
   const scored = scoreSearchIntent({ title: hit.title }, profile.intent);
   if (scored.decision === "match" && scored.score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) {
     return { kind: "match", card: cardFromIntentHit(hit, scored.score, scored.reason, "match") };
   }
-  if (scored.decision === "veto") return undefined;
-  if (scored.decision === "discard" && scored.objectRole !== "none") return undefined;
+  if (scored.decision === "veto") return { kind: "discard", reason: scored.reason, score: scored.score };
+  if (scored.decision === "discard" && scored.objectRole !== "none") {
+    return { kind: "discard", reason: scored.reason, score: scored.score };
+  }
   if (scored.decision === "discard" && scored.objectRole === "none") {
-    const queried = profile.intent.objects.length > 0 ? profile.intent.objects : profile.keywords;
-    if (!listingKeepsPlatformHit(haystack, queried)) return undefined;
+    const queried =
+      hit.matchedSearchTerms !== undefined && hit.matchedSearchTerms.length > 0
+        ? hit.matchedSearchTerms
+        : profile.intent.objects.length > 0
+          ? profile.intent.objects
+          : profile.keywords;
+    if (!listingKeepsPlatformHit(haystack, queried)) {
+      return {
+        kind: "discard",
+        reason: "поисковое слово встречается только как часть другого слова в строке списка",
+        score: scored.score,
+      };
+    }
   }
   // No object in the listing title, and the visible row is not substring
   // noise: the site may have matched lot subject. Cap at MAX_AMBIGUOUS.
@@ -305,10 +340,14 @@ function cardFromIntentHit(
   reason: string,
   foundAs: SpecialistFoundAs,
 ): SpecialistProcurementCardValue {
+  const foundBy =
+    hit.matchedSearchTerms !== undefined && hit.matchedSearchTerms.length > 0
+      ? ` Найдена по: ${hit.matchedSearchTerms.join(", ")}.`
+      : "";
   const prefix =
     foundAs === "match"
-      ? `procurement.search: найдена «${hit.title}». Оценка ${String(score)}. ${reason}`
-      : `procurement.search: найдена «${hit.title}». Оценка ${String(score)} — на проверку. ${reason}`;
+      ? `procurement.search: найдена «${hit.title}».${foundBy} Оценка ${String(score)}. ${reason}`
+      : `procurement.search: найдена «${hit.title}».${foundBy} Оценка ${String(score)} — на проверку. ${reason}`;
   return foundCard(hit, foundAs, prefix, { relevanceScore: score, relevanceReason: reason });
 }
 

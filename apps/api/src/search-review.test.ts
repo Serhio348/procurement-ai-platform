@@ -218,7 +218,14 @@ describe("createProcurementSearchReview", () => {
     expect(classify).not.toHaveBeenCalled();
   });
 
-  it("does not treat commissioning without the profile object as a match", async () => {
+  it("hands commissioning without the profile object to the model instead of a silent card discard", async () => {
+    const classify = vi.fn(async () => ({
+      verdict: "irrelevant",
+      confidence: 0.95,
+      reason: "Зерноочистительный комплекс, электрооборудование не является предметом.",
+      needDeeper: false,
+      matchedTerms: [],
+    }));
     const review = createProcurementSearchReview({
       caller: cardCaller({
         "auction/11": cardWithLots(
@@ -227,6 +234,7 @@ describe("createProcurementSearchReview", () => {
           ["Пусконаладочные работы оборудования зерноочистительного комплекса"],
         ),
       }),
+      classifier: { classify },
     });
     const worksProfile = {
       name: "Монтаж и пусконаладка электросилового оборудования",
@@ -245,6 +253,7 @@ describe("createProcurementSearchReview", () => {
     );
 
     expect(outcome?.verdict).toBe("irrelevant");
-    expect(outcome?.decidedBy).toBe("card");
+    expect(outcome?.decidedBy).toBe("model");
+    expect(classify).toHaveBeenCalledTimes(1);
   });
 });

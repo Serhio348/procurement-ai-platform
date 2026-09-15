@@ -66,6 +66,8 @@ const ENDINGS = [
   "ь",
 ];
 
+const SHORT_NOUN_ENDINGS = ["ей", "ой", "ов", "ам", "ах", "ям", "ях", "а", "я", "у", "ю", "е", "и", "ы", "о", "ь"];
+
 const FILLER = new Set(["для", "по", "и", "с", "на", "в", "во", "от", "до", "из", "к", "ко", "о", "об"]);
 
 /** Agent-noun tails that must not share a root with the verb/action. */
@@ -143,10 +145,22 @@ export function stemWord(raw: string): string {
   // поставщика otherwise becomes поставщи and shares a prefix with поставка.
   const agent = agentNounStem(stem);
   if (agent !== undefined) return agent;
+  let stripped = false;
   for (const ending of ENDINGS) {
     if (stem.length - ending.length >= 4 && stem.endsWith(ending)) {
       stem = stem.slice(0, -ending.length);
+      stripped = true;
       break;
+    }
+  }
+  // Short nouns (сеть / сети / сетей, вода / воды) have a three-letter root.
+  // Only plain case endings are taken so «шкаф» and «банк» stay whole.
+  if (!stripped && stem.length <= 5) {
+    for (const ending of SHORT_NOUN_ENDINGS) {
+      if (stem.length - ending.length >= 3 && stem.endsWith(ending)) {
+        stem = stem.slice(0, -ending.length);
+        break;
+      }
     }
   }
   if (stem.endsWith("нн") && stem.length > 5) stem = stem.slice(0, -2);

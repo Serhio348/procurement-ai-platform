@@ -13,6 +13,7 @@ import {
   type SourceProcurementId,
 } from "@procurement/contracts";
 import { listingKeepsPlatformHit } from "@procurement/domain";
+import { silentLogger, type Logger } from "@procurement/observability";
 import { expandPublicDocumentation } from "./documentation-expand.js";
 import type { ParsedGoszakupkiCard } from "./goszakupki-by-parser.js";
 import {
@@ -28,7 +29,11 @@ export interface GoszakupkiBySourceOptions {
   cacheTtlMs?: number;
   now?: () => Date;
   publicFetch?: PublicDocumentationFetch;
+  logger?: Logger;
 }
+
+/** Smallest slice of the result budget a single profile phrase is owed. */
+export const MIN_ROWS_PER_SEARCH_TERM = 20;
 
 interface CacheEntry {
   expiresAt: number;
@@ -41,6 +46,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   readonly #cacheTtlMs: number;
   readonly #now: () => Date;
   readonly #publicFetch: PublicDocumentationFetch;
+  readonly #logger: Logger;
   readonly #cache = new Map<string, CacheEntry>();
 
   constructor(options: GoszakupkiBySourceOptions) {
@@ -48,29 +54,33 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     this.#cacheTtlMs = options.cacheTtlMs ?? 30_000;
     this.#now = options.now ?? (() => new Date());
     this.#publicFetch = options.publicFetch ?? fetch;
+    this.#logger = options.logger ?? silentLogger;
   }
 
+  /**
+   * Retrieval only. Each profile phrase is its own platform query (the site
+   * filters by substring, so a joined phrase returns nothing) and owns its
+   * own slice of the result budget: a broad first phrase cannot starve the
+   * rest. Rows are merged round-robin and de-duplicated by procedure id,
+   * keeping every phrase that found them. Nothing here decides relevance.
+   */
   async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
-    // Each profile line is its own platform query: the site's text filter
-    // matches a substring, so joining several lines into one phrase returns
-    // nothing.
     const terms = query.keywords.length === 0 ? [undefined] : query.keywords;
-    const buckets: Array<
-      Array<ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]>
-    > = [];
-    const pagesPerTerm = Math.min(
-      30,
-      Math.max(1, Math.ceil((query.offset + query.limit) / 20) + 1),
+    const buckets: SearchBucket[] = [];
+    const rowsPerTerm = Math.max(
+      MIN_ROWS_PER_SEARCH_TERM,
+      Math.ceil((query.offset + query.limit) / terms.length),
     );
+    const pagesPerTerm = Math.min(30, Math.ceil(rowsPerTerm / 20) + 1);
 
     for (const term of terms) {
-      const termRows = new Map<
-        string,
-        ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number]
-      >();
+      const termRows = new Map<string, SearchRow>();
+      let seenRows = 0;
+      let pages = 0;
       for (let page = 1; page <= pagesPerTerm; page += 1) {
         const path = searchPath(query, term, page);
         const response = await this.#client.get(path);
+        pages += 1;
         if (response.status < 200 || response.status >= 300) {
           throw new SourceAccessError(
             this.sourceId,
@@ -78,25 +88,43 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
           );
         }
         const parsed = parseGoszakupkiSearchPage(response.body, response.url);
+        seenRows += parsed.rows.length;
         for (const row of parsed.rows) {
           if (!matchesSearchRow(row, query, term)) continue;
           termRows.set(row.hit.sourceProcurementId, row);
         }
         if (!parsed.hasNextPage) break;
-        if (termRows.size >= query.offset + query.limit) break;
+        if (termRows.size >= rowsPerTerm) break;
       }
-      buckets.push(
-        [...termRows.values()].sort(
+      this.#logger.info("goszakupki.by search term", {
+        component: "goszakupki-by-source",
+        term: term ?? "",
+        pages,
+        rows: seenRows,
+        kept: termRows.size,
+      });
+      buckets.push({
+        term,
+        rows: [...termRows.values()].sort(
           (left, right) =>
             sourceSequence(right.hit.sourceProcurementId) -
             sourceSequence(left.hit.sourceProcurementId),
         ),
-      );
+      });
     }
 
-    const hits = interleaveSearchBuckets(buckets)
-      .map((row) => row.hit)
-      .slice(query.offset, query.offset + query.limit);
+    const merged = interleaveSearchBuckets(buckets);
+    const hits = merged
+      .slice(query.offset, query.offset + query.limit)
+      .map(({ row, terms: found }) =>
+        found.length === 0 ? row.hit : { ...row.hit, matchedSearchTerms: found },
+      );
+    this.#logger.info("goszakupki.by search merged", {
+      component: "goszakupki-by-source",
+      terms: terms.map((term) => term ?? ""),
+      candidates: merged.length,
+      returned: hits.length,
+    });
     return ProcurementSearchResponse.parse({ hits });
   }
 
@@ -282,18 +310,33 @@ function matchesSearchRow(
   return true;
 }
 
-function interleaveSearchBuckets<T extends { hit: { sourceProcurementId: string } }>(
-  buckets: readonly (readonly T[])[],
-): T[] {
-  const merged: T[] = [];
-  const seen = new Set<string>();
-  const size = Math.max(0, ...buckets.map((bucket) => bucket.length));
+type SearchRow = ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number];
+
+interface SearchBucket {
+  term: string | undefined;
+  rows: readonly SearchRow[];
+}
+
+function interleaveSearchBuckets(
+  buckets: readonly SearchBucket[],
+): Array<{ row: SearchRow; terms: string[] }> {
+  const merged: Array<{ row: SearchRow; terms: string[] }> = [];
+  const byId = new Map<string, { row: SearchRow; terms: string[] }>();
+  const size = Math.max(0, ...buckets.map((bucket) => bucket.rows.length));
   for (let index = 0; index < size; index += 1) {
     for (const bucket of buckets) {
-      const row = bucket[index];
-      if (row === undefined || seen.has(row.hit.sourceProcurementId)) continue;
-      seen.add(row.hit.sourceProcurementId);
-      merged.push(row);
+      const row = bucket.rows[index];
+      if (row === undefined) continue;
+      const id = row.hit.sourceProcurementId;
+      let entry = byId.get(id);
+      if (entry === undefined) {
+        entry = { row, terms: [] };
+        byId.set(id, entry);
+        merged.push(entry);
+      }
+      if (bucket.term !== undefined && !entry.terms.includes(bucket.term)) {
+        entry.terms.push(bucket.term);
+      }
     }
   }
   return merged;

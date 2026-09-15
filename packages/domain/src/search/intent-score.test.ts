@@ -216,6 +216,38 @@ describe("scoreSearchIntent", () => {
     expect(result.matchedDesired).toContain("проектирование");
   });
 
+  it("matches electrical works from a profile written as real specialist phrases", () => {
+    // Not single words: the phrases a specialist actually saves.
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "монтаж электрооборудования",
+        "монтаж электросилового оборудования",
+        "пусконаладочные работы",
+        "пуско-наладочные работы",
+        "наладка электрооборудования",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.objects).toContain("электрооборудования");
+    expect(plan.desired_actions).toContain("монтаж");
+
+    const relevant = scoreSearchIntent(
+      {
+        title:
+          "Монтаж электрооборудования распределительного пункта с трансформаторной подстанцией, АСКУЭ, пусконаладочные работы",
+      },
+      plan,
+    );
+    expect(relevant.decision).toBe("match");
+
+    const grain = scoreSearchIntent({ title: "Пусконаладка зернового комплекса" }, plan);
+    expect(grain.decision).not.toBe("match");
+    expect(grain.matchedObjects).toEqual([]);
+  });
+
   it("does not match a works profile on commissioning alone without the object", () => {
     const worksPlan = inferSearchIntentPlan({
       name: "Монтаж и пусконаладка электросилового оборудования",

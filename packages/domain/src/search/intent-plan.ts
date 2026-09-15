@@ -24,6 +24,23 @@ const DEFAULT_EXCLUDED_FOR_PURCHASE = [
 
 const PURPOSE_FILLER = /^(управления|управление|привода|привод)$/iu;
 
+/**
+ * Roots that mark a token as the work itself inside a saved phrase
+ * («электромонтажные» carries монтаж, «пусконаладочные» carries наладк).
+ * Generic carriers («работы», «услуги», «выполнение») name no object either.
+ */
+const WORK_TOKEN_ROOTS = [
+  "монтаж",
+  "ремонт",
+  "обслуживан",
+  "проектирован",
+  "наладк",
+  "наладоч",
+  "строительств",
+];
+const WORK_CARRIER = /^(работ|услуг|выполнен|оказан|производств|комплекс)/iu;
+const SPLIT_FILLER = new Set(["и", "или", "с", "со", "по", "на", "в", "для", "к", "а", "также"]);
+
 export interface IntentProfileSlice {
   name: string;
   keywords: readonly string[];
@@ -38,14 +55,20 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
   const objects: string[] = [];
   const desired: string[] = [];
   const context: string[] = [];
-  const lookingForWorks = profile.keywords.some((phrase) => matchesAny(phrase, WORK_LEXICON));
+  const lookingForWorks = profile.keywords.some((phrase) => splitWorkPhrase(phrase) !== undefined);
   for (const phrase of profile.keywords) {
     if (matchesAny(phrase, DESIRED_LEXICON)) {
       pushUnique(desired, phrase);
       continue;
     }
-    if (matchesAny(phrase, WORK_LEXICON)) {
+    const work = splitWorkPhrase(phrase);
+    if (work !== undefined) {
+      // «монтаж электрооборудования» names both the work and its object:
+      // the phrase stays a desired action, the noun becomes an object so a
+      // lot that says «работы по монтажу электрооборудования РП» can score.
       pushUnique(desired, phrase);
+      for (const action of work.actions) pushUnique(desired, action);
+      if (work.object !== undefined) pushUnique(objects, work.object);
       continue;
     }
     const split = splitPurposePhrase(phrase);
@@ -161,6 +184,47 @@ function contextTermsFromPurpose(purpose: string): string[] {
   }
   if (stripped.length > 0) pushUnique(terms, stripped);
   return terms;
+}
+
+/**
+ * Splits a work phrase into the action tokens and the remaining noun group.
+ * Undefined when the phrase names no work at all. «пусконаладочные работы»
+ * → actions only; «монтаж электросилового оборудования» → action «монтаж»,
+ * object «электросилового оборудования».
+ */
+export function splitWorkPhrase(
+  phrase: string,
+): { actions: string[]; object?: string } | undefined {
+  const tokens = phrase
+    .normalize("NFKC")
+    .split(/\s+/u)
+    .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter((token) => token.length > 0);
+  const actions: string[] = [];
+  const rest: string[] = [];
+  for (const token of tokens) {
+    const lower = normaliseToken(token);
+    if (SPLIT_FILLER.has(lower)) continue;
+    if (isWorkToken(lower)) {
+      pushUnique(actions, token);
+      continue;
+    }
+    if (WORK_CARRIER.test(lower)) continue;
+    rest.push(token);
+  }
+  if (actions.length === 0 && !matchesAny(phrase, WORK_LEXICON)) return undefined;
+  const object = rest.join(" ");
+  return object.length >= 4 ? { actions, object } : { actions };
+}
+
+function isWorkToken(lower: string): boolean {
+  if (lower === "смр" || lower === "пнр") return true;
+  if (WORK_TOKEN_ROOTS.some((root) => lower.includes(root))) return true;
+  return matchesAny(lower, WORK_LEXICON);
+}
+
+function normaliseToken(token: string): string {
+  return token.toLocaleLowerCase("ru-BY").replace(/ё/gu, "е").replace(/[-‐‑‒–—]/gu, "");
 }
 
 function matchesAny(phrase: string, lexicon: readonly string[]): boolean {

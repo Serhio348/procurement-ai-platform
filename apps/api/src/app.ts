@@ -513,14 +513,22 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     first: readonly SearchHit[],
     extra: readonly SearchHit[],
   ): SearchHit[] {
-    const seen = new Set(first.map((item) => item.sourceProcurementId));
-    const merged = [...first];
+    const byId = new Map<string, SearchHit>(
+      first.map((item) => [item.sourceProcurementId, item] as const),
+    );
     for (const hit of extra) {
-      if (seen.has(hit.sourceProcurementId)) continue;
-      seen.add(hit.sourceProcurementId);
-      merged.push(hit);
+      const known = byId.get(hit.sourceProcurementId);
+      if (known === undefined) {
+        byId.set(hit.sourceProcurementId, hit);
+        continue;
+      }
+      const terms = [...(known.matchedSearchTerms ?? [])];
+      for (const term of hit.matchedSearchTerms ?? []) {
+        if (!terms.includes(term)) terms.push(term);
+      }
+      if (terms.length > 0) byId.set(hit.sourceProcurementId, { ...known, matchedSearchTerms: terms });
     }
-    return merged;
+    return [...byId.values()];
   }
 
   /**
@@ -553,7 +561,65 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         : await searchHits.search(
             buildSearchQuery(profile, limit, offset, publishedFrom, extraTerms),
           );
-    return { plan, hits: mergeSearchHits(firstHits, extraHits) };
+    const hits = mergeSearchHits(firstHits, extraHits);
+    logger.info("Specialist profile search retrieval", {
+      profileName: profileDisplayName(profile),
+      originalTerms: [...profile.keywords],
+      listingTerms,
+      derivedTerms: extraTerms,
+      firstHits: firstHits.length,
+      extraHits: extraHits.length,
+      candidates: hits.length,
+      perTerm: countHitsPerTerm(hits),
+    });
+    return { plan, hits };
+  }
+
+  /**
+   * One line per candidate so a search can be replayed from the journal:
+   * which phrase found it, what the listing score decided and why.
+   */
+  function logSearchTrace(
+    profile: SpecialistWorkingProfile,
+    selected: ReturnType<typeof selectRelevantSearchCards>,
+  ): void {
+    const profileName = profileDisplayName(profile);
+    const rows = [
+      ...selected.cards.map((card) => ({
+        decision: "match" as const,
+        sourceProcurementId: card.sourceProcurementId,
+        title: card.title,
+        score: card.relevanceScore,
+        reason: card.relevanceReason,
+      })),
+      ...selected.ambiguousCards.map((card, index) => ({
+        decision: "review" as const,
+        sourceProcurementId: card.sourceProcurementId,
+        title: card.title,
+        score: card.relevanceScore,
+        reason: card.relevanceReason,
+        matchedSearchTerms: selected.ambiguousHits[index]?.matchedSearchTerms,
+      })),
+      ...selected.discarded.map((item) => ({
+        decision: "discard" as const,
+        sourceProcurementId: item.hit.sourceProcurementId,
+        title: item.hit.title,
+        score: item.score,
+        reason: item.reason,
+        matchedSearchTerms: item.hit.matchedSearchTerms,
+      })),
+    ];
+    for (const row of rows) logger.debug("Specialist search candidate", { profileName, ...row });
+  }
+
+  function countHitsPerTerm(hits: readonly SearchHit[]): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const hit of hits) {
+      for (const term of hit.matchedSearchTerms ?? []) {
+        counts[term] = (counts[term] ?? 0) + 1;
+      }
+    }
+    return counts;
   }
 
   /**
@@ -844,6 +910,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       },
       limit,
     );
+    logSearchTrace(profile, selected);
     const now = clock();
     let skippedRejected = 0;
     const resultItems: SpecialistProcurementCardValue[] = [];
@@ -998,6 +1065,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           },
           limit,
         );
+        logSearchTrace(profile, selected);
         const now = clock();
         for (const card of selected.cards) {
           const remembered = await rememberFound(card, profile.id, now);

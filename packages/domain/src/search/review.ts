@@ -83,8 +83,11 @@ export function outcomeFromCardReview(result: CheapClassifyResult): ReviewOutcom
 }
 
 /**
- * Listing-score on the full card text. Match / veto / discard settle the
- * case; an inconclusive review leaves the cheap keyword pass or the model.
+ * Listing-score on the full card text. Match settles the case, as do the
+ * two explicit negatives: a veto (the work itself is excluded) and a purpose
+ * the profile does not want. A plain «no object found» is not proof of
+ * anything — the platform returned the row for a reason the term matcher
+ * may not see — so it stays open for the model or a human.
  */
 export function outcomeFromIntentCard(scored: SearchIntentScore): ReviewOutcome | undefined {
   if (scored.decision === "match") {
@@ -96,7 +99,7 @@ export function outcomeFromIntentCard(scored: SearchIntentScore): ReviewOutcome 
       confidence: 1,
     };
   }
-  if (scored.decision === "veto" || scored.decision === "discard") {
+  if (scored.decision === "veto" || scored.contextRole === "mismatch") {
     return {
       verdict: "irrelevant",
       decidedBy: "card",

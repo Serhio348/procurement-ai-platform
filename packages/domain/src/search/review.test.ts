@@ -1,4 +1,4 @@
-import { ProcedureCard, SearchHit } from "@procurement/contracts";
+import { ProcedureCard, SearchHit, SearchIntentPlan } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import {
   buildSearchClassifierInput,
@@ -83,14 +83,40 @@ describe("reviewByIntentCard", () => {
     expect(outcome?.reason).toMatch(/монтаж/i);
   });
 
-  it("does not match commissioning of a grain complex for an electrical works plan", () => {
+  it("leaves commissioning of a grain complex open for the model instead of calling it irrelevant", () => {
+    // No electrical object anywhere on the card: not a match, but also not a
+    // proven miss — the code did not see a veto or a foreign purpose.
     const outcome = reviewByIntentCard(
       card("Пусконаладка зернового комплекса", [
         { title: "Пусконаладочные работы оборудования зерноочистительного комплекса" },
       ]),
       worksPlan,
     );
-    expect(outcome?.verdict).toBe("irrelevant");
+    expect(outcome).toBeUndefined();
+  });
+
+  it("still settles a veto and a foreign purpose on the card without a model", () => {
+    const supplyPlan = SearchIntentPlan.parse({
+      objects: ["КТП"],
+      required_context: ["насос"],
+      excluded_context: ["освещение"],
+      desired_actions: ["поставка"],
+      excluded_actions: ["монтаж"],
+    });
+    expect(
+      reviewByIntentCard(card("Монтаж КТП 10/0,4 кВ", [{ title: "Монтаж КТП" }]), supplyPlan)
+        ?.verdict,
+    ).toBe("irrelevant");
+    expect(
+      reviewByIntentCard(
+        card("Поставка КТП для освещения", [{ title: "КТП для освещения стадиона" }]),
+        supplyPlan,
+      )?.verdict,
+    ).toBe("irrelevant");
+    // An embedded code (БКТПВ) with no exact КТП token on the card is a candidate, not a miss.
+    expect(
+      reviewByIntentCard(card("Поставка БКТПВ-630", [{ title: "БКТПВ-630 кВА" }]), supplyPlan),
+    ).toBeUndefined();
   });
 });
 

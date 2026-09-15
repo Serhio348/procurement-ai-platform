@@ -227,6 +227,95 @@ describe("GoszakupkiBySource", () => {
     expect(decodeURIComponent(String(get.mock.calls[1]?.[0]))).toContain("кабель");
   });
 
+  it("sends every profile phrase to the site as its own query, never one joined phrase", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТПБ", "КТП", "сети электроснабжения"],
+        limit: 100,
+      }),
+    );
+
+    const texts = get.mock.calls.map((call) => {
+      const url = new URL(`https://goszakupki.by${String(call[0])}`);
+      return url.searchParams.get("TendersSearch[text]");
+    });
+    expect(texts).toEqual(["КТПБ", "КТП", "сети электроснабжения"]);
+  });
+
+  it("returns one candidate for a procedure found by two phrases and lists both phrases", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТП", "сети электроснабжения"],
+        limit: 100,
+      }),
+    );
+
+    const ids = result.hits.map((hit) => hit.sourceProcurementId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(result.hits.length).toBe(4);
+    for (const hit of result.hits) {
+      expect(hit.matchedSearchTerms).toEqual(["КТП", "сети электроснабжения"]);
+    }
+  });
+
+  it("gives every phrase its share of the limit instead of letting a broad first phrase take it all", async () => {
+    // Phrase A has pages of rows; phrases B..E have one page each with fresh ids.
+    const get = vi.fn(async (path: string) => {
+      const url = new URL(`https://goszakupki.by${path}`);
+      const text = url.searchParams.get("TendersSearch[text]") ?? "";
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const termIndex = ["A", "B", "C", "D", "E"].indexOf(text) + 1;
+      const body = searchHtml.replaceAll(/90001(\d\d)/gu, (_match, tail: string) =>
+        `9${String(termIndex)}${String(page).padStart(2, "0")}${tail}`,
+      );
+      const last = text === "A" ? page >= 10 : true;
+      return {
+        status: 200,
+        url: `https://goszakupki.by${path}`,
+        body: last ? body.replace('class="next"', 'class="next disabled"') : body,
+      };
+    });
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["A", "B", "C", "D", "E"],
+        limit: 20,
+      }),
+    );
+
+    expect(result.hits).toHaveLength(20);
+    const byTerm = new Map<string, number>();
+    for (const hit of result.hits) {
+      for (const term of hit.matchedSearchTerms ?? []) {
+        byTerm.set(term, (byTerm.get(term) ?? 0) + 1);
+      }
+    }
+    expect([...byTerm.keys()].sort()).toEqual(["A", "B", "C", "D", "E"]);
+    expect(byTerm.get("A")).toBe(4);
+    expect(byTerm.get("E")).toBe(4);
+    // The page budget of a broad phrase is bounded by its share, not by the whole limit.
+    const pagesForA = get.mock.calls.filter((call) => String(call[0]).includes("text%5D=A")).length;
+    expect(pagesForA).toBeLessThanOrEqual(3);
+  });
+
   it("keeps a listing row the site returned when the keyword is not in the title", async () => {
     const get = vi.fn(async (path: string) => ({
       status: 200,

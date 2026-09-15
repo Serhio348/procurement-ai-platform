@@ -14,6 +14,14 @@ describe("stemWord", () => {
     expect(stemsShareRoot(stemWord("монтаж"), stemWord("монтажные"))).toBe(true);
   });
 
+  it("treats short nouns in different cases as one term", () => {
+    expect(termOccurs("Строительство сетей электроснабжения микрорайона", "сети электроснабжения")).toBe(true);
+    expect(termOccurs("Ремонт сети электроснабжения", "сетей электроснабжения")).toBe(true);
+    expect(termOccurs("Поставка шкафов", "шкаф")).toBe(true);
+    expect(stemWord("шкаф")).toBe("шкаф");
+    expect(stemWord("банк")).toBe("банк");
+  });
+
   it("joins hyphen and concatenated пусконаладка", () => {
     expect(termOccurs("пуско-наладочные работы насоса", "пусконаладка")).toBe(true);
     expect(termOccurs("пусконаладочные работы", "пуско-наладка")).toBe(true);

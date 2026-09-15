@@ -233,6 +233,12 @@ export const SearchHit = z.object({
   amount: PlatformAmount.optional(),
   publishedAt: PlatformInstant.optional(),
   bidsDeadline: PlatformInstant.optional(),
+  /**
+   * Profile phrases whose platform query returned this row. A row found by
+   * several phrases is one candidate that lists them all. Diagnostics and
+   * later scoring only; never a relevance verdict on its own.
+   */
+  matchedSearchTerms: z.array(z.string().min(1)).optional(),
 });
 export type SearchHit = z.infer<typeof SearchHit>;
 

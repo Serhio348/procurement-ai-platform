@@ -1,6 +1,7 @@
 import { ProcedureCard, SearchHit, electricalEquipmentSeedV1 } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import { uuidFromHex } from "../specialist/case.js";
+import { inferSearchIntentPlan } from "./intent-plan.js";
 import { isSingleSourceAfterFailedProcedure, selectRelevantSearchCards } from "./search-cards.js";
 
 const profile = {
@@ -44,6 +45,29 @@ describe("selectRelevantSearchCards", () => {
     expect(selected.cards[0]?.actions[0]?.detail).toContain("Документы ещё не брали");
     expect(selected.cards[0]?.id).toBe(uuidFromHex("fixture:auction-001"));
     expect(selected.cards[0]?.live).toBe(false);
+  });
+
+  it("keeps a БКТПВ row found by «КТП» as a review candidate, never an automatic match, and traces discards", () => {
+    const plan = inferSearchIntentPlan({
+      name: "КТП",
+      keywords: ["КТПБ", "КТП", "сети электроснабжения"],
+      excludeKeywords: [],
+    });
+    const selected = selectRelevantSearchCards(
+      [
+        hit("auction-1", "Поставка БКТПВ-630", { matchedSearchTerms: ["КТП"] }),
+        hit("auction-2", "Закупка КТП 10/0,4 кВ", { matchedSearchTerms: ["КТП", "КТПБ"] }),
+        hit("auction-3", "Монтаж КТП на объекте", { matchedSearchTerms: ["КТП"] }),
+      ],
+      { keywords: ["КТПБ", "КТП", "сети электроснабжения"], excludeKeywords: [], intent: plan },
+      20,
+    );
+    expect(selected.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-2"]);
+    expect(selected.cards[0]?.actions[0]?.detail).toContain("Найдена по: КТП, КТПБ");
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["auction-1"]);
+    expect(selected.ambiguousCards[0]?.foundAs).toBe("review");
+    expect(selected.discarded.map((item) => item.hit.sourceProcurementId)).toEqual(["auction-3"]);
+    expect(selected.discarded[0]?.reason).toMatch(/монтаж/i);
   });
 
   it("gives each goszakupki.by procedure its own card id", () => {

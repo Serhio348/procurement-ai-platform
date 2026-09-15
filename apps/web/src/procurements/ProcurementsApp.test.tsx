@@ -313,6 +313,37 @@ describe("ProcurementsApp", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("shows card-reading percent while the search run is scoring", () => {
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                searchRun={{
+                  profileId: "00000000-0000-4000-8000-000000000901",
+                  profileName: "КТП",
+                  status: "scoring",
+                  retrievedCount: 80,
+                  scoredCount: 16,
+                  matchCount: 2,
+                  discardedCount: 14,
+                  reviewCount: 0,
+                }}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status").textContent).toMatch(/Читаем карточки 16 из 80/);
+    expect(screen.getByRole("status").textContent).toMatch(/20%/);
+    expect(screen.getByText(/Найдено 2, отброшено 14/)).toBeTruthy();
+  });
+
   it("lets the specialist pick which profile to search", async () => {
     const user = userEvent.setup();
     const substations = SpecialistWorkingProfile.parse({

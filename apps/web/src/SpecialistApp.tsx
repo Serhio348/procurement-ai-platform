@@ -13,7 +13,12 @@ import type {
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
-import { isIngestRunning, isRejectedTriage, isWatchedTriage } from "@procurement/domain";
+import {
+  isIngestRunning,
+  isListingPlaceholder,
+  isRejectedTriage,
+  isWatchedTriage,
+} from "@procurement/domain";
 import { AdminApp } from "./admin/AdminApp.js";
 import { InboxAlertProvider } from "./inbox/InboxAlert.js";
 import { InboxApp } from "./inbox/InboxApp.js";
@@ -134,7 +139,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         };
 
   const searchPaneItems = procurements.filter(
-    (item) => !isWatchedTriage(item) && !isRejectedTriage(item.triage),
+    (item) =>
+      !isListingPlaceholder(item) &&
+      !isWatchedTriage(item) &&
+      !isRejectedTriage(item.triage),
   );
 
   const decide =

@@ -27,6 +27,8 @@ const found = SpecialistProcurementCard.parse({
   statusLabel: "Приём предложений",
   url: "https://goszakupki.by/request/view/2",
   sourceProcurementId: "request/2",
+  foundAs: "match",
+  relevanceReason: "В лотах есть комплектная трансформаторная подстанция.",
   profileIds: [profile.id],
 });
 

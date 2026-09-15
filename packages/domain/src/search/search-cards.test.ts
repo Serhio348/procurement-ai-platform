@@ -2,7 +2,12 @@ import { ProcedureCard, SearchHit, electricalEquipmentSeedV1 } from "@procuremen
 import { describe, expect, it } from "vitest";
 import { uuidFromHex } from "../specialist/case.js";
 import { inferSearchIntentPlan } from "./intent-plan.js";
-import { isSingleSourceAfterFailedProcedure, selectRelevantSearchCards } from "./search-cards.js";
+import {
+  isScoredSearchMatch,
+  isSingleSourceAfterFailedProcedure,
+  LISTING_PENDING_REASON,
+  selectRelevantSearchCards,
+} from "./search-cards.js";
 
 const profile = {
   keywords: electricalEquipmentSeedV1.keywords,
@@ -418,5 +423,17 @@ describe("selectRelevantSearchCards with intent", () => {
     );
     expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["fresh"]);
     expect(selected.discardedCount).toBe(50);
+  });
+});
+
+describe("isScoredSearchMatch", () => {
+  it("rejects a listing placeholder even if it was stamped match", () => {
+    expect(
+      isScoredSearchMatch({ foundAs: "match", relevanceReason: LISTING_PENDING_REASON }),
+    ).toBe(false);
+    expect(isScoredSearchMatch({ foundAs: "review", relevanceReason: "неясно" })).toBe(false);
+    expect(
+      isScoredSearchMatch({ foundAs: "match", relevanceReason: "В лотах есть НКУ для насосов." }),
+    ).toBe(true);
   });
 });

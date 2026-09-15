@@ -49,6 +49,7 @@ import {
   partitionHitsByDecision,
   platformSearchTerms,
   isRejectedTriage,
+  isScoredSearchMatch,
   isWatchedTriage,
   profileDisplayName,
   scoreIntentCard,
@@ -247,6 +248,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       currentCabinet().workspaceId,
       cutoff,
       [...workspace().decidedSourceIds()],
+      [...keepCaseIds],
     );
     const ids = [...new Set([...removed, ...staleIds])];
     if (ids.length === 0) return;
@@ -350,7 +352,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const tab = query.tab ?? "listed";
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 100;
-    if (tab === "listed" || tab === "search") {
+    if (tab === "listed") {
       await pruneStaleCases();
     }
     if (tab === "search") {
@@ -359,6 +361,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         const card = await resolveCase(id);
         if (card === undefined) continue;
         if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
+        if (!isScoredSearchMatch(card)) continue;
         items.push(slimListedCard(card));
       }
       return SpecialistProcurementListResponse.parse({
@@ -744,6 +747,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           discardedCount: listingDiscarded + discarded,
           reviewCount: ambiguousCount,
         });
+        logger.info("Specialist search card scored", {
+          profileName: profileDisplayName(profile),
+          sourceProcurementId: item.card.sourceProcurementId,
+          title: item.card.title.slice(0, 160),
+          verdict: "irrelevant",
+          scoredCount,
+          pendingCount: pending.length,
+        });
         if (scoring.persistEach) {
           workspace().setDismissedInboxIds(catalog().dismissedIds());
           await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
@@ -771,6 +782,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           matchCount,
           discardedCount: listingDiscarded + discarded,
           reviewCount: ambiguousCount,
+        });
+        logger.info("Specialist search card scored", {
+          profileName: profileDisplayName(profile),
+          sourceProcurementId: item.card.sourceProcurementId,
+          title: item.card.title.slice(0, 160),
+          verdict: "closed",
+          scoredCount,
+          pendingCount: pending.length,
         });
         if (scoring.persistEach) {
           workspace().setDismissedInboxIds(catalog().dismissedIds());
@@ -823,6 +842,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         matchCount,
         discardedCount: listingDiscarded + discarded,
         reviewCount: ambiguousCount,
+      });
+      logger.info("Specialist search card scored", {
+        profileName: profileDisplayName(profile),
+        sourceProcurementId: item.card.sourceProcurementId,
+        title: item.card.title.slice(0, 160),
+        verdict: outcome?.verdict ?? "unscored",
+        scoredCount,
+        pendingCount: pending.length,
       });
       if (scoring.persistEach) {
         workspace().setDismissedInboxIds(catalog().dismissedIds());
@@ -890,7 +917,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return ids
       .map((id) => byId.get(id))
       .filter((card): card is SpecialistProcurementCardValue => card !== undefined)
-      .filter((card) => !isRejectedTriage(card.triage) && !isWatchedTriage(card));
+      .filter(
+        (card) =>
+          isScoredSearchMatch(card) &&
+          !isRejectedTriage(card.triage) &&
+          !isWatchedTriage(card),
+      );
   }
 
   /**
@@ -937,16 +969,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         continue;
       }
       const already = known.get(card.sourceProcurementId);
-      if (already?.foundAs === "match") {
-        const remembered = await rememberFound({ ...card, foundAs: "match" }, profile.id, now);
-        workspace().appendSearchId(profile.id, remembered.card.id);
+      if (already?.foundAs === "match" && options.skipKnownIrrelevant) {
         continue;
       }
       if (already?.foundAs === "review") {
-        const remembered = await rememberFound(card, profile.id, now);
-        restoredReview += 1;
-        if (options.restoreReviewInbox) queueFoundInbox(remembered.card, now);
-        continue;
+        if (options.skipKnownIrrelevant) continue;
+        if (options.restoreReviewInbox) {
+          const remembered = await rememberFound(card, profile.id, now);
+          restoredReview += 1;
+          queueFoundInbox(remembered.card, now);
+          continue;
+        }
       }
       pending.push({ card, hit });
     }

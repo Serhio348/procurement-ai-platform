@@ -359,6 +359,32 @@ h3 {
   color: #3a5d86;
 }
 
+.search-read-progress {
+  margin: 0 0 12px;
+}
+
+.search-read-progress-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 6px;
+  color: #3a5d86;
+  font-size: 13px;
+}
+
+.search-read-progress-track {
+  height: 6px;
+  border-radius: 99px;
+  background: #dbe4ee;
+  overflow: hidden;
+}
+
+.search-read-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: #3a5d86;
+}
+
 .search-overlay {
   position: fixed;
   inset: 0;

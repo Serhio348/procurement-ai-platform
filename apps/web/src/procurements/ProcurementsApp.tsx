@@ -12,6 +12,7 @@ import type {
 } from "@procurement/contracts";
 import {
   ingestFileWeight,
+  isListingPlaceholder,
   isRejectedTriage,
   isWatchedTriage,
   procurementsForProfile,
@@ -233,6 +234,12 @@ export function ProcurementsApp({
       setNotice("Не удалось дочитать карточки поиска.");
       return;
     }
+    if (searchRun.status === "retrieving" || searchRun.status === "scoring") {
+      setNotice(
+        `По профилю «${searchRun.profileName}»: читаем карточки ${String(searchRun.scoredCount)} из ${String(searchRun.retrievedCount)}. Найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}.`,
+      );
+      return;
+    }
     if (searchRun.status !== "done") return;
     setNotice(
       `По профилю «${searchRun.profileName}»: найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}, сомнительных во входящих ${String(searchRun.reviewCount)}.`,
@@ -388,7 +395,7 @@ export function ProcurementsApp({
                   <select
                     id="search-profile-select"
                     value={chosenProfileId}
-                    disabled={listing}
+                    disabled={listing || scoring}
                     onChange={(event) => {
                       const id = event.target.value;
                       setChosenProfileId(id);
@@ -414,7 +421,7 @@ export function ProcurementsApp({
               <button
                 type="button"
                 className="search-profile"
-                disabled={search === undefined || listing}
+                disabled={search === undefined || listing || scoring}
                 onClick={() => {
                   void runSearch();
                 }}
@@ -425,7 +432,7 @@ export function ProcurementsApp({
                 <button
                   type="button"
                   className="search-profile"
-                  disabled={listing}
+                  disabled={listing || scoring}
                   onClick={() => {
                     void runSearch(nextOffset);
                   }}
@@ -435,6 +442,25 @@ export function ProcurementsApp({
               ) : null}
             </div>
           </div>
+          {listing || scoring ? (
+            <div className="search-read-progress" role="status" aria-live="polite">
+              <div className="search-read-progress-top">
+                <span>
+                  {listing
+                    ? "Ищем закупки на площадке…"
+                    : `Читаем карточки${
+                        searchRun === undefined
+                          ? "…"
+                          : ` ${String(searchRun.scoredCount)} из ${String(searchRun.retrievedCount)}`
+                      }`}
+                </span>
+                <strong>{String(searchPct)}%</strong>
+              </div>
+              <div className="search-read-progress-track">
+                <div className="search-read-progress-bar" style={{ width: `${String(searchPct)}%` }} />
+              </div>
+            </div>
+          ) : null}
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}
           {listing ? (
             <div className="search-overlay" role="status" aria-live="polite">
@@ -698,5 +724,9 @@ export function ProcurementsApp({
 }
 
 function isSearchQueueCard(item: SpecialistProcurementCard): boolean {
-  return !isWatchedTriage(item) && !isRejectedTriage(item.triage);
+  return (
+    !isListingPlaceholder(item) &&
+    !isWatchedTriage(item) &&
+    !isRejectedTriage(item.triage)
+  );
 }

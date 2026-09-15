@@ -129,7 +129,6 @@ export class SpecialistCatalog {
     }
     for (const id of removed) {
       this.#cases.delete(id);
-      this.#pruned.add(id);
       this.dismissByProcurementId(id);
     }
     return removed;
@@ -159,7 +158,9 @@ export class SpecialistCatalog {
     for (const item of this.#order) {
       latest.set(item.change.procurementId, item);
     }
-    const fromChanges = [...latest.values()].map(toProcurementCard);
+    const fromChanges = [...latest.values()]
+      .filter((item) => !this.#dismissed.has(item.change.id))
+      .map(toProcurementCard);
     const rest = fromChanges.filter(
       (item) => !this.#cases.has(item.id) && !this.#pruned.has(item.id),
     );

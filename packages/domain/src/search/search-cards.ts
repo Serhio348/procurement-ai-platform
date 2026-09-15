@@ -29,6 +29,25 @@ export interface ProfileSearchSelection {
 /** How many borderline hits one search run may push to the inbox. */
 export const MAX_AMBIGUOUS_PER_SEARCH = 50;
 
+/** Listing placeholder: the site row is not a scored card yet. */
+export const LISTING_PENDING_REASON =
+  "В строке списка нет полного предмета закупки — карточка дочитывается.";
+
+/** A site listing row waiting for procurement.get. Not an actionable card. */
+export function isListingPlaceholder(card: {
+  relevanceReason?: string | undefined;
+}): boolean {
+  return card.relevanceReason === LISTING_PENDING_REASON;
+}
+
+/** Закупки may show a hit only after procurement.get and a code score. */
+export function isScoredSearchMatch(card: {
+  foundAs?: string | undefined;
+  relevanceReason?: string | undefined;
+}): boolean {
+  return card.foundAs === "match" && !isListingPlaceholder(card);
+}
+
 /** Profile filters applied to listing hits before classification. */
 export interface SearchSelectionProfile extends CheapClassifyProfile {
   /** Watched procedure statuses; empty or absent means no status filter. */
@@ -224,7 +243,7 @@ function rankHitByIntent(hit: SearchHitValue, profile: SearchSelectionProfile): 
     card: cardFromIntentHit(
       hit,
       0,
-      "В строке списка нет полного предмета закупки — карточка дочитывается.",
+      LISTING_PENDING_REASON,
       "review",
     ),
   };

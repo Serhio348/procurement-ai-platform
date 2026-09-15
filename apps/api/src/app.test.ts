@@ -10,7 +10,13 @@ import {
   electricalEquipmentSeedV1,
   type InboxFixtureItem,
 } from "@procurement/contracts";
-import { SpecialistCatalog, SpecialistWorkspace, inferSearchIntentPlan, type ReviewOutcome } from "@procurement/domain";
+import {
+  LISTING_PENDING_REASON,
+  SpecialistCatalog,
+  SpecialistWorkspace,
+  inferSearchIntentPlan,
+  type ReviewOutcome,
+} from "@procurement/domain";
 import { McpToolCallError } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
@@ -112,7 +118,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("deletes an inbox row without removing the procurement case", async () => {
+  it("deletes an inbox row and does not invent a procurement case from it", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     const listed = await app.inject({ method: "GET", url: "/api/inbox" });
     const id = JSON.parse(listed.body).items[0]?.id as string;
@@ -126,7 +132,7 @@ describe("specialist API", () => {
       (JSON.parse(cases.body).items as Array<{ title: string }>).some(
         (item) => item.title === "Поставка КТПБ",
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     await app.close();
   });
@@ -245,6 +251,80 @@ describe("specialist API", () => {
     expect(JSON.parse(searched.body).items).toHaveLength(1);
     expect(queueTitles).toEqual(["КТПБ из поиска"]);
     expect(queueTitles).not.toContain("Закупка взрывозащищенной пусковой аппаратуры");
+
+    await app.close();
+  });
+
+  it("does not show a listing stub before the platform card is scored", async () => {
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000801",
+        title: "Поставка КТП 10 кВ для жилого дома",
+        status: "accepting_bids",
+        statusLabel: "Приём предложений",
+        url: "https://goszakupki.by/auction/view/ktp-1",
+        sourceProcurementId: "auction/ktp-1",
+        foundAs: "match",
+        live: true,
+        relevanceScore: 0,
+        relevanceReason: LISTING_PENDING_REASON,
+      }),
+    );
+    let releaseReview!: () => void;
+    const reviewGate = new Promise<void>((resolve) => {
+      releaseReview = resolve;
+    });
+    const review = vi.fn(async (reviewed: readonly SearchHit[]) => {
+      await reviewGate;
+      return reviewed.map(
+        (): ReviewOutcome => ({
+          verdict: "relevant",
+          decidedBy: "card",
+          reason: "В лотах есть КТП.",
+          matchedTerms: ["КТП"],
+          confidence: 1,
+        }),
+      );
+    });
+    const app = await buildSpecialistApi({
+      catalog,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/ktp-1",
+            url: "https://goszakupki.by/auction/view/ktp-1",
+            title: "Поставка КТП 10 кВ для жилого дома",
+          }),
+        ],
+      },
+      searchReview: { review },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТП", keywords: ["КТП"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const before = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    expect(JSON.parse(searched.body).items).toEqual([]);
+    expect(JSON.parse(before.body).items).toEqual([]);
+
+    releaseReview();
+    await vi.waitFor(async () => {
+      const queue = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+      const items = JSON.parse(queue.body).items as Array<{
+        title: string;
+        relevanceReason?: string;
+      }>;
+      expect(items).toHaveLength(1);
+      expect(items[0]?.relevanceReason).toBe("В лотах есть КТП.");
+    });
 
     await app.close();
   });

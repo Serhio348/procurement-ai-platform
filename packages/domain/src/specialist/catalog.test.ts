@@ -113,7 +113,7 @@ describe("SpecialistCatalog", () => {
     expect(catalog.urgentInbox()).toHaveLength(1);
   });
 
-  it("drops a dismissed urgent row from the inbox and keeps the procurement case", () => {
+  it("drops a dismissed urgent row from the inbox without inventing a case", () => {
     const catalog = SpecialistCatalog.parse(fixture);
     const status = catalog.urgentInbox()[0];
     if (status === undefined) throw new Error("fixture missing");
@@ -122,7 +122,7 @@ describe("SpecialistCatalog", () => {
     expect(catalog.urgentInbox()[1]?.topic).toBe("documents");
     expect(catalog.dismiss(status.id)).toBe(true);
     expect(catalog.urgentInbox().map((entry) => entry.title)).toEqual(["НКУ и щитовое оборудование"]);
-    expect(catalog.procurement(status.procurementId)?.title).toBe("Поставка КТПБ");
+    expect(catalog.procurement(status.procurementId)).toBeUndefined();
     catalog.undismiss(status.id);
     expect(catalog.urgentInbox()[0]?.title).toBe("Поставка КТПБ");
   });
@@ -203,6 +203,8 @@ describe("SpecialistCatalog", () => {
     expect(removed.sort()).toEqual([stale.id, legacy.id, fresh.id].sort());
     expect(catalog.procurements().map((card) => card.id)).toEqual([decided.id]);
     expect(catalog.urgentInbox()).toEqual([]);
+    catalog.upsertCase(stale);
+    expect(catalog.procurement(stale.id)?.title).toBe("СО2-инкубатор");
   });
 
   it("prunes a finished procedure the specialist never took, even if it was seen today", () => {

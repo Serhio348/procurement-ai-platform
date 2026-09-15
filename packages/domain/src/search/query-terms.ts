@@ -150,7 +150,12 @@ export function stemWord(raw: string): string {
     }
   }
   if (stem.endsWith("нн") && stem.length > 5) stem = stem.slice(0, -2);
-  else if (stem.endsWith("н") && stem.length > 5) stem = stem.slice(0, -1);
+  else if (stem.endsWith("н") && stem.length > 5) {
+    const stripped = stem.slice(0, -1);
+    // Keep «проектн» (проектной документации). Stripping «н» would
+    // collapse it to the noun «проект» (Проект застройки).
+    if (stripped !== "проект") stem = stripped;
+  }
   return stem;
 }
 
@@ -194,11 +199,19 @@ function hasAgentTail(stem: string): boolean {
   return AGENT_TAILS.some((tail) => stem.includes(tail));
 }
 
-function wordFamily(stem: string): "supply-action" | "supplier-person" | undefined {
+function wordFamily(
+  stem: string,
+): "supply-action" | "supplier-person" | "project-object" | "design-work" | undefined {
   if (stem.includes("поставщик") || stem.startsWith("поставщи")) return "supplier-person";
   if (stem.startsWith("поставк") || stem.startsWith("поставл") || stem === "постав") {
     return "supply-action";
   }
+  // Noun «проект» (a named construction object) is not the activity
+  // «проектирование» and not the adjective «проектный». Prefix matching
+  // would otherwise treat «проект» as a root of «проектирова».
+  if (stem === "проект") return "project-object";
+  if (hasAgentTail(stem)) return undefined;
+  if (stem.startsWith("проектн") || stem.startsWith("проектир")) return "design-work";
   return undefined;
 }
 

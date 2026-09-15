@@ -176,6 +176,41 @@ describe("scoreSearchIntent", () => {
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
   });
 
+  it("does not match a design profile on a construction object named проект", () => {
+    const designPlan = inferSearchIntentPlan({
+      name: "Проектирование электроснабжения и электрооборудования",
+      keywords: ["проектирование", "электроснабжение", "электрооборудование"],
+      excludeKeywords: [],
+    });
+    const result = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+        "Выбор субподрядной организации для выполнения работ по монтажу электрооборудования распределительного пункта с трансформаторной подстанцией (РП с ТП), АСКУЭ, пусконаладочных работ, электрофизических измерений и сдачи результата работ эксплуатирующей организации Филиалу «Жлобинские электрические сети» РУП «Гомельэнерго», при строительстве объекта: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
+      ),
+      designPlan,
+    );
+    expect(result.decision).not.toBe("match");
+    expect(result.matchedDesired).not.toContain("проектирование");
+  });
+
+  it("matches a design profile from lot design documentation", () => {
+    const designPlan = inferSearchIntentPlan({
+      name: "Проектирование электроснабжения и электрооборудования",
+      keywords: ["проектирование", "электроснабжение", "электрооборудование"],
+      excludeKeywords: [],
+    });
+    const result = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Закупка услуг",
+        "Разработка проектной документации по электроснабжению",
+      ),
+      designPlan,
+    );
+    expect(result.decision).toBe("match");
+    expect(result.matchedObjects).toContain("электроснабжение");
+    expect(result.matchedDesired).toContain("проектирование");
+  });
+
   it("does not match a works profile on commissioning alone without the object", () => {
     const worksPlan = inferSearchIntentPlan({
       name: "Монтаж и пусконаладка электросилового оборудования",

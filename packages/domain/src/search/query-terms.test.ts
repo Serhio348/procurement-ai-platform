@@ -36,6 +36,35 @@ describe("поставка vs поставщик", () => {
   });
 });
 
+describe("проект vs проектирование", () => {
+  it("does not treat a construction object name as the design action", () => {
+    expect(termOccurs("Проект застройки микрорайона", "проектирование")).toBe(false);
+    expect(termOccurs("Проект строительства", "проектирование")).toBe(false);
+    expect(termOccurs("Проект объекта. Монтаж электрооборудования", "проектирование")).toBe(
+      false,
+    );
+  });
+
+  it("treats design documentation as the design action", () => {
+    expect(
+      termOccurs("Разработка проектной документации по электроснабжению", "проектирование"),
+    ).toBe(true);
+    expect(termOccurs("проектной документации", "проектный")).toBe(true);
+    expect(termOccurs("проектирование электроснабжения", "проектирование")).toBe(true);
+    expect(
+      termOccurs("Проектная документация на электроснабжение объекта", "проектирование"),
+    ).toBe(true);
+  });
+
+  it("does not treat a designer person as the design action", () => {
+    expect(termOccurs("проектировщик системы электроснабжения", "проектирование")).toBe(false);
+  });
+
+  it("still matches монтаж inflections after the project-family split", () => {
+    expect(termOccurs("монтаж электрооборудования", "монтаж")).toBe(true);
+  });
+});
+
 describe("termOccurs", () => {
   it("does not treat НКУ as a hit inside банку", () => {
     expect(termOccurs("услуги банку и охрана", "НКУ")).toBe(false);

@@ -296,6 +296,25 @@ export const SpecialistSearchRequest = z.object({
 });
 export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
 
+export const SpecialistSearchRunStatus = z.enum(["retrieving", "scoring", "done", "failed"]);
+export type SpecialistSearchRunStatus = z.infer<typeof SpecialistSearchRunStatus>;
+
+/**
+ * Background card scoring for one profile search. Listing never writes a
+ * verdict; scoredCount moves as procurement.get + intent score finish.
+ */
+export const SpecialistSearchRun = z.object({
+  profileId: z.string().uuid(),
+  profileName: z.string().min(1),
+  status: SpecialistSearchRunStatus,
+  retrievedCount: z.number().int().nonnegative(),
+  scoredCount: z.number().int().nonnegative(),
+  matchCount: z.number().int().nonnegative(),
+  discardedCount: z.number().int().nonnegative(),
+  reviewCount: z.number().int().nonnegative(),
+});
+export type SpecialistSearchRun = z.infer<typeof SpecialistSearchRun>;
+
 export const SpecialistSearchResponse = z.object({
   profileName: z.string().min(1).default("Без названия"),
   relevantCount: z.number().int().nonnegative(),
@@ -305,6 +324,7 @@ export const SpecialistSearchResponse = z.object({
   /** True when the source returned a full page — more results may follow. */
   hasMore: z.boolean().default(false),
   items: z.array(SpecialistProcurementCard),
+  run: SpecialistSearchRun.optional(),
 });
 export type SpecialistSearchResponse = z.infer<typeof SpecialistSearchResponse>;
 

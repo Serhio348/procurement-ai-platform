@@ -11,6 +11,7 @@ import {
   fetchProcurement,
   fetchProcurements,
   fetchProfiles,
+  fetchSearchProgress,
   purgeProcurement,
   emptyTrash,
   reindexProcurement,
@@ -94,11 +95,11 @@ function LiveConsole() {
   >("loading");
 
   useEffect(() => {
-    void Promise.all([fetchInbox(), fetchProfiles()])
-      .then(([inbox, listed]) => {
+    void Promise.all([fetchInbox(), fetchProfiles(), fetchProcurements()])
+      .then(([inbox, listed, procurements]) => {
         setData({
           inbox,
-          procurements: [],
+          procurements,
           profiles: listed.items,
           activeProfileId: listed.activeProfileId,
         });
@@ -122,7 +123,6 @@ function LiveConsole() {
   return (
     <SpecialistApp
       key={user?.id ?? "anon"}
-      {...(user?.id === undefined ? {} : { storageScope: user.id })}
       inbox={data.inbox}
       procurements={data.procurements}
       profiles={data.profiles}
@@ -144,6 +144,7 @@ function LiveConsole() {
       resolveInbox={resolveInbox}
       listMine={fetchProcurements}
       loadCard={fetchProcurement}
+      searchProgress={fetchSearchProgress}
     />
   );
 }

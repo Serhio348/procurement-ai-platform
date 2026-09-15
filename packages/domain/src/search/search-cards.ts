@@ -12,7 +12,6 @@ import {
 } from "@procurement/contracts";
 import { statusLabel, uuidFromHex } from "../specialist/case.js";
 import { cheapClassifyHit, type CheapClassifyProfile } from "./cheap-classify.js";
-import { scoreSearchIntent, SEARCH_INTENT_WEIGHTS } from "./intent-score.js";
 import { listingKeepsPlatformHit, termOccurs } from "./query-terms.js";
 import { termMatches } from "./term-match.js";
 
@@ -46,13 +45,10 @@ export interface SearchSelectionProfile extends CheapClassifyProfile {
 }
 
 /**
- * Turns listing hits into specialist cases. Exact profile-keyword matches
- * become cards. Hits where a keyword is only buried inside a foreign code
- * ("КТПБ" in "БКТПБ-746") and hits that match no keyword at all become
- * ambiguous cards for human review, capped at MAX_AMBIGUOUS_PER_SEARCH.
- * With an intent plan, a title that names no object is also review: the
- * platform may have matched lot subject, and procurement.get scores the card.
- * Only an exclude keyword, a veto, or a mismatched purpose drops a hit outright.
+ * Listing is retrieval, not a verdict. Profile filters (status, single-source,
+ * exclude words, substring noise) may drop a row. Everything the platform
+ * returned otherwise waits for procurement.get so lot subject can score.
+ * Without an intent plan the cheap keyword classifier still runs on the title.
  */
 export function selectRelevantSearchCards(
   hits: readonly SearchHitValue[],
@@ -118,49 +114,12 @@ export function selectRelevantSearchCards(
     );
     ambiguousHits.push(hit);
   }
-  if (profile.intent !== undefined) {
+  if (profile.intent === undefined) {
     cards.sort((left, right) => (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0));
     if (cards.length > limit) cards.length = limit;
-    capAmbiguousByLotSubjectFirst(ambiguousCards, ambiguousHits);
   }
   const discardedCount = hits.length - cards.length - ambiguousCards.length;
   return { cards, ambiguousCards, ambiguousHits, discardedCount, discarded };
-}
-
-/**
- * Keep capacity for both visible object candidates and rows whose match is
- * hidden in the lot. Neither class may consume the whole get budget.
- */
-function capAmbiguousByLotSubjectFirst(
-  ambiguousCards: SpecialistProcurementCardValue[],
-  ambiguousHits: SearchHitValue[],
-): void {
-  if (ambiguousCards.length <= MAX_AMBIGUOUS_PER_SEARCH) return;
-  const ranked = ambiguousCards.map((card, index) => ({
-    card,
-    hit: ambiguousHits[index],
-    score: card.relevanceScore ?? 0,
-    index,
-  }));
-  const visible = ranked.filter((row) => row.score > 0);
-  const lotOnly = ranked.filter((row) => row.score === 0);
-  const perClass = Math.floor(MAX_AMBIGUOUS_PER_SEARCH / 2);
-  const selected = [...visible.slice(0, perClass), ...lotOnly.slice(0, perClass)];
-  const selectedIndexes = new Set(selected.map((row) => row.index));
-  for (const row of ranked) {
-    if (selected.length >= MAX_AMBIGUOUS_PER_SEARCH) break;
-    if (selectedIndexes.has(row.index)) continue;
-    selectedIndexes.add(row.index);
-    selected.push(row);
-  }
-  selected.sort((left, right) => left.index - right.index);
-  ambiguousCards.length = 0;
-  ambiguousHits.length = 0;
-  for (const row of selected) {
-    if (row.hit === undefined) continue;
-    ambiguousCards.push(row.card);
-    ambiguousHits.push(row.hit);
-  }
 }
 
 export function hitMatchesProfileKeywords(
@@ -247,32 +206,28 @@ function rankHitByIntent(hit: SearchHitValue, profile: SearchSelectionProfile): 
   if (excluded !== undefined) {
     return { kind: "discard", reason: `исключающее слово профиля: ${excluded}`, score: 0 };
   }
-  const scored = scoreSearchIntent({ title: hit.title }, profile.intent);
-  if (scored.decision === "match" && scored.score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) {
-    return { kind: "match", card: cardFromIntentHit(hit, scored.score, scored.reason, "match") };
+  const queried =
+    hit.matchedSearchTerms !== undefined && hit.matchedSearchTerms.length > 0
+      ? hit.matchedSearchTerms
+      : profile.intent.objects.length > 0
+        ? profile.intent.objects
+        : profile.keywords;
+  if (!listingKeepsPlatformHit(haystack, queried)) {
+    return {
+      kind: "discard",
+      reason: "поисковое слово встречается только как часть другого слова в строке списка",
+      score: 0,
+    };
   }
-  if (scored.decision === "veto") return { kind: "discard", reason: scored.reason, score: scored.score };
-  if (scored.decision === "discard" && scored.objectRole !== "none") {
-    return { kind: "discard", reason: scored.reason, score: scored.score };
-  }
-  if (scored.decision === "discard" && scored.objectRole === "none") {
-    const queried =
-      hit.matchedSearchTerms !== undefined && hit.matchedSearchTerms.length > 0
-        ? hit.matchedSearchTerms
-        : profile.intent.objects.length > 0
-          ? profile.intent.objects
-          : profile.keywords;
-    if (!listingKeepsPlatformHit(haystack, queried)) {
-      return {
-        kind: "discard",
-        reason: "поисковое слово встречается только как часть другого слова в строке списка",
-        score: scored.score,
-      };
-    }
-  }
-  // No object in the listing title, and the visible row is not substring
-  // noise: the site may have matched lot subject. Cap at MAX_AMBIGUOUS.
-  return { kind: "review", card: cardFromIntentHit(hit, scored.score, scored.reason, "review") };
+  return {
+    kind: "review",
+    card: cardFromIntentHit(
+      hit,
+      0,
+      "В строке списка нет полного предмета закупки — карточка дочитывается.",
+      "review",
+    ),
+  };
 }
 
 export function cardFromRelevantHit(

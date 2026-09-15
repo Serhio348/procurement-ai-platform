@@ -6,6 +6,7 @@ import type {
   SpecialistIngestProgress,
   SpecialistProcurementCard,
   SpecialistSearchResponse,
+  SpecialistSearchRun,
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
@@ -182,6 +183,7 @@ export function ProcurementsApp({
   selectProfile,
   decide,
   ingestProgress,
+  searchRun,
 }: {
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
@@ -190,6 +192,7 @@ export function ProcurementsApp({
   selectProfile?: (id: string) => Promise<void>;
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
+  searchRun?: SpecialistSearchRun;
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -202,21 +205,39 @@ export function ProcurementsApp({
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [searchPct, setSearchPct] = useState(0);
-  const searching = busy && busyKind === undefined;
+  const scoring = searchRun?.status === "retrieving" || searchRun?.status === "scoring";
+  const searching = (busy && busyKind === undefined) || scoring;
   useEffect(() => {
+    if (searchRun !== undefined && searchRun.retrievedCount > 0) {
+      const pct =
+        searchRun.status === "done" || searchRun.status === "failed"
+          ? 100
+          : Math.min(99, Math.round((searchRun.scoredCount / searchRun.retrievedCount) * 100));
+      setSearchPct(pct);
+      return undefined;
+    }
     if (!searching) {
       setSearchPct(0);
       return undefined;
     }
-    // Simulated progress: the request is a single call, so the percent eases
-    // toward 90 and the overlay closes when the response arrives.
     const timer = setInterval(() => {
       setSearchPct((pct) =>
         pct >= 90 ? pct : pct + Math.max(1, Math.round((90 - pct) * 0.08)),
       );
     }, 300);
     return () => clearInterval(timer);
-  }, [searching]);
+  }, [searchRun, searching]);
+  useEffect(() => {
+    if (searchRun === undefined) return;
+    if (searchRun.status === "failed") {
+      setNotice("Не удалось дочитать карточки поиска.");
+      return;
+    }
+    if (searchRun.status !== "done") return;
+    setNotice(
+      `По профилю «${searchRun.profileName}»: найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}, сомнительных во входящих ${String(searchRun.reviewCount)}.`,
+    );
+  }, [searchRun]);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
   const ingestGeneration = useRef(0);
   const showingSearch = useRef(false);
@@ -229,9 +250,14 @@ export function ProcurementsApp({
       const incoming = catalog.filter(isSearchQueueCard);
       if (!showingSearch.current) return incoming;
       const byId = new Map(incoming.map((item) => [item.id, item] as const));
-      return current
+      const merged = current
         .map((item) => byId.get(item.id) ?? item)
         .filter(isSearchQueueCard);
+      const seen = new Set(merged.map((item) => item.id));
+      for (const item of incoming) {
+        if (!seen.has(item.id)) merged.push(item);
+      }
+      return merged;
     });
   }
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
@@ -261,11 +287,31 @@ export function ProcurementsApp({
       }
       const result = await search(offset);
       showingSearch.current = true;
-      setCatalogItems(result.items);
+      setCatalogItems((current) => {
+        const incoming = result.items.filter(isSearchQueueCard);
+        if (offset === 0) {
+          const byId = new Map(current.map((item) => [item.id, item] as const));
+          for (const item of incoming) byId.set(item.id, item);
+          const order = [...current.map((item) => item.id)];
+          for (const item of incoming) {
+            if (!order.includes(item.id)) order.push(item.id);
+          }
+          return order
+            .map((id) => byId.get(id))
+            .filter((item): item is SpecialistProcurementCard => item !== undefined)
+            .filter(isSearchQueueCard);
+        }
+        const seen = new Set(current.map((item) => item.id));
+        return [...current, ...incoming.filter((item) => !seen.has(item.id))];
+      });
       setHasMore(result.hasMore);
       setNextOffset(offset + 100);
+      const run = result.run;
+      const scored = run === undefined ? undefined : `${String(run.scoredCount)} из ${String(run.retrievedCount)}`;
       setNotice(
-        `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}, сомнительных во входящих ${String(result.ambiguousCount)}.`,
+        run !== undefined && (run.status === "scoring" || run.status === "retrieving")
+          ? `По профилю «${result.profileName}»: читаем карточки${scored === undefined ? "" : ` (${scored})`}. Список пополняется по мере оценки.`
+          : `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}, сомнительных во входящих ${String(result.ambiguousCount)}.`,
       );
     } catch (error) {
       setNotice(
@@ -406,7 +452,11 @@ export function ProcurementsApp({
               <div className="search-spinner">
                 <span className="search-spinner-pct">{searchPct}%</span>
               </div>
-              <p className="search-overlay-text">Ищем закупки на площадке…</p>
+              <p className="search-overlay-text">
+                {searchRun?.status === "scoring"
+                  ? `Читаем карточки: ${String(searchRun.scoredCount)} из ${String(searchRun.retrievedCount)}…`
+                  : "Ищем закупки на площадке…"}
+              </p>
             </div>
           ) : null}
           {items.length === 0 ? (

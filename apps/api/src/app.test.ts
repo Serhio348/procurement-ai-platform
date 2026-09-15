@@ -518,11 +518,22 @@ describe("specialist API", () => {
       ambiguousCount: number;
       discardedCount: number;
       items: Array<{ title: string }>;
+      run?: { status: string; retrievedCount: number; scoredCount: number };
     };
     expect(body.items).toEqual([]);
     expect(body.relevantCount).toBe(0);
     expect(body.discardedCount).toBe(1);
     expect(body.ambiguousCount).toBe(3);
+    expect(body.run).toMatchObject({
+      status: "retrieving",
+      retrievedCount: 4,
+      scoredCount: 0,
+    });
+    const progress = await app.inject({ method: "GET", url: "/api/procurements/search/progress" });
+    expect(JSON.parse(progress.body)).toMatchObject({
+      status: "retrieving",
+      retrievedCount: 4,
+    });
     expect(
       (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{ title: string }>)
         .map((item) => item.title)
@@ -531,9 +542,12 @@ describe("specialist API", () => {
 
     releaseReview();
     await vi.waitFor(async () => {
-      expect(review).toHaveBeenCalledTimes(1);
+      expect(review.mock.calls.flatMap((call) => call[0]).map((item) => item.sourceProcurementId).sort()).toEqual([
+        "auction/drop-1",
+        "auction/lot-1",
+        "auction/unclear-1",
+      ]);
     });
-    expect(review.mock.calls[0]?.[0]).toHaveLength(3);
 
     await vi.waitFor(async () => {
       const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
@@ -1020,11 +1034,11 @@ describe("specialist API", () => {
 
     const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 2 });
-    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(1));
-    expect(review.mock.calls[0]?.[0].map((item) => item.sourceProcurementId).sort()).toEqual([
-      "auction/drop-2",
-      "auction/unclear-2",
-    ]);
+    await vi.waitFor(() =>
+      expect(
+        review.mock.calls.flatMap((call) => call[0]).map((item) => item.sourceProcurementId).sort(),
+      ).toEqual(["auction/drop-2", "auction/unclear-2"]),
+    );
     await vi.waitFor(async () => {
       const latest = await app.inject({ method: "GET", url: "/api/inbox" });
       expect((JSON.parse(latest.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
@@ -1032,8 +1046,9 @@ describe("specialist API", () => {
       ]);
     });
 
+    const reviewedAfterFirst = review.mock.calls.length;
     const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    expect(review).toHaveBeenCalledTimes(1);
+    expect(review.mock.calls.length).toBe(reviewedAfterFirst);
     expect(JSON.parse(second.body)).toMatchObject({ discardedCount: 2, ambiguousCount: 1 });
 
     // Changing the phrases forgets the irrelevant verdict: the next search asks again.
@@ -1043,7 +1058,7 @@ describe("specialist API", () => {
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ", "ЩО"] },
     });
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(review.mock.calls.length).toBeGreaterThan(reviewedAfterFirst));
 
     await app.close();
   });

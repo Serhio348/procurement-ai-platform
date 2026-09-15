@@ -9,6 +9,7 @@ import type {
   SpecialistProfileListResponse,
   SpecialistProfileWrite,
   SpecialistSearchResponse,
+  SpecialistSearchRun,
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
@@ -56,8 +57,7 @@ export interface SpecialistAppProps {
     limit?: number;
   }) => Promise<readonly SpecialistProcurementCard[]>;
   loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
-  /** Namespaces last-search ids so two users on one browser do not share them. */
-  storageScope?: string;
+  searchProgress?: () => Promise<SpecialistSearchRun>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -100,53 +100,36 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   // pane is unmounted on every tab switch and the whole app on reload; without
   // this it would come back showing the whole catalog (old completed cases)
   // instead of what was just found. Kept in localStorage so a refresh keeps it.
-  const [searchIdsByProfile, setSearchIdsByProfile] = useState(() =>
-    readStoredSearchIds(props.storageScope),
-  );
-  const searchIds = searchIdsByProfile[activeProfileId];
+  const [searchRun, setSearchRun] = useState<SpecialistSearchRun | undefined>();
   const ingestingIds = useRef(new Set<string>());
   const [ingestById, setIngestById] = useState<Record<string, SpecialistIngestProgress>>(
     {},
   );
   const ingestProgressRef = useRef(props.ingestProgress);
   ingestProgressRef.current = props.ingestProgress;
+  const searchProgressRef = useRef(props.searchProgress);
+  searchProgressRef.current = props.searchProgress;
   const loadCardRef = useRef(props.loadCard);
   loadCardRef.current = props.loadCard;
+  const listMineRef = useRef(props.listMine);
+  listMineRef.current = props.listMine;
 
   const search =
     searchProfile === undefined
       ? undefined
       : async (offset?: number) => {
           const result = await searchProfile(offset);
-          // Keep decided / watched cases in memory so "Мои закупки" does not
-          // empty when the search pane shows only the latest hit list.
           setProcurements((current) => mergeProcurementCards(current, result.items));
-          const ids = result.items.map((item) => item.id);
-          setSearchIdsByProfile((current) => {
-            const previous = current[activeProfileId];
-            const next = {
-              ...current,
-              [activeProfileId]:
-                offset === undefined || offset === 0 || previous === undefined
-                  ? ids
-                  : [...previous, ...ids.filter((id) => !previous.includes(id))],
-            };
-            writeStoredSearchIds(next, props.storageScope);
-            return next;
-          });
+          setSearchRun(result.run);
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
           return result;
         };
 
-  const searchPaneItems =
-    searchIds === undefined
-      ? procurements.filter((item) => !isWatchedTriage(item) && !isRejectedTriage(item.triage))
-      : searchIds
-          .map((id) => procurements.find((item) => item.id === id))
-          .filter((item): item is SpecialistProcurementCard => item !== undefined)
-          .filter((item) => !isWatchedTriage(item) && !isRejectedTriage(item.triage));
+  const searchPaneItems = procurements.filter(
+    (item) => !isWatchedTriage(item) && !isRejectedTriage(item.triage),
+  );
 
   const decide =
     decideCase === undefined
@@ -163,16 +146,6 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             if (updated === undefined) return current;
             return mergeProcurementCards(current, [updated]);
           });
-          if (kind === "monitor" || kind === "participate" || kind === "reject") {
-            setSearchIdsByProfile((current) => {
-              const previous = current[activeProfileId];
-              if (previous === undefined || !previous.includes(id)) return current;
-              const nextIds = previous.filter((item) => item !== id);
-              const next = { ...current, [activeProfileId]: nextIds };
-              writeStoredSearchIds(next, props.storageScope);
-              return next;
-            });
-          }
           if (refreshInbox !== undefined) {
             setInbox(await refreshInbox());
           }
@@ -295,19 +268,43 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (searchRun === undefined) return undefined;
+    if (searchRun.status === "done" || searchRun.status === "failed") return undefined;
+    const timer = window.setInterval(() => {
+      const pull = searchProgressRef.current;
+      const list = listMineRef.current;
+      if (pull !== undefined) {
+        void pull()
+          .then((next) => {
+            setSearchRun(next);
+          })
+          .catch(() => undefined);
+      }
+      if (list !== undefined) {
+        void list({ tab: "listed", limit: 100 })
+          .then((items) => {
+            setProcurements((current) => mergeProcurementCards(current, items));
+          })
+          .catch(() => undefined);
+      }
+      if (refreshInbox !== undefined) {
+        void refreshInbox()
+          .then((items) =>
+            setInbox((current) => (sameInboxItems(current, items) ? current : items)),
+          )
+          .catch(() => undefined);
+      }
+    }, 800);
+    return () => window.clearInterval(timer);
+  }, [refreshInbox, searchRun]);
+
   function showInSearchPane(card: SpecialistProcurementCard): void {
     const next =
       activeProfileId.length > 0 && !card.profileIds.includes(activeProfileId)
         ? { ...card, profileIds: [...card.profileIds, activeProfileId] }
         : card;
     rememberCard(next);
-    setSearchIdsByProfile((current) => {
-      const previous = current[activeProfileId];
-      if (previous === undefined || previous.includes(next.id)) return current;
-      const updated = { ...current, [activeProfileId]: [next.id, ...previous] };
-      writeStoredSearchIds(updated, props.storageScope);
-      return updated;
-    });
   }
 
   function remember(next: SpecialistWorkingProfile, activate = false): SpecialistWorkingProfile {
@@ -420,6 +417,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                     },
                   })}
               {...(decide === undefined ? {} : { decide })}
+              {...(searchRun === undefined ? {} : { searchRun })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
             />
           }
@@ -440,6 +438,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                     },
                   })}
               {...(decide === undefined ? {} : { decide })}
+              {...(searchRun === undefined ? {} : { searchRun })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
             />
           }
@@ -584,43 +583,6 @@ function ProfileEditorRoute({
       setWatch={setWatch}
     />
   );
-}
-
-export const SEARCH_IDS_STORAGE_KEY = "procurement.searchIdsByProfile";
-
-export function searchIdsStorageKey(scope?: string): string {
-  return scope === undefined || scope.length === 0
-    ? SEARCH_IDS_STORAGE_KEY
-    : `${SEARCH_IDS_STORAGE_KEY}.${scope}`;
-}
-
-type SearchIdsByProfile = Readonly<Record<string, readonly string[]>>;
-
-/** Storage is best-effort: a missing or corrupt entry just means "no search yet". */
-export function readStoredSearchIds(scope?: string): SearchIdsByProfile {
-  try {
-    const raw = globalThis.localStorage?.getItem(searchIdsStorageKey(scope));
-    if (raw === null || raw === undefined) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    const result: Record<string, readonly string[]> = {};
-    for (const [profileId, ids] of Object.entries(parsed)) {
-      if (Array.isArray(ids) && ids.every((id) => typeof id === "string")) {
-        result[profileId] = ids;
-      }
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-export function writeStoredSearchIds(value: SearchIdsByProfile, scope?: string): void {
-  try {
-    globalThis.localStorage?.setItem(searchIdsStorageKey(scope), JSON.stringify(value));
-  } catch {
-    // Quota or privacy mode: the in-memory state still works for this session.
-  }
 }
 
 function sameInboxItems(

@@ -7,6 +7,7 @@ import {
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistSearchResponse,
+  SpecialistSearchRun,
   SpecialistWorkingProfile,
   type SpecialistInboxAction,
   type SpecialistInboxEntry,
@@ -14,6 +15,7 @@ import {
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistProfileWrite,
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
+  type SpecialistSearchRun as SpecialistSearchRunValue,
   type SpecialistTriageKind,
   type SpecialistProfileListResponse as SpecialistProfileListResponseValue,
   type SpecialistIngestProgress as SpecialistIngestProgressValue,
@@ -102,6 +104,16 @@ export async function searchProcurements(
     throw new Error(await searchFailureMessage(response));
   }
   return SpecialistSearchResponse.parse(await response.json());
+}
+
+export async function fetchSearchProgress(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistSearchRunValue> {
+  const response = await fetcher("/api/procurements/search/progress", withCredentials());
+  if (!response.ok) {
+    throw new Error("Не удалось получить прогресс поиска");
+  }
+  return SpecialistSearchRun.parse(await response.json());
 }
 
 export async function fetchProfile(

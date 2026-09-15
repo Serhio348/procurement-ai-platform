@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { GoszakupkiHttpClient } from "./goszakupki-by-http.js";
 import { parseGoszakupkiSearchPage } from "./goszakupki-by-parser.js";
 
@@ -9,6 +11,8 @@ const DEFAULT_TERMS = [
   "наладка электрооборудования",
   "электромонтажные работы",
 ];
+
+await loadRepoEnv();
 
 const terms = unique(process.argv.slice(2).map((term) => term.trim()).filter(Boolean));
 const searchTerms = terms.length > 0 ? terms : DEFAULT_TERMS;
@@ -106,4 +110,29 @@ function unique(values: readonly string[]): string[] {
     result.push(value);
   }
   return result;
+}
+
+async function loadRepoEnv(): Promise<void> {
+  const envPath = fileURLToPath(new URL("../../../.env", import.meta.url));
+  let text: string;
+  try {
+    text = await readFile(envPath, "utf8");
+  } catch {
+    return;
+  }
+  for (const line of text.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    let value = trimmed.slice(separator + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
 }

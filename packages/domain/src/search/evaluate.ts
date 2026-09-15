@@ -106,10 +106,7 @@ export function evaluateSearch(
   );
   const rows = cases.map((item) => {
     const oldDecision = decisionFromSelection(item.id, oldSelected);
-    const newCard =
-      newSelected.cards.find((card) => card.sourceProcurementId === item.id) ??
-      newSelected.ambiguousCards.find((card) => card.sourceProcurementId === item.id);
-    const newDecision = decisionFromSelection(item.id, newSelected);
+    const listingDecision = decisionFromSelection(item.id, newSelected);
     const scored = scoreSearchIntent(
       {
         title: item.title,
@@ -117,14 +114,24 @@ export function evaluateSearch(
       },
       intent,
     );
+    // Listing only filters. The verdict is the same scorer that runs after
+    // procurement.get; seed titles stand in for title + lot subject.
+    const newDecision =
+      listingDecision === "discard"
+        ? "discard"
+        : scored.decision === "match"
+          ? "match"
+          : scored.decision === "veto" || scored.decision === "discard"
+            ? "discard"
+            : "review";
     const row: SearchEvalRow = {
       id: item.id,
       title: item.title,
       gold: item.gold,
       oldDecision,
       newDecision,
-      relevanceScore: newCard?.relevanceScore ?? scored.score,
-      relevanceReason: newCard?.relevanceReason ?? scored.reason,
+      relevanceScore: scored.score,
+      relevanceReason: scored.reason,
       ...(item.extraText === undefined ? {} : { extraText: item.extraText }),
     };
     return row;

@@ -62,12 +62,13 @@ describe("selectRelevantSearchCards", () => {
       { keywords: ["КТПБ", "КТП", "сети электроснабжения"], excludeKeywords: [], intent: plan },
       20,
     );
-    expect(selected.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-2"]);
-    expect(selected.cards[0]?.actions[0]?.detail).toContain("Найдена по: КТП, КТПБ");
-    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["auction-1"]);
-    expect(selected.ambiguousCards[0]?.foundAs).toBe("review");
-    expect(selected.discarded.map((item) => item.hit.sourceProcurementId)).toEqual(["auction-3"]);
-    expect(selected.discarded[0]?.reason).toMatch(/монтаж/i);
+    expect(selected.cards.map((card) => card.sourceProcurementId)).toEqual([]);
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId).sort()).toEqual([
+      "auction-1",
+      "auction-2",
+      "auction-3",
+    ]);
+    expect(selected.discarded).toEqual([]);
   });
 
   it("gives each goszakupki.by procedure its own card id", () => {
@@ -289,7 +290,7 @@ describe("selectRelevantSearchCards with intent", () => {
   };
   const profile = { keywords: ["НКУ"], excludeKeywords: [], intent };
 
-  it("keeps supply and fabrication and drops installation and repair", () => {
+  it("does not settle supply vs installation from the listing title", () => {
     const selected = selectRelevantSearchCards(
       [
         hit("a", "Поставка НКУ для насосной станции"),
@@ -302,13 +303,18 @@ describe("selectRelevantSearchCards with intent", () => {
       profile,
       20,
     );
-    expect(selected.cards.map((card) => card.sourceProcurementId).sort()).toEqual(["a", "b", "f"]);
-    expect(selected.cards.every((card) => (card.relevanceScore ?? 0) >= 55)).toBe(true);
-    expect(selected.cards[0]?.relevanceReason).toBeDefined();
-    expect(selected.ambiguousCards.some((card) => card.sourceProcurementId === "c")).toBe(false);
+    expect(selected.cards).toEqual([]);
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId).sort()).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+    ]);
   });
 
-  it("discards an excluded_context hit and substring noise without an object", () => {
+  it("drops substring noise on the listing and leaves purpose mismatches for the card", () => {
     const selected = selectRelevantSearchCards(
       [
         hit("light", "Закупка шкаф управления наружным освещением"),
@@ -321,8 +327,8 @@ describe("selectRelevantSearchCards with intent", () => {
       20,
     );
     expect(selected.cards).toEqual([]);
-    expect(selected.ambiguousCards).toEqual([]);
-    expect(selected.discardedCount).toBe(2);
+    expect(selected.ambiguousCards.map((card) => card.sourceProcurementId)).toEqual(["light"]);
+    expect(selected.discarded.map((item) => item.hit.sourceProcurementId)).toEqual(["contest"]);
   });
 
   it("reviews a listing whose title has no object when the site still returned it", () => {
@@ -378,7 +384,7 @@ describe("selectRelevantSearchCards with intent", () => {
       works,
       20,
     );
-    expect(selected.ambiguousCards).toHaveLength(50);
+    expect(selected.ambiguousCards).toHaveLength(51);
     expect(selected.ambiguousCards.some((card) => card.sourceProcurementId === "limited/3669746")).toBe(
       true,
     );

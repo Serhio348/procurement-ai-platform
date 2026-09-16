@@ -569,6 +569,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   function queueFoundInbox(card: SpecialistProcurementCardValue, now: string): void {
+    // A specialist decision already owns this source. Re-queuing it as
+    // «На проверку» would dismiss into Закупки where watched cases are hidden.
+    if (workspace().decidedSourceIds().has(card.sourceProcurementId)) {
+      return;
+    }
     const recorded = catalog().record(inboxItemFromFoundCard(card, now));
     if (recorded.duplicate) catalog().undismiss(recorded.item.change.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
@@ -1023,6 +1028,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       if (already?.foundAs === "review") {
         if (options.skipKnownIrrelevant) continue;
+        if (workspace().decidedSourceIds().has(card.sourceProcurementId)) continue;
         if (options.restoreReviewInbox) {
           const remembered = await rememberFound(card, profile.id, now);
           restoredReview += 1;
@@ -1677,8 +1683,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
 
     let card = await resolveCase(item.change.procurementId);
-    // Opening from the inbox takes the case onto the procurements list,
-    // including a review hit that had been waiting only in the inbox.
+    // Opening from the inbox takes an undecided review onto Закупки.
+    // Watched/rejected cases already left that list — keep them out of the
+    // search queue so «Открыть» does not look like a vanishing card.
     if (action !== "dismiss" && card !== undefined) {
       const listed =
         action === "open" || card.foundAs === "review"
@@ -1686,7 +1693,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           : card;
       card = withTriage(attachProfileToCard(listed, workspace().profile().id), workspace());
       catalog().upsertCase(card);
-      workspace().appendSearchId(workspace().profile().id, card.id);
+      if (!isWatchedTriage(card) && !isRejectedTriage(card.triage)) {
+        workspace().appendSearchId(workspace().profile().id, card.id);
+      }
     }
     if (action === "refresh" && card !== undefined) {
       card = withTriage(applyInboxChangeToCard(card, item.change), workspace());

@@ -14,6 +14,7 @@ import {
   LISTING_PENDING_REASON,
   SpecialistCatalog,
   SpecialistWorkspace,
+  inboxItemFromFoundCard,
   inferSearchIntentPlan,
   type ReviewOutcome,
 } from "@procurement/domain";
@@ -992,6 +993,87 @@ describe("specialist API", () => {
       title: string;
     }>).map((item) => item.title);
     expect(restored).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    await app.close();
+  });
+
+  it("does not put a monitored review back in the inbox, and opens it into Мои закупки", async () => {
+    const profileId = "00000000-0000-4000-8000-000000000c01";
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000c02",
+      title: "Поставка НКУ 0,4 кВ",
+      status: "announced",
+      statusLabel: "объявлена",
+      url: "https://goszakupki.by/auction/view/watched-review",
+      sourceProcurementId: "auction/watched-review",
+      foundAs: "review",
+      profileIds: [profileId],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(card);
+    const workspace = SpecialistWorkspace.parse({
+      profiles: [{ id: profileId, name: "НКУ для управления насосами", keywords: ["НКУ"] }],
+      activeProfileId: profileId,
+      decisions: [
+        {
+          sourceProcurementId: "auction/watched-review",
+          kind: "monitor",
+          decidedAt: "2026-09-05T10:00:00.000Z",
+        },
+      ],
+    });
+    const app = await buildSpecialistApi({
+      catalog,
+      workspace,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/watched-review",
+            url: "https://goszakupki.by/auction/view/watched-review",
+            title: "Поставка НКУ 0,4 кВ",
+          }),
+        ],
+      },
+    });
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const inboxBefore = await app.inject({ method: "GET", url: "/api/inbox" });
+    // Already decided: search must not bounce the same source back as «На проверку».
+    expect(JSON.parse(inboxBefore.body).items).toEqual([]);
+
+    // Seed the stale inbox row the way a previous bug left it.
+    catalog.record(inboxItemFromFoundCard(card, "2026-09-06T12:00:00.000Z"));
+    const staleInbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rowId = (JSON.parse(staleInbox.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    expect(rowId.length).toBeGreaterThan(0);
+
+    const opened = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${rowId}/resolve`,
+      payload: { action: "open" },
+    });
+    expect(opened.statusCode).toBe(200);
+    const openedCard = JSON.parse(opened.body).card as {
+      foundAs?: string;
+      triage?: string;
+      id: string;
+    };
+    expect(openedCard.foundAs).toBe("match");
+    expect(openedCard.triage).toBe("monitor");
+
+    const searchTab = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    expect(JSON.parse(searchTab.body).items).toEqual([]);
+    const mine = await app.inject({ method: "GET", url: "/api/procurements?tab=monitor" });
+    expect(
+      (JSON.parse(mine.body).items as Array<{ id: string; triage?: string }>).map((item) => ({
+        id: item.id,
+        triage: item.triage,
+      })),
+    ).toEqual([expect.objectContaining({ id: openedCard.id, triage: "monitor" })]);
+    expect(JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items).toEqual(
+      [],
+    );
 
     await app.close();
   });

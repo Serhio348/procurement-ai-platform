@@ -71,6 +71,7 @@ import {
 import type { AuthDirectory } from "./auth/directory.js";
 import type { AuthMailPort } from "./auth/mail.js";
 import { registerAuth } from "./auth/register.js";
+import { profileToSiteSearchQuery } from "./profile-search-query.js";
 import {
   contentDisposition,
   contentTypeForName,
@@ -466,32 +467,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     publishedFrom?: string,
     searchKeywords?: readonly string[],
   ): Omit<SearchQuery, "sourceId"> {
-    const { filters } = profile;
-    const fromDate = [filters.publishedFrom, publishedFrom]
-      .filter((value): value is string => value !== undefined)
-      .sort()
-      .at(-1);
-    return {
-      keywords: [...(searchKeywords ?? profile.keywords)],
-      excludeKeywords: [...profile.excludeKeywords],
-      buyerUnp: filters.buyerUnp ?? "",
-      buyerText: filters.buyerText ?? "",
-      procurementNumber: filters.procurementNumber ?? "",
-      priceFrom: filters.priceFrom,
-      priceTo: filters.priceTo,
-      publishedFrom: fromDate === undefined ? undefined : toIsoDateTime(fromDate),
-      publishedTo: filters.publishedTo ? toIsoDateTime(filters.publishedTo) : undefined,
-      requestEndFrom: filters.requestEndFrom ? toIsoDateTime(filters.requestEndFrom) : undefined,
-      requestEndTo: filters.requestEndTo ? toIsoDateTime(filters.requestEndTo) : undefined,
-      auctionFrom: filters.auctionFrom ? toIsoDateTime(filters.auctionFrom) : undefined,
-      auctionTo: filters.auctionTo ? toIsoDateTime(filters.auctionTo) : undefined,
-      typeIds: [...(filters.typeIds ?? [])],
-      statusIds: [...(filters.statusIds ?? [])],
-      regionIds: [...(filters.regionIds ?? [])],
-      kinds: [],
+    return profileToSiteSearchQuery(profile, {
       limit,
       offset,
-    };
+      ...(publishedFrom === undefined ? {} : { publishedFrom }),
+      ...(searchKeywords === undefined ? {} : { searchKeywords }),
+      toIsoDateTime,
+    });
   }
 
   async function resolveSearchPlan(profile: SpecialistWorkingProfile): Promise<SearchIntentPlan> {

@@ -111,7 +111,12 @@ export function ProfileApp({
   }
 
   function setPrice(key: keyof typeof filters, raw: string): void {
-    const value = raw === "" ? undefined : Number(raw);
+    if (raw.trim().length === 0) {
+      setFilters((current) => ({ ...current, [key]: undefined } as typeof current));
+      return;
+    }
+    const value = Number(raw.replace(",", "."));
+    if (!Number.isFinite(value) || value < 0) return;
     setFilters((current) => ({ ...current, [key]: value } as typeof current));
   }
 
@@ -286,30 +291,6 @@ export function ProfileApp({
                 )}
               </section>
 
-              <section className="profile-section" aria-labelledby="profile-statuses">
-                <h2 id="profile-statuses">Статусы закупок</h2>
-                <p className="profile-hint">Отбираются только отмеченные статусы. Ничего не отмечено — показываем все.</p>
-                <fieldset className="profile-statuses">
-                  <legend className="sr-only">Статусы</legend>
-                  {STATUS_OPTIONS.map((option) => (
-                    <label key={option.value} className="profile-status-option">
-                      <input
-                        type="checkbox"
-                        checked={statuses.includes(option.value)}
-                        onChange={(event) => {
-                          setStatuses(
-                            event.target.checked
-                              ? [...statuses, option.value]
-                              : statuses.filter((item) => item !== option.value),
-                          );
-                        }}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </fieldset>
-              </section>
-
               <section className="profile-section" aria-labelledby="profile-single-source">
                 <h2 id="profile-single-source">Закупки из одного источника</h2>
                 <p className="profile-hint">
@@ -371,13 +352,15 @@ export function ProfileApp({
           ) : (
             <section className="profile-section profile-filters-section" aria-labelledby="profile-filters">
               <h2 id="profile-filters">Уточнить поиск на площадке</h2>
-              <p className="profile-hint">Эти поля отправляются прямо на goszakupki.by — чем точнее, тем меньше лишних страниц.</p>
+              <p className="profile-hint">
+                Эти поля отправляются прямо на goszakupki.by вместе со словами поиска — чем точнее, тем меньше лишних страниц.
+              </p>
               <div className="profile-filters-form">
                 <div className="profile-filter-group">
                   <label htmlFor="profile-unp">УНП заказчика</label>
                   <input
                     id="profile-unp"
-                    value={filters.buyerUnp}
+                    value={filters.buyerUnp ?? ""}
                     onChange={(event) => setFilter("buyerUnp", event.target.value)}
                   />
                 </div>
@@ -386,7 +369,7 @@ export function ProfileApp({
                   <label htmlFor="profile-customer">Заказчик / организатор</label>
                   <input
                     id="profile-customer"
-                    value={filters.buyerText}
+                    value={filters.buyerText ?? ""}
                     onChange={(event) => setFilter("buyerText", event.target.value)}
                   />
                 </div>
@@ -395,7 +378,7 @@ export function ProfileApp({
                   <label htmlFor="profile-number">Номер закупки</label>
                   <input
                     id="profile-number"
-                    value={filters.procurementNumber}
+                    value={filters.procurementNumber ?? ""}
                     onChange={(event) => setFilter("procurementNumber", event.target.value)}
                   />
                 </div>
@@ -507,6 +490,30 @@ export function ProfileApp({
                     }}
                     placeholder="Выберите виды процедур"
                   />
+                </div>
+
+                <div className="profile-filter-group">
+                  <span className="profile-filter-label" id="profile-statuses">Статус</span>
+                  <p className="profile-hint">Отмеченные статусы уходят на площадку. Ничего не отмечено — площадка отдаёт все.</p>
+                  <fieldset className="profile-statuses" aria-labelledby="profile-statuses">
+                    <legend className="sr-only">Статусы</legend>
+                    {STATUS_OPTIONS.map((option) => (
+                      <label key={option.value} className="profile-status-option">
+                        <input
+                          type="checkbox"
+                          checked={statuses.includes(option.value)}
+                          onChange={(event) => {
+                            setStatuses(
+                              event.target.checked
+                                ? [...statuses, option.value]
+                                : statuses.filter((item) => item !== option.value),
+                            );
+                          }}
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </fieldset>
                 </div>
 
                 <div className="profile-filter-group">

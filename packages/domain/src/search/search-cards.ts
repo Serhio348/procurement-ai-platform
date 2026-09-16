@@ -180,7 +180,22 @@ function statusFromListing(hit: SearchHitValue): ProcedureStatusValue | undefine
     .toLocaleLowerCase("ru-BY")
     .replace(/ё/gu, "е");
   if (badge !== undefined && isAcceptingBidsBadge(badge)) return "accepting_bids";
+  // The kind column («Электронный аукцион») is not a status. Treating it as
+  // auction_in_progress hid every live row whose profile watches Подача.
+  if (badge !== undefined && looksLikeProcedureKindBadge(badge)) return undefined;
   return hit.status;
+}
+
+function looksLikeProcedureKindBadge(normalized: string): boolean {
+  return (
+    normalized.includes("электронный аукцион") ||
+    normalized.includes("запрос ценовых") ||
+    normalized.includes("открытый конкурс") ||
+    normalized.includes("из одного источника") ||
+    normalized.includes("заявка о ценах") ||
+    normalized.includes("запрос предложений о сведениях") ||
+    (normalized.includes("конкурс") && normalized.includes("ограничен"))
+  );
 }
 
 function isAcceptingBidsBadge(normalized: string): boolean {

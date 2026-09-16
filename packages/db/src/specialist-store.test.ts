@@ -28,6 +28,10 @@ describe("jsonbSafe", () => {
   it("strips NUL bytes that PostgreSQL rejects inside jsonb", () => {
     expect(jsonbSafe({ title: "КТП\u0000Б" })).toEqual({ title: "КТПБ" });
   });
+
+  it("keeps undefined so a missing jsonb field is not JSON.parse'd", () => {
+    expect(jsonbSafe(undefined)).toBeUndefined();
+  });
 });
 
 describe("uniqueBySource", () => {
@@ -107,5 +111,16 @@ describe("postgresErrorMessage", () => {
     });
     const wrapped = Object.assign(new Error("Failed query"), { cause });
     expect(postgresErrorMessage(wrapped)).toContain("specialist_cases_source_uq");
+  });
+
+  it("does not treat a Zod issue code as a Postgres SQLSTATE", () => {
+    const cause = Object.assign(new Error("invalid input syntax for type json"), {
+      code: "22P02",
+    });
+    const wrapped = Object.assign(new Error("Failed query"), {
+      code: "invalid_type",
+      cause,
+    });
+    expect(postgresErrorMessage(wrapped)).toContain("22P02");
   });
 });

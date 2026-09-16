@@ -826,6 +826,102 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("sends every filled advanced-search window on the source query", async () => {
+    const search = vi.fn(async () => [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/3664806",
+        url: "https://goszakupki.by/auction/view/3664806",
+        title: "Выбор поставщика блочной комплектной подстанции (БКТПБ №3)",
+        sourceStatus: "Подача предложений",
+        status: "accepting_bids",
+      }),
+    ]);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "КТПБ",
+        keywords: ["КТПБ"],
+        statuses: ["accepting_bids"],
+        excludeSingleSource: true,
+        filters: {
+          buyerUnp: "123456789",
+          buyerText: "Гродноэнерго",
+          procurementNumber: "auc0003664806",
+          priceFrom: 1000,
+          priceTo: 500000,
+          publishedFrom: "2026-09-01",
+          publishedTo: "2026-09-30",
+          requestEndFrom: "2026-09-16",
+          requestEndTo: "2026-10-01",
+          auctionFrom: "2026-09-20",
+          auctionTo: "2026-09-25",
+          typeIds: ["Auction", "singleSource"],
+          regionIds: ["4"],
+        },
+      },
+    });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+
+    const query = search.mock.calls[0]?.[0] as {
+      statuses?: string[];
+      typeIds?: string[];
+      regionIds?: string[];
+      buyerUnp?: string;
+      buyerText?: string;
+      procurementNumber?: string;
+      priceFrom?: number;
+      priceTo?: number;
+      publishedFrom?: string;
+      publishedTo?: string;
+      requestEndFrom?: string;
+      requestEndTo?: string;
+      auctionFrom?: string;
+      auctionTo?: string;
+    };
+    expect(query.statuses).toEqual(["accepting_bids"]);
+    expect(query.typeIds).toEqual(["Auction"]);
+    expect(query.regionIds).toEqual(["4"]);
+    expect(query.buyerUnp).toBe("123456789");
+    expect(query.buyerText).toBe("Гродноэнерго");
+    expect(query.procurementNumber).toBe("auc0003664806");
+    expect(query.priceFrom).toBe(1000);
+    expect(query.priceTo).toBe(500000);
+    expect(query.publishedFrom).toBe("2026-09-01T00:00:00+03:00");
+    expect(query.publishedTo).toBe("2026-09-30T00:00:00+03:00");
+    expect(query.requestEndFrom).toBe("2026-09-16T00:00:00+03:00");
+    expect(query.requestEndTo).toBe("2026-10-01T00:00:00+03:00");
+    expect(query.auctionFrom).toBe("2026-09-20T00:00:00+03:00");
+    expect(query.auctionTo).toBe("2026-09-25T00:00:00+03:00");
+
+    await app.close();
+  });
+
+  it("saves a profile whose advanced-search windows were left empty", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "КТПБ",
+        keywords: ["КТПБ"],
+        filters: { buyerUnp: "", publishedFrom: "", priceFrom: null },
+      },
+    });
+
+    expect(saved.statusCode).toBe(200);
+    const body = JSON.parse(saved.body) as { filters: { buyerUnp?: string; publishedFrom?: string } };
+    expect(body.filters.buyerUnp).toBeUndefined();
+    expect(body.filters.publishedFrom).toBeUndefined();
+
+    await app.close();
+  });
+
   it("queries extra objects the model added after the cheap listing", async () => {
     const search = vi.fn(async (query: { keywords: string[] }) => {
       if (query.keywords.includes("шкаф управления")) {

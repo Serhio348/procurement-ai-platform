@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -196,6 +196,7 @@ describe("ProfileApp", () => {
 
     renderProfile(profile({ statuses: ["accepting_bids"] }), save);
 
+    await user.click(screen.getByRole("tab", { name: "Расширенный поиск" }));
     await user.click(screen.getByLabelText("Завершена"));
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
 
@@ -213,6 +214,7 @@ describe("ProfileApp", () => {
     renderProfile(profile({ statuses: [] }), save);
 
     await user.click(screen.getByLabelText("Не показывать закупки из одного источника"));
+    await user.click(screen.getByRole("tab", { name: "Расширенный поиск" }));
     await user.click(screen.getByLabelText("Не состоялась"));
     await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
 
@@ -220,6 +222,65 @@ describe("ProfileApp", () => {
       expect.objectContaining({
         excludeSingleSource: true,
         statuses: ["failed"],
+      }),
+    );
+  });
+
+  it("saves every advanced-search window onto the profile filters", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => profile());
+
+    renderProfile(profile({ filters: {}, statuses: ["accepting_bids"] }), save);
+
+    await user.click(screen.getByRole("tab", { name: "Расширенный поиск" }));
+    await user.type(screen.getByLabelText("УНП заказчика"), "123456789");
+    await user.type(screen.getByLabelText("Заказчик / организатор"), "Гродноэнерго");
+    await user.type(screen.getByLabelText("Номер закупки"), "auc0003664806");
+    fireEvent.change(document.getElementById("profile-price-from")!, { target: { value: "1000" } });
+    fireEvent.change(document.getElementById("profile-price-to")!, { target: { value: "500000" } });
+    fireEvent.change(document.getElementById("profile-published-from")!, {
+      target: { value: "2026-09-01" },
+    });
+    fireEvent.change(document.getElementById("profile-published-to")!, {
+      target: { value: "2026-09-30" },
+    });
+    fireEvent.change(document.getElementById("profile-request-from")!, {
+      target: { value: "2026-09-16" },
+    });
+    fireEvent.change(document.getElementById("profile-request-to")!, {
+      target: { value: "2026-10-01" },
+    });
+    fireEvent.change(document.getElementById("profile-auction-from")!, {
+      target: { value: "2026-09-20" },
+    });
+    fireEvent.change(document.getElementById("profile-auction-to")!, {
+      target: { value: "2026-09-25" },
+    });
+    await user.click(document.getElementById("profile-types")!);
+    await user.click(screen.getByLabelText("Электронный аукцион"));
+    await user.click(document.getElementById("profile-types")!);
+    await user.click(document.getElementById("profile-regions")!);
+    await user.click(screen.getByLabelText("Гродненская область"));
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statuses: ["accepting_bids"],
+        filters: expect.objectContaining({
+          buyerUnp: "123456789",
+          buyerText: "Гродноэнерго",
+          procurementNumber: "auc0003664806",
+          priceFrom: 1000,
+          priceTo: 500000,
+          publishedFrom: "2026-09-01",
+          publishedTo: "2026-09-30",
+          requestEndFrom: "2026-09-16",
+          requestEndTo: "2026-10-01",
+          auctionFrom: "2026-09-20",
+          auctionTo: "2026-09-25",
+          typeIds: ["Auction"],
+          regionIds: ["4"],
+        }),
       }),
     );
   });

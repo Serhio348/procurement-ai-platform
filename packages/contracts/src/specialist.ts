@@ -12,25 +12,60 @@ import {
   SearchHit,
 } from "./procurement.js";
 
+function blankToUndefined(value: unknown): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "string" && value.trim().length === 0) return undefined;
+  return value;
+}
+
+function asOptionalText(value: unknown): unknown {
+  const blank = blankToUndefined(value);
+  return typeof blank === "string" ? blank.trim() : blank;
+}
+
+function asOptionalIsoDate(value: unknown): unknown {
+  const blank = blankToUndefined(value);
+  if (typeof blank === "string" && /^\d{4}-\d{2}-\d{2}/.test(blank)) return blank.slice(0, 10);
+  return blank;
+}
+
+function asOptionalPrice(value: unknown): unknown {
+  const blank = blankToUndefined(value);
+  if (typeof blank === "number") return Number.isFinite(blank) ? blank : undefined;
+  if (typeof blank === "string") {
+    const parsed = Number(blank.trim().replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return blank;
+}
+
+const OptionalFilterText = (max: number) =>
+  z.preprocess(asOptionalText, z.string().max(max).optional());
+const OptionalFilterDate = z.preprocess(asOptionalIsoDate, IsoDate.optional());
+const OptionalFilterPrice = z.preprocess(
+  asOptionalPrice,
+  z.number().nonnegative().finite().optional(),
+);
+
 export const SpecialistSearchFilters = z.object({
   /** Site-side: buyer / organizer UNP. */
-  buyerUnp: z.string().max(32).optional(),
+  buyerUnp: OptionalFilterText(32),
   /** Site-side: buyer / organizer name substring. */
-  buyerText: z.string().max(300).optional(),
+  buyerText: OptionalFilterText(300),
   /** Site-side: procedure number or lot number. */
-  procurementNumber: z.string().max(64).optional(),
+  procurementNumber: OptionalFilterText(64),
   /** Site-side: approximate price range in BYN, inclusive. */
-  priceFrom: z.number().nonnegative().finite().optional(),
-  priceTo: z.number().nonnegative().finite().optional(),
+  priceFrom: OptionalFilterPrice,
+  priceTo: OptionalFilterPrice,
   /** Site-side: invitation posting dates. */
-  publishedFrom: IsoDate.optional(),
-  publishedTo: IsoDate.optional(),
+  publishedFrom: OptionalFilterDate,
+  publishedTo: OptionalFilterDate,
   /** Site-side: bids acceptance deadline. */
-  requestEndFrom: IsoDate.optional(),
-  requestEndTo: IsoDate.optional(),
+  requestEndFrom: OptionalFilterDate,
+  requestEndTo: OptionalFilterDate,
   /** Site-side: auction date. */
-  auctionFrom: IsoDate.optional(),
-  auctionTo: IsoDate.optional(),
+  auctionFrom: OptionalFilterDate,
+  auctionTo: OptionalFilterDate,
   /** Site-side goszakupki.by procedure type codes. */
   typeIds: z.array(z.string().min(1)).optional(),
   /** Site-side goszakupki.by region codes. */

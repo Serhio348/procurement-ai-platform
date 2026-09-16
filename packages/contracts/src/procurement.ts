@@ -208,8 +208,14 @@ export const SearchQuery = z.object({
   regionIds: z.array(z.string().min(1)).default([]),
   /** Source-specific procedure type codes. */
   typeIds: z.array(z.string().min(1)).default([]),
-  /** Source-specific status codes. */
+  /** Source-specific status codes already known to the adapter. */
   statusIds: z.array(z.string().min(1)).default([]),
+  /**
+   * Profile status checkboxes. The source adapter maps them to its own
+   * `TendersSearch[status][]` (or equivalent) codes. Empty means no
+   * site-side status filter.
+   */
+  statuses: z.array(ProcedureStatus).default([]),
   kinds: z.array(ProcedureKind).default([]),
   limit: z.number().int().positive().max(500).default(50),
   offset: z.number().int().nonnegative().default(0),

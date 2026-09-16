@@ -20,6 +20,12 @@ import {
   parseGoszakupkiCard,
   parseGoszakupkiSearchPage,
 } from "./goszakupki-by-parser.js";
+import {
+  FALLBACK_STATUS_OPTIONS,
+  parseGoszakupkiSearchFilters,
+  searchQueryStatusIds,
+  type GoszakupkiStatusOption,
+} from "./goszakupki-by-filters.js";
 import type { GoszakupkiPageClient } from "./goszakupki-by-http.js";
 import { downloadPublicDocumentation, type PublicDocumentationFetch } from "./public-download.js";
 import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.js";
@@ -48,6 +54,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   readonly #publicFetch: PublicDocumentationFetch;
   readonly #logger: Logger;
   readonly #cache = new Map<string, CacheEntry>();
+  #statusOptions: readonly GoszakupkiStatusOption[] | undefined;
 
   constructor(options: GoszakupkiBySourceOptions) {
     this.#client = options.client;
@@ -65,11 +72,13 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
    * keeping every phrase that found them. Nothing here decides relevance.
    */
   async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
-    const terms = query.keywords.length === 0 ? [undefined] : query.keywords;
+    const statusIds = await this.#resolvedStatusIds(query);
+    const filteredQuery = { ...query, statusIds };
+    const terms = filteredQuery.keywords.length === 0 ? [undefined] : filteredQuery.keywords;
     const buckets: SearchBucket[] = [];
     const rowsPerTerm = Math.max(
       MIN_ROWS_PER_SEARCH_TERM,
-      Math.ceil((query.offset + query.limit) / terms.length),
+      Math.ceil((filteredQuery.offset + filteredQuery.limit) / terms.length),
     );
     const pagesPerTerm = Math.min(30, Math.ceil(rowsPerTerm / 20) + 1);
 
@@ -78,7 +87,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
       let seenRows = 0;
       let pages = 0;
       for (let page = 1; page <= pagesPerTerm; page += 1) {
-        const path = searchPath(query, term, page);
+        const path = searchPath(filteredQuery, term, page);
         const response = await this.#client.get(path);
         pages += 1;
         if (response.status < 200 || response.status >= 300) {
@@ -90,7 +99,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
         const parsed = parseGoszakupkiSearchPage(response.body, response.url);
         seenRows += parsed.rows.length;
         for (const row of parsed.rows) {
-          if (!matchesSearchRow(row, query, term)) continue;
+          if (!matchesSearchRow(row, filteredQuery, term)) continue;
           termRows.set(row.hit.sourceProcurementId, row);
         }
         if (!parsed.hasNextPage) break;
@@ -115,7 +124,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
 
     const merged = interleaveSearchBuckets(buckets);
     const hits = merged
-      .slice(query.offset, query.offset + query.limit)
+      .slice(filteredQuery.offset, filteredQuery.offset + filteredQuery.limit)
       .map(({ row, terms: found }) =>
         found.length === 0 ? row.hit : { ...row.hit, matchedSearchTerms: found },
       );
@@ -126,6 +135,26 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
       returned: hits.length,
     });
     return ProcurementSearchResponse.parse({ hits });
+  }
+
+  async #resolvedStatusIds(query: SearchQuery): Promise<string[]> {
+    if (query.statuses.length === 0 && query.statusIds.length === 0) {
+      return query.statusIds;
+    }
+    const options = await this.#loadStatusOptions();
+    return searchQueryStatusIds(query, options);
+  }
+
+  async #loadStatusOptions(): Promise<readonly GoszakupkiStatusOption[]> {
+    if (this.#statusOptions !== undefined) return this.#statusOptions;
+    const response = await this.#client.get("/tenders/posted");
+    if (response.status < 200 || response.status >= 300) {
+      this.#statusOptions = FALLBACK_STATUS_OPTIONS;
+      return this.#statusOptions;
+    }
+    const parsed = parseGoszakupkiSearchFilters(response.body).statuses;
+    this.#statusOptions = parsed.length > 0 ? parsed : FALLBACK_STATUS_OPTIONS;
+    return this.#statusOptions;
   }
 
   async get(id: SourceProcurementId) {

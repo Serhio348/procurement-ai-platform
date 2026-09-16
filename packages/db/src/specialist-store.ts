@@ -8,6 +8,7 @@ import {
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type SpecialistProcurementListTab,
   type SpecialistTriageKind,
+  type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql } from "drizzle-orm";
@@ -217,8 +218,8 @@ export function createSpecialistStore(db: Database) {
           })
           .from(workspaceProcurements)
           .where(eq(workspaceProcurements.workspaceId, workspaceId));
-        const profiles = profileRows.map((row) =>
-          SpecialistWorkingProfile.parse({
+        const profiles = profileRows.flatMap((row) => {
+          const parsed = SpecialistWorkingProfile.safeParse({
             id: row.id,
             name: row.name,
             purpose: row.purpose,
@@ -227,13 +228,12 @@ export function createSpecialistStore(db: Database) {
             excludeKeywords: row.excludeKeywords,
             statuses: row.statuses,
             excludeSingleSource: row.excludeSingleSource,
-            filters: row.filters,
+            filters: asFilterRecord(row.filters),
             watchNewProcurements: row.watchNewProcurements,
-            ...(row.lastDiscoveryAt === null
-              ? {}
-              : { lastDiscoveryAt: toIsoDateTime(row.lastDiscoveryAt) }),
-          }),
-        );
+            ...optionalLastDiscoveryAt(row.lastDiscoveryAt),
+          });
+          return parsed.success ? [parsed.data] : [];
+        });
         const active =
           profiles.find((item) => item.id === settingRows[0]?.activeProfileId) ?? profiles[0];
         if (active === undefined) return undefined;
@@ -280,64 +280,52 @@ export function createSpecialistStore(db: Database) {
         const removed = existingProfiles
           .map((row) => row.id)
           .filter((id) => !nextIds.has(id));
+        await tx
+          .delete(workspaceReviewVerdicts)
+          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
         if (removed.length > 0) {
           await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
         }
         for (const profile of state.profiles) {
+          const columns = workspaceProfileColumns(profile, workspaceId, now);
           await tx
             .insert(workspaceProfiles)
-            .values({
-              id: profile.id,
-              workspaceId,
-              name: profile.name,
-              purpose: profile.purpose,
-              description: profile.description,
-              keywords: profile.keywords,
-              excludeKeywords: profile.excludeKeywords,
-              statuses: profile.statuses,
-              excludeSingleSource: profile.excludeSingleSource,
-              filters: profile.filters,
-              watchNewProcurements: profile.watchNewProcurements,
-              lastDiscoveryAt: profile.lastDiscoveryAt,
-              updatedAt: now,
-            })
+            .values(columns)
             .onConflictDoUpdate({
               target: workspaceProfiles.id,
               set: {
-                name: profile.name,
-                purpose: profile.purpose,
-                description: profile.description,
-                keywords: profile.keywords,
-                excludeKeywords: profile.excludeKeywords,
-                statuses: profile.statuses,
-                excludeSingleSource: profile.excludeSingleSource,
-                filters: profile.filters,
-                watchNewProcurements: profile.watchNewProcurements,
-                lastDiscoveryAt: profile.lastDiscoveryAt,
-                updatedAt: now,
+                name: columns.name,
+                purpose: columns.purpose,
+                description: columns.description,
+                keywords: columns.keywords,
+                excludeKeywords: columns.excludeKeywords,
+                statuses: columns.statuses,
+                excludeSingleSource: columns.excludeSingleSource,
+                filters: columns.filters,
+                watchNewProcurements: columns.watchNewProcurements,
+                lastDiscoveryAt: columns.lastDiscoveryAt,
+                updatedAt: columns.updatedAt,
               },
             });
         }
+        const settingsJson = jsonbSql({ searchIdsByProfile: state.searchIdsByProfile });
         await tx
           .insert(workspaceSettings)
           .values({
             workspaceId,
             activeProfileId: state.activeProfileId,
-            settings: { searchIdsByProfile: state.searchIdsByProfile },
+            settings: settingsJson,
             updatedAt: now,
           })
           .onConflictDoUpdate({
             target: workspaceSettings.workspaceId,
             set: {
               activeProfileId: state.activeProfileId,
-              settings: { searchIdsByProfile: state.searchIdsByProfile },
+              settings: settingsJson,
               updatedAt: now,
             },
           });
 
-        await tx
-          .delete(workspaceReviewVerdicts)
-          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
         for (const verdict of state.reviewedIrrelevant) {
           await tx.insert(workspaceReviewVerdicts).values({
             workspaceId,
@@ -852,11 +840,62 @@ function caseListFilters(workspaceId: string, query: SpecialistCaseListQuery) {
 
 /** Drops NUL bytes that PostgreSQL rejects inside jsonb. */
 export function jsonbSafe<T>(value: T): T {
-  return JSON.parse(
-    JSON.stringify(value, (_key, nested) =>
-      typeof nested === "string" ? nested.replaceAll("\u0000", "") : nested,
-    ),
-  ) as T;
+  if (value === undefined) return value;
+  const encoded = JSON.stringify(value, (_key, nested) =>
+    typeof nested === "string" ? nested.replaceAll("\u0000", "") : nested,
+  );
+  if (encoded === undefined) return value;
+  return JSON.parse(encoded) as T;
+}
+
+/**
+ * node-pg encodes a JS array as a Postgres array literal. jsonb columns need
+ * a JSON document; passing the string and casting avoids `22P02` on update.
+ */
+function jsonbSql(value: unknown) {
+  return sql`cast(${JSON.stringify(jsonbSafe(value))} as jsonb)`;
+}
+
+function timestampOrNull(value: string | undefined): string | null {
+  if (value === undefined || value.trim().length === 0) return null;
+  return toIsoDateTime(value);
+}
+
+function asFilterRecord(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  return value;
+}
+
+function optionalLastDiscoveryAt(value: string | Date | null): { lastDiscoveryAt: string } | Record<string, never> {
+  if (value === null) return {};
+  if (typeof value === "string" && value.trim().length === 0) return {};
+  try {
+    return { lastDiscoveryAt: toIsoDateTime(value) };
+  } catch {
+    return {};
+  }
+}
+
+function workspaceProfileColumns(
+  profile: SpecialistWorkingProfileValue,
+  workspaceId: string,
+  now: string,
+) {
+  return {
+    id: profile.id,
+    workspaceId,
+    name: profile.name,
+    purpose: profile.purpose,
+    description: profile.description,
+    keywords: jsonbSql(profile.keywords),
+    excludeKeywords: jsonbSql(profile.excludeKeywords),
+    statuses: jsonbSql(profile.statuses),
+    excludeSingleSource: profile.excludeSingleSource,
+    filters: jsonbSql(profile.filters),
+    watchNewProcurements: profile.watchNewProcurements,
+    lastDiscoveryAt: timestampOrNull(profile.lastDiscoveryAt),
+    updatedAt: now,
+  };
 }
 
 /**
@@ -907,11 +946,18 @@ export function postgresErrorMessage(error: unknown): string {
         message?: unknown;
         cause?: unknown;
       };
-      const code = typeof record.code === "string" ? record.code : undefined;
+      const code =
+        typeof record.code === "string" && /^[0-9A-Z]{5}$/.test(record.code)
+          ? record.code
+          : undefined;
       const constraint = typeof record.constraint === "string" ? record.constraint : undefined;
       const message = typeof record.message === "string" ? record.message : undefined;
+      const detail =
+        typeof (record as { detail?: unknown }).detail === "string"
+          ? (record as { detail: string }).detail
+          : undefined;
       if (code !== undefined || constraint !== undefined) {
-        return [code, constraint, message]
+        return [code, constraint, message, detail]
           .filter((part) => part !== undefined && part.length > 0)
           .join(" ");
       }

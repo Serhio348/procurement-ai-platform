@@ -533,5 +533,22 @@ describe("specialist working profile", () => {
     expect(parsed.keywords).toEqual([]);
     expect(parsed.watchNewProcurements).toBe(false);
   });
+
+  it("drops empty advanced-search windows instead of rejecting the profile", () => {
+    const parsed = SpecialistWorkingProfile.parse({
+      filters: {
+        buyerUnp: "  ",
+        publishedFrom: "",
+        publishedTo: "2026-09-30T00:00:00+03:00",
+        priceFrom: "",
+        priceTo: null,
+      },
+    });
+    expect(parsed.filters.buyerUnp).toBeUndefined();
+    expect(parsed.filters.publishedFrom).toBeUndefined();
+    expect(parsed.filters.publishedTo).toBe("2026-09-30");
+    expect(parsed.filters.priceFrom).toBeUndefined();
+    expect(parsed.filters.priceTo).toBeUndefined();
+  });
 });
 

@@ -73,7 +73,7 @@ export function parseGoszakupkiSearchPage(
       const buyerCell = titleCell.clone();
       buyerCell.find("a").remove();
       const buyerName = text(buyerCell);
-      const sourceStatus = text(cells.eq(columns.status));
+      const sourceStatus = listingStatusText(cells, columns.status);
       const amount = parsePlatformAmount(text(cells.eq(columns.amount)));
       const bidsDeadline = parsePlatformInstant(text(cells.eq(columns.deadline)));
       const kind = procedureKind(text(cells.eq(columns.kind)));
@@ -618,15 +618,80 @@ function listingColumns(
     }
     return undefined;
   };
+  const fromHeader = {
+    kind: find("вид"),
+    status: find("статус"),
+    deadline: find("окончани", "документы до"),
+    amount: find("стоимость"),
+  };
+  if (
+    fromHeader.kind !== undefined ||
+    fromHeader.status !== undefined ||
+    fromHeader.deadline !== undefined ||
+    fromHeader.amount !== undefined
+  ) {
+    return {
+      kind: fromHeader.kind ?? 2,
+      status: fromHeader.status ?? 3,
+      deadline: fromHeader.deadline ?? 4,
+      amount: fromHeader.amount ?? 5,
+    };
+  }
+  const first = table.find("tr[data-key]").first().children("td");
+  const shift =
+    first.find("input[type=checkbox]").length > 0 || text(first.eq(0)).length === 0 ? 1 : 0;
   return {
-    kind: find("вид") ?? 2,
-    status: find("статус") ?? 3,
-    deadline: find("окончани", "документы до") ?? 4,
-    amount: find("стоимость") ?? 5,
+    kind: 2 + shift,
+    status: 3 + shift,
+    deadline: 4 + shift,
+    amount: 5 + shift,
   };
 }
 
-function procedureStatus(sourceStatus: string | undefined): ProcedureStatus {
+/**
+ * A missing thead used to read «Электронный аукцион» from the kind column
+ * as the status. If that cell is a procedure kind and the next cell is a
+ * real badge, take the badge.
+ */
+function listingStatusText(
+  cells: Cheerio<AnyNode>,
+  statusIndex: number,
+): string {
+  const raw = text(cells.eq(statusIndex));
+  if (!looksLikeProcedureKindLabel(raw)) return raw;
+  const next = text(cells.eq(statusIndex + 1));
+  return looksLikeStatusBadge(next) ? next : raw;
+}
+
+function looksLikeProcedureKindLabel(value: string): boolean {
+  const normalized = normalise(value);
+  return (
+    normalized.includes("электронный аукцион") ||
+    normalized.includes("запрос ценовых") ||
+    normalized.includes("открытый конкурс") ||
+    normalized.includes("из одного источника") ||
+    normalized.includes("заявка о ценах") ||
+    normalized.includes("запрос предложений о сведениях") ||
+    (normalized.includes("конкурс") && normalized.includes("ограничен"))
+  );
+}
+
+function looksLikeStatusBadge(value: string): boolean {
+  const normalized = normalise(value);
+  if (normalized.length === 0) return false;
+  return (
+    isAcceptingBidsStatus(normalized) ||
+    normalized.includes("заверш") ||
+    normalized.includes("отмен") ||
+    normalized.includes("рассмотр") ||
+    normalized.includes("несостоя") ||
+    /торги\s+идут|идут\s+торг/u.test(normalized) ||
+    normalized.includes("подписан") ||
+    normalized.includes("объявлен")
+  );
+}
+
+export function procedureStatus(sourceStatus: string | undefined): ProcedureStatus {
   if (sourceStatus === undefined) return "unknown";
   const normalized = normalise(sourceStatus);
   // Checked first: a failed lot may still carry "рассмотрение" in its badge text.

@@ -197,6 +197,98 @@ describe("GoszakupkiBySource", () => {
     );
   });
 
+  it("puts the profile status checkbox on the site URL as TendersSearch[status][]", async () => {
+    const formHtml = await readFile(
+      fileURLToPath(
+        new URL("../../../tests/fixtures/goszakupki-by/search-filters.html", import.meta.url),
+      ),
+      "utf8",
+    );
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body:
+        path === "/tenders/posted"
+          ? formHtml
+          : searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТПБ"],
+        statuses: ["accepting_bids"],
+        limit: 10,
+      }),
+    );
+
+    expect(get).toHaveBeenNthCalledWith(1, "/tenders/posted");
+    const searchPath = String(get.mock.calls[1]?.[0]);
+    expect(decodeURIComponent(searchPath)).toContain("TendersSearch[text]=КТПБ");
+    expect(decodeURIComponent(searchPath)).toContain("TendersSearch[status][]=1");
+    expect(decodeURIComponent(searchPath)).toContain("TendersSearch[status][]=2");
+    expect(decodeURIComponent(searchPath)).not.toContain("TendersSearch[type]");
+  });
+
+  it("puts every filled advanced-search window on the site URL", async () => {
+    const formHtml = await readFile(
+      fileURLToPath(
+        new URL("../../../tests/fixtures/goszakupki-by/search-filters.html", import.meta.url),
+      ),
+      "utf8",
+    );
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body:
+        path === "/tenders/posted"
+          ? formHtml
+          : searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТПБ"],
+        buyerUnp: "123456789",
+        buyerText: "Гродноэнерго",
+        procurementNumber: "auc0003664806",
+        priceFrom: 1000,
+        priceTo: 500000,
+        publishedFrom: "2026-09-01T00:00:00+03:00",
+        publishedTo: "2026-09-30T00:00:00+03:00",
+        requestEndFrom: "2026-09-16T00:00:00+03:00",
+        requestEndTo: "2026-10-01T00:00:00+03:00",
+        auctionFrom: "2026-09-20T00:00:00+03:00",
+        auctionTo: "2026-09-25T00:00:00+03:00",
+        typeIds: ["Auction"],
+        statuses: ["accepting_bids"],
+        regionIds: ["4"],
+        limit: 10,
+      }),
+    );
+
+    const searchPath = decodeURIComponent(String(get.mock.calls[1]?.[0]));
+    expect(searchPath).toContain("TendersSearch[text]=КТПБ");
+    expect(searchPath).toContain("TendersSearch[unp]=123456789");
+    expect(searchPath).toContain("TendersSearch[customer_text]=Гродноэнерго");
+    expect(searchPath).toContain("TendersSearch[num]=auc0003664806");
+    expect(searchPath).toContain("TendersSearch[price_from]=1000");
+    expect(searchPath).toContain("TendersSearch[price_to]=500000");
+    expect(searchPath).toContain("TendersSearch[created_from]=01.09.2026");
+    expect(searchPath).toContain("TendersSearch[created_to]=30.09.2026");
+    expect(searchPath).toContain("TendersSearch[request_end_from]=16.09.2026");
+    expect(searchPath).toContain("TendersSearch[request_end_to]=01.10.2026");
+    expect(searchPath).toContain("TendersSearch[auction_date_from]=20.09.2026");
+    expect(searchPath).toContain("TendersSearch[auction_date_to]=25.09.2026");
+    expect(searchPath).toContain("TendersSearch[type][]=Auction");
+    expect(searchPath).toContain("TendersSearch[status][]=1");
+    expect(searchPath).toContain("TendersSearch[status][]=2");
+    expect(searchPath).toContain("TendersSearch[region][]=4");
+  });
+
   it("queries every profile phrase even when the first phrase fills the result limit", async () => {
     const get = vi.fn(async (path: string) => {
       const body = path.includes(encodeURIComponent("кабель"))

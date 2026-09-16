@@ -613,11 +613,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       excludeKeywords: profile.excludeKeywords,
     });
     const listingTerms = platformSearchTerms(inferred, profile.keywords);
+    const siteQuery = buildSearchQuery(profile, limit, offset, publishedFrom, listingTerms);
+    logger.info("Specialist profile search query", {
+      profileName: profileDisplayName(profile),
+      keywords: siteQuery.keywords,
+      statuses: siteQuery.statuses,
+      statusIds: siteQuery.statusIds,
+      typeIds: siteQuery.typeIds,
+      regionIds: siteQuery.regionIds,
+      publishedFrom: siteQuery.publishedFrom ?? "",
+    });
     const [plan, firstHits] = await Promise.all([
       resolveSearchPlan(profile),
-      searchHits.search(
-        buildSearchQuery(profile, limit, offset, publishedFrom, listingTerms),
-      ),
+      searchHits.search(siteQuery),
     ]);
     const extraTerms = extraPlatformSearchTerms(listingTerms, plan, profile.keywords);
     const extraHits =

@@ -1,9 +1,12 @@
+import { SearchQuery } from "@procurement/contracts";
+import type { Logger } from "@procurement/observability";
 import * as cheerio from "cheerio";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseGoszakupkiSearchFilters } from "./goszakupki-by-filters.js";
 import { GoszakupkiHttpClient } from "./goszakupki-by-http.js";
 import { parseGoszakupkiSearchPage } from "./goszakupki-by-parser.js";
+import { GoszakupkiBySource } from "./goszakupki-by-source.js";
 
 /**
  * Same GET as the site advanced search. No adapter scoring.
@@ -63,6 +66,39 @@ for (const [index, row] of raw.entries()) {
 }
 for (const { hit } of parsed.rows) {
   out(`PARSED ${hit.sourceProcurementId}  ${hit.sourceStatus ?? "—"}  ${hit.title}`);
+}
+
+out("");
+out("ADAPTER procurement.search");
+const source = new GoszakupkiBySource({
+  client,
+  logger: {
+    child() {
+      return this as Logger;
+    },
+    debug() {},
+    info(msg, fields) {
+      out(`  ${msg} ${JSON.stringify(fields ?? {})}`);
+    },
+    warn(msg, fields) {
+      out(`  WARN ${msg} ${JSON.stringify(fields ?? {})}`);
+    },
+    error(msg) {
+      out(`  ERR ${msg}`);
+    },
+  } as Logger,
+});
+const adapter = await source.search(
+  SearchQuery.parse({
+    sourceId: "goszakupki_by",
+    keywords: [text],
+    statuses: ["accepting_bids"],
+    limit: 50,
+  }),
+);
+out(`ADAPTER hits=${String(adapter.hits.length)}`);
+for (const hit of adapter.hits) {
+  out(`ADAPTER ${hit.sourceProcurementId}  ${hit.sourceStatus ?? "—"}  ${hit.title}`);
 }
 
 function arg(name: string): string | undefined {

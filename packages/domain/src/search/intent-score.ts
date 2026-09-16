@@ -379,6 +379,10 @@ function decisionFor(
     if (desiredCount > 0) return "review";
     return "discard";
   }
+  // Works: the equipment noun without монтаж / ПНР is a supply or repair row.
+  if ((plan.intent === "works" || plan.intent === "design") && desiredCount === 0) {
+    return "discard";
+  }
   if (contextRole === "missing") return "review";
   if (score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) return "match";
   return "review";

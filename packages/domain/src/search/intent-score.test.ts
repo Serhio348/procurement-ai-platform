@@ -368,6 +368,9 @@ describe("scoreSearchIntent", () => {
     expect(plan.intent).toBe("works");
     expect(plan.objects).toContain("электрооборудования");
     expect(plan.desired_actions).toContain("монтаж");
+    expect(plan.excluded_actions).toEqual(
+      expect.arrayContaining(["поставка", "ремонт", "демонтаж"]),
+    );
 
     const relevant = scoreSearchIntent(
       {
@@ -385,6 +388,30 @@ describe("scoreSearchIntent", () => {
     // Unrelated equipment is not a works match either: no object, no work verb.
     const boiler = scoreSearchIntent({ title: "Котёл твердотопливный КВр-0,5" }, plan);
     expect(boiler.decision).toBe("discard");
+
+    const repair = scoreSearchIntent(
+      { title: "Текущий ремонт электрооборудования с частичной заменой проводки" },
+      plan,
+    );
+    expect(repair.decision).toBe("veto");
+
+    const pump = scoreSearchIntent(
+      {
+        title:
+          "Насос сточно-динамический, услуги по демонтажу, установке и пусконаладочные работы насоса",
+      },
+      plan,
+    );
+    expect(pump.decision).toBe("discard");
+
+    const mixedSupply = scoreSearchIntent(
+      {
+        title:
+          "Закупка из одного источника по выполнению строительно-монтажных, пусконаладочных работ и поставку оборудования",
+      },
+      plan,
+    );
+    expect(mixedSupply.decision).not.toBe("match");
   });
 
   it("does not match a works profile on commissioning alone without the object", () => {
@@ -472,8 +499,8 @@ describe("extraPlatformSearchTerms", () => {
       intent: "works",
     });
     expect(
-      platformSearchTerms(plan, ["КТПБ", "КТП", "сети электроснабжения"]),
-    ).toEqual(["КТПБ", "КТП", "сети электроснабжения", "электрооборудование"]);
+      platformSearchTerms(plan, ["монтаж электрооборудования", "электромонтажные работы"]),
+    ).toEqual(["монтаж электрооборудования", "электромонтажные работы"]);
   });
 
   it("returns only objects the cheap listing has not already queried", () => {

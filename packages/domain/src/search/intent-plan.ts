@@ -21,6 +21,13 @@ const DEFAULT_EXCLUDED_FOR_PURCHASE = [
   "проектирование",
   "пусконаладка",
 ];
+const DEFAULT_EXCLUDED_FOR_WORKS = [
+  "поставка",
+  "изготовление",
+  "ремонт",
+  "демонтаж",
+  "обслуживание",
+];
 
 const PURPOSE_FILLER = /^(управления|управление|привода|привод)$/iu;
 
@@ -86,6 +93,11 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
       if (profile.keywords.some((phrase) => matchesAny(phrase, [action]))) continue;
       pushUnique(excluded, action);
     }
+  } else {
+    for (const action of DEFAULT_EXCLUDED_FOR_WORKS) {
+      if (desired.some((phrase) => matchesAny(phrase, [action]))) continue;
+      pushUnique(excluded, action);
+    }
   }
   return SearchIntentPlan.parse({
     objects,
@@ -98,16 +110,19 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
 }
 
 /**
- * Every saved phrase remains a platform query. Plan objects broaden recall;
- * they never replace the specialist's explicit search directions.
+ * Every saved phrase remains a platform query. For a supply profile, plan
+ * objects may add extra site queries. For works they must not: searching
+ * the bare equipment noun pulls поставка listings and starves the work
+ * phrases of the get-budget.
  */
 export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
 ): string[] {
+  const extra = plan.intent === "works" || plan.intent === "design" ? [] : plan.objects;
   const terms: string[] = [];
   const seen = new Set<string>();
-  for (const value of [...fallbackKeywords, ...plan.objects]) {
+  for (const value of [...fallbackKeywords, ...extra]) {
     const term = value.trim();
     const key = term.toLocaleLowerCase("ru-BY");
     if (term.length === 0 || seen.has(key)) continue;

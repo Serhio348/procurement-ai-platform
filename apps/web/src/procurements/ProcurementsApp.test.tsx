@@ -428,6 +428,45 @@ describe("ProcurementsApp", () => {
     expect(screen.getAllByRole("button", { name: /Комплекс средств защиты/ })).toHaveLength(1);
   });
 
+  it("does not show another profile's leftover search cards", () => {
+    const equipment = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "КТП",
+    });
+    const works = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Монтаж",
+    });
+    const leftover = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000421",
+      title: "Поставка КТПБ",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/auction/view/ktp-1",
+      sourceProcurementId: "auction/ktp-1",
+      foundAs: "match",
+      profileIds: [equipment.id],
+    });
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[leftover]}
+                profiles={[equipment, works]}
+                activeProfileId={works.id}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: /Поставка КТПБ/ })).toBeNull();
+  });
+
   it("lets the specialist pick which profile to search", async () => {
     const user = userEvent.setup();
     const substations = SpecialistWorkingProfile.parse({

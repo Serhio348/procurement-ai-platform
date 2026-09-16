@@ -1156,7 +1156,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
     logSearchTrace(profile, selected);
     const now = clock();
-    // Keep unprocessed hits for this profile. A later search appends; decide() removes.
+    // A new button search replaces this profile's unread queue only.
+    // Other profiles keep their cards.
+    if (offset === 0) {
+      workspace().replaceSearchIds(profile.id, []);
+    }
     const collected = await collectPendingHits(selected, profile, now, {
       restoreReviewInbox: true,
       skipKnownIrrelevant: false,

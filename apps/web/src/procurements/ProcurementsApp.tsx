@@ -262,19 +262,13 @@ export function ProcurementsApp({
     // Parent refreshed a card (decide / inbox). Update rows already on screen
     // without swapping a search hit list for the whole database catalog.
     setCatalogItems((current) => {
-      const incoming = catalog.filter(isSearchQueueCard);
-      if (!showingSearch.current) return uniqueBySource(incoming);
-      return uniqueBySource([...incoming, ...current.filter(isSearchQueueCard)]);
+      const incoming = catalog.filter((item) => belongsToChosenProfile(item, chosenProfileId));
+      return uniqueBySource(incoming);
     });
   }
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
   const items = uniqueBySource(
-    catalogItems.filter((item) => {
-      if (!isSearchQueueCard(item)) return false;
-      if (chosenProfile === undefined) return true;
-      if (item.profileIds.length === 0) return true;
-      return item.profileIds.includes(chosenProfile.id);
-    }),
+    catalogItems.filter((item) => belongsToChosenProfile(item, chosenProfileId)),
   );
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
   const ingestForSelected =
@@ -299,23 +293,11 @@ export function ProcurementsApp({
       const result = await search(offset);
       showingSearch.current = true;
       setCatalogItems((current) => {
-        const incoming = result.items.filter(isSearchQueueCard);
-        const incomingSources = new Set(incoming.map((item) => item.sourceProcurementId));
-        const other =
-          chosenProfileId.length === 0
-            ? []
-            : current.filter(
-                (item) =>
-                  isSearchQueueCard(item) &&
-                  !item.profileIds.includes(chosenProfileId) &&
-                  !incomingSources.has(item.sourceProcurementId),
-              );
-        if (offset === 0) return uniqueBySource([...incoming, ...other]);
-        return uniqueBySource([
-          ...incoming,
-          ...other,
-          ...current.filter(isSearchQueueCard),
-        ]);
+        const incoming = result.items.filter((item) =>
+          belongsToChosenProfile(item, chosenProfileId),
+        );
+        if (offset === 0) return uniqueBySource(incoming);
+        return uniqueBySource([...incoming, ...current]);
       });
       setHasMore(result.hasMore);
       setNextOffset(offset + 400);
@@ -416,8 +398,10 @@ export function ProcurementsApp({
                     onChange={(event) => {
                       const id = event.target.value;
                       setChosenProfileId(id);
+                      showingSearch.current = false;
+                      const next = catalog.filter((item) => belongsToChosenProfile(item, id));
+                      setCatalogItems(uniqueBySource(next));
                       const profile = profiles.find((item) => item.id === id);
-                      const next = procurementsForProfile(catalogItems, profile);
                       const keep = next.find((item) => item.id === selected?.id) ?? next[0];
                       void (async () => {
                         if (selectProfile !== undefined) await selectProfile(id);
@@ -749,6 +733,15 @@ export function ProcurementsApp({
       </main>
     </Shell>
   );
+}
+
+function belongsToChosenProfile(
+  item: SpecialistProcurementCard,
+  profileId: string,
+): boolean {
+  if (!isSearchQueueCard(item)) return false;
+  if (profileId.length === 0) return true;
+  return item.profileIds.includes(profileId);
 }
 
 function uniqueBySource(

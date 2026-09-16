@@ -620,18 +620,18 @@ describe("specialist API", () => {
       ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
     );
 
-    // A later empty search must not wipe the unread queue. The incubator was
-    // never stored.
+    // A later empty search replaces this profile's unread queue. The
+    // incubator was never stored.
     now = "2026-09-09T10:00:00.000Z";
     hits = [];
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    const listedAfterPrune = await app.inject({ method: "GET", url: "/api/procurements" });
+    const searchAfterPrune = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=search",
+    });
     const inboxAfterPrune = await app.inject({ method: "GET", url: "/api/inbox" });
-    expect(titles(listedAfterPrune.body).sort()).toEqual(
-      ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
-    );
+    expect(titles(searchAfterPrune.body)).toEqual([]);
     expect(titles(inboxAfterPrune.body)).toEqual([]);
-    expect(removeCases.mock.calls.some((call) => call[0]?.length === 2)).toBe(false);
 
     await app.close();
   });

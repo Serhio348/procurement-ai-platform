@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   blobStorageKey,
   caseListTimeShouldBump,
+  dedupeReviewVerdicts,
   jsonbSafe,
   postgresErrorMessage,
   toIsoDateTime,
@@ -10,8 +11,7 @@ import {
 import { SpecialistProcurementCard } from "@procurement/contracts";
 
 describe("dedupeReviewVerdicts", () => {
-  it("keeps one row per profile and source, preferring the newer decision", async () => {
-    const { dedupeReviewVerdicts } = await import("./specialist-store.js");
+  it("keeps one row per profile and source, preferring the newer decision", () => {
     const older = {
       profileId: "00000000-0000-4000-8000-000000000901",
       sourceProcurementId: "request/3675640",

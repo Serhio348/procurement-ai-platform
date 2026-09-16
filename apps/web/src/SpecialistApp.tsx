@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
+  ProcurementId,
   SpecialistInboxAction,
   SpecialistInboxEntry,
   SpecialistInboxResolveResponse,
@@ -690,8 +691,8 @@ export function mergeProcurementCards(
     });
     idBySource.set(update.sourceProcurementId, update.id);
   }
-  const seen = new Set<string>();
-  const order: string[] = [];
+  const seen = new Set<ProcurementId>();
+  const order: ProcurementId[] = [];
   for (const item of [...current, ...updates]) {
     const id = idBySource.get(item.sourceProcurementId);
     if (id === undefined || seen.has(id)) continue;

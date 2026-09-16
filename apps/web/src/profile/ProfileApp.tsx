@@ -35,7 +35,7 @@ const REGION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
 
 const STATUS_OPTIONS: ReadonlyArray<{ value: ProcedureStatus; label: string }> = [
   { value: "announced", label: "Объявлена" },
-  { value: "accepting_bids", label: "Приём предложений" },
+  { value: "accepting_bids", label: "Подача предложений" },
   { value: "bidding_closed", label: "Приём завершён, идёт подписание" },
   { value: "auction_in_progress", label: "Торги идут" },
   { value: "under_review", label: "На рассмотрении" },

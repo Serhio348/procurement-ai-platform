@@ -47,7 +47,7 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
   });
 
-  it("shows a clamped title and procedure kind on the mine row", () => {
+  it("shows a card title and procedure kind without a separate label row", () => {
     const longTitle =
       "Комплект панелей по типу ЩО-70 для комплектации объекта «Реконструкция здания главного корпуса и здания поликлиники»";
     render(
@@ -66,6 +66,7 @@ describe("MyProcurementsApp", () => {
     );
     expect(screen.getByRole("heading", { level: 2, name: longTitle })).toBeTruthy();
     expect(screen.getByText("закупка из одного источника")).toBeTruthy();
+    expect(screen.getByText("Открыть карточку")).toBeTruthy();
   });
 
   it("derives procedure kind from the platform card when kindLabel is missing", () => {

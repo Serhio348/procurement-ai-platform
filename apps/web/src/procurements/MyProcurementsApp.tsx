@@ -21,8 +21,8 @@ type MineTab = "all" | "monitor" | "participate" | "archive";
 export type MyProcurementsSection = "mine" | "trash";
 type ListTab = MineTab | "trash";
 
-/** Enough for a specialist to scan without an endless wall of uneven cards. */
-export const MY_PROCUREMENTS_PAGE_SIZE = 12;
+/** Three rows of cards fits one viewport better than an endless scroll. */
+export const MY_PROCUREMENTS_PAGE_SIZE = 9;
 
 const filterTabs: { key: MineTab; label: string }[] = [
   { key: "all", label: "Все" },
@@ -404,7 +404,7 @@ export function MyProcurementsApp({
           <>
             <ul
               key={`${activeTab}:${profileFilter}:${safePage}`}
-              className="my-procurements-list"
+              className="my-procurements-grid"
             >
               {pageItems.map((item) => {
                 const procedureKind = cardProcedureKindLabel(item);
@@ -412,10 +412,10 @@ export function MyProcurementsApp({
                 const names = profileNamesForCard(item, profiles);
                 return (
                   <li key={item.id}>
-                    <article className={`my-procurements-row is-${item.triage ?? "unknown"}`}>
+                    <article className={`my-procurements-card is-${item.triage ?? "unknown"}`}>
                       <button
                         type="button"
-                        className="my-procurements-row-main"
+                        className="my-procurements-card-main"
                         aria-label={`Открыть: ${item.title}`}
                         onClick={() => {
                           void navigate(
@@ -423,57 +423,65 @@ export function MyProcurementsApp({
                           );
                         }}
                       >
-                        <div className="my-procurements-row-top">
-                          <div className="my-procurements-card-header">
-                            <span className={`my-procurements-card-triage triage-${item.triage ?? ""}`}>
-                              {item.triage === "monitor"
-                                ? "Слежу"
-                                : item.triage === "participate"
-                                  ? "Участвую"
-                                  : "Корзина"}
+                        <div className="my-procurements-card-header">
+                          <span className={`my-procurements-card-triage triage-${item.triage ?? ""}`}>
+                            {item.triage === "monitor"
+                              ? "Слежу"
+                              : item.triage === "participate"
+                                ? "Участвую"
+                                : "Корзина"}
+                          </span>
+                          <span className="my-procurements-card-status">{item.statusLabel}</span>
+                          {bidsDeadlinePassed(item, today) ? (
+                            <span className="my-procurements-card-expired">срок подачи истёк</span>
+                          ) : null}
+                          {item.sourceCard !== undefined &&
+                          isSingleSourceAfterFailedProcedure(item.sourceCard) ? (
+                            <span className="my-procurements-card-after-failed">
+                              после несостоявшейся
                             </span>
-                            <span className="my-procurements-card-status">{item.statusLabel}</span>
-                            {bidsDeadlinePassed(item, today) ? (
-                              <span className="my-procurements-card-expired">срок подачи истёк</span>
-                            ) : null}
-                            {item.sourceCard !== undefined &&
-                            isSingleSourceAfterFailedProcedure(item.sourceCard) ? (
-                              <span className="my-procurements-card-after-failed">
-                                после несостоявшейся
-                              </span>
-                            ) : null}
-                            {profileFilter === "all" && names.length > 0
-                              ? names.slice(0, 2).map((name) => (
-                                  <span key={name} className="my-procurements-card-profile">
-                                    {name}
-                                  </span>
-                                ))
-                              : null}
-                          </div>
+                          ) : null}
+                          {profileFilter === "all" && names.length > 0
+                            ? names.slice(0, 1).map((name) => (
+                                <span key={name} className="my-procurements-card-profile">
+                                  {name}
+                                </span>
+                              ))
+                            : null}
                           <span className="my-procurements-card-id">{shortId(item.id)}</span>
                         </div>
                         <h2 className="my-procurements-card-title" title={item.title}>
                           {item.title}
                         </h2>
                         <CardIngestCaption ingest={activeIngest[item.id]} />
-                        <div className="my-procurements-row-meta">
+                        <dl className="my-procurements-card-facts">
                           {procedureKind === undefined ? null : (
-                            <span className="my-procurements-meta-kind">{procedureKind}</span>
+                            <div>
+                              <dt>Вид</dt>
+                              <dd className="my-procurements-card-kind">{procedureKind}</dd>
+                            </div>
                           )}
                           {item.amountLabel ? (
-                            <span className="my-procurements-meta-amount">{item.amountLabel}</span>
-                          ) : (
-                            <span className="my-procurements-meta-muted">сумма не указана</span>
-                          )}
+                            <div>
+                              <dt>Сумма</dt>
+                              <dd className="my-procurements-card-amount">{item.amountLabel}</dd>
+                            </div>
+                          ) : null}
                           {deadline === undefined ? null : (
-                            <span className="my-procurements-meta-deadline">до {deadline}</span>
+                            <div>
+                              <dt>Приём до</dt>
+                              <dd>{deadline}</dd>
+                            </div>
                           )}
-                        </div>
+                        </dl>
                         {item.buyerName ? (
                           <p className="my-procurements-card-buyer" title={item.buyerName}>
                             {item.buyerName}
                           </p>
                         ) : null}
+                        <span className="my-procurements-card-footer" aria-hidden="true">
+                          Открыть карточку <span className="my-procurements-card-arrow">→</span>
+                        </span>
                       </button>
                       {isTrash ? (
                         <div className="my-procurements-card-actions">

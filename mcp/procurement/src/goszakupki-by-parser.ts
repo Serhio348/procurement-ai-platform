@@ -49,6 +49,8 @@ export interface ParsedGoszakupkiSearchPage {
 
 const PROCEDURE_VIEW_PATH =
   /^\/(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)\/?$/;
+const PROCEDURE_VIEW_IN_HREF =
+  /(?:^|\/)(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)/i;
 
 export function parseGoszakupkiSearchPage(
   html: string,
@@ -133,13 +135,22 @@ function listingProcedureLink(
     } catch {
       continue;
     }
-    const identity = pathname.match(PROCEDURE_VIEW_PATH);
+    const identity =
+      pathname.match(PROCEDURE_VIEW_PATH) ?? href.match(PROCEDURE_VIEW_IN_HREF);
     if (identity?.[1] === undefined || identity[2] === undefined) continue;
+    const fromLink = text(anchor);
+    const fromCell = text(anchor.closest("td"));
+    const title =
+      fromLink.length > 0 && !/^\d+$/u.test(fromLink)
+        ? fromLink
+        : fromCell.length > 0
+          ? fromCell
+          : fromLink;
     candidates.push({
       href,
       family: identity[1],
       id: identity[2],
-      title: text(anchor),
+      title,
       anchor,
     });
   }

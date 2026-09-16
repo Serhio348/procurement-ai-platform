@@ -12,7 +12,6 @@ import {
   type SearchQuery,
   type SourceProcurementId,
 } from "@procurement/contracts";
-import { listingKeepsPlatformHit } from "@procurement/domain";
 import { silentLogger, type Logger } from "@procurement/observability";
 import { expandPublicDocumentation } from "./documentation-expand.js";
 import type { ParsedGoszakupkiCard } from "./goszakupki-by-parser.js";
@@ -106,7 +105,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
         });
         seenRows += parsed.rows.length;
         for (const row of parsed.rows) {
-          if (!matchesSearchRow(row, filteredQuery, term)) continue;
+          if (query.kinds.length > 0 && !query.kinds.includes(row.kind)) continue;
           termRows.set(row.hit.sourceProcurementId, row);
         }
         if (!parsed.hasNextPage) break;
@@ -322,25 +321,6 @@ function sourceDate(value: string | undefined): string | undefined {
   return year === undefined || month === undefined || day === undefined
     ? undefined
     : `${day}.${month}.${year}`;
-}
-
-function matchesSearchRow(
-  row: ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number],
-  query: SearchQuery,
-  searchedTerm: string | undefined,
-): boolean {
-  if (query.kinds.length > 0 && !query.kinds.includes(row.kind)) return false;
-  const haystack = [
-    row.hit.title,
-    row.hit.buyerName,
-    row.hit.sourceStatus,
-  ]
-    .filter((value): value is string => value !== undefined)
-    .join(" ");
-  if (searchedTerm !== undefined && !listingKeepsPlatformHit(haystack, [searchedTerm])) {
-    return false;
-  }
-  return true;
 }
 
 type SearchRow = ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number];

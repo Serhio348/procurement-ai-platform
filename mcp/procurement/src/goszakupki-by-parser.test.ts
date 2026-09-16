@@ -121,6 +121,35 @@ describe("parseGoszakupkiCard", () => {
     });
   });
 
+  it("uses the subject cell when the procedure link text is only a number", () => {
+    const html = `<!doctype html><table>
+      <thead><tr>
+        <th></th>
+        <th>Номер закупки</th>
+        <th>Организация / Предмет закупки</th>
+        <th>Вид процедуры закупки</th>
+        <th>Статус</th>
+        <th>Предложения, документы до</th>
+        <th>Ориентировочная/предельная стоимость</th>
+      </tr></thead>
+      <tbody>
+        <tr data-key="0">
+          <td><input type="checkbox"></td>
+          <td>3664806</td>
+          <td>Гродноэнерго<br><a href="https://goszakupki.by/auction/view/3664806?lang=ru">3664806</a> Поставка БКТПБ №3</td>
+          <td>Электронный аукцион</td>
+          <td><span class="badge">Подача предложений</span></td>
+          <td>27.09.2026</td>
+          <td>526 056.26 BYN</td>
+        </tr>
+      </tbody>
+    </table>`;
+    const parsed = parseGoszakupkiSearchPage(html, "https://goszakupki.by/tenders/posted");
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]?.hit.sourceProcurementId).toBe("auction/3664806");
+    expect(parsed.rows[0]?.hit.title).toContain("БКТПБ №3");
+  });
+
   it.each([
     ["auction", "9000001", "auction", "electronic_auction", "Поставка комплектной", "2026-09-01"],
     ["marketing", "9000002", "marketing", "other", "Поверка измерительных", "2026-09-01"],

@@ -47,7 +47,7 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
   });
 
-  it("shows the full title and procedure kind on the mine card", () => {
+  it("shows a clamped title and procedure kind on the mine row", () => {
     const longTitle =
       "Комплект панелей по типу ЩО-70 для комплектации объекта «Реконструкция здания главного корпуса и здания поликлиники»";
     render(
@@ -65,7 +65,6 @@ describe("MyProcurementsApp", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("heading", { level: 2, name: longTitle })).toBeTruthy();
-    expect(screen.getByText("Вид процедуры")).toBeTruthy();
     expect(screen.getByText("закупка из одного источника")).toBeTruthy();
   });
 
@@ -510,5 +509,90 @@ describe("MyProcurementsApp", () => {
     expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
     expect(screen.queryByText("Вторая в корзине")).toBeNull();
     expect(screen.getByText("Корзина пуста.")).toBeTruthy();
+  });
+
+  it("paginates the mine list and moves between pages", async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 14 }, (_, index) =>
+      SpecialistProcurementCard.parse({
+        ...card,
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        title: `Закупка номер ${String(index + 1)}`,
+        sourceProcurementId: `single-source/${String(index + 1)}`,
+        triage: index % 2 === 0 ? "participate" : "monitor",
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={items}
+          pageSize={5}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("1–5 из 14")).toBeTruthy();
+    expect(screen.getByText("Закупка номер 1")).toBeTruthy();
+    expect(screen.queryByText("Закупка номер 6")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Вперёд" }));
+    expect(screen.getByText("6–10 из 14")).toBeTruthy();
+    expect(screen.getByText("Закупка номер 6")).toBeTruthy();
+    expect(screen.queryByText("Закупка номер 1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "2" }));
+    expect(screen.getByText("6–10 из 14")).toBeTruthy();
+  });
+
+  it("filters mine rows by profile and keeps «Все закупки»", async () => {
+    const user = userEvent.setup();
+    const equipment = {
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "Оборудование",
+      purpose: "",
+      description: "",
+      keywords: ["нку"],
+      excludeKeywords: [],
+      statuses: ["accepting_bids" as const],
+      excludeSingleSource: false,
+      filters: {},
+      watchNewProcurements: false,
+    };
+    const networks = {
+      ...equipment,
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Сети",
+      keywords: ["сети"],
+    };
+    const first = SpecialistProcurementCard.parse({
+      ...card,
+      title: "НКУ для насосов",
+      profileIds: [equipment.id],
+    });
+    const second = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "Сети электроснабжения",
+      sourceProcurementId: "request/2",
+      triage: "monitor",
+      profileIds: [networks.id],
+    });
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[first, second]}
+          profiles={[equipment, networks]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("tab", { name: "Все закупки" })).toBeTruthy();
+    expect(screen.getByText("НКУ для насосов")).toBeTruthy();
+    expect(screen.getByText("Сети электроснабжения")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Оборудование" }));
+    expect(screen.getByText("НКУ для насосов")).toBeTruthy();
+    expect(screen.queryByText("Сети электроснабжения")).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Все закупки" }));
+    expect(screen.getByText("Сети электроснабжения")).toBeTruthy();
   });
 });

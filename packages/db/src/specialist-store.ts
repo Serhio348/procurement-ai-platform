@@ -27,7 +27,7 @@ import {
   workspaceSettings,
   workspaces,
 } from "./schema.js";
-import { withRlsBypass, withUser, withWorkspace } from "./workspace-scope.js";
+import { withRlsBypass, withUser, withWorkspace, withWorkspaceWrite } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
@@ -271,10 +271,7 @@ export function createSpecialistStore(db: Database) {
     ): Promise<void> {
       const state = SpecialistWorkspaceState.parse(snapshot);
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
-        // Serialize workspace writes: delete-all + insert of review verdicts
-        // raced with discovery/search persists and hit workspace_review_verdicts_uq.
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${workspaceId}))`);
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const existingProfiles = await tx
           .select({ id: workspaceProfiles.id })
           .from(workspaceProfiles)
@@ -626,7 +623,7 @@ export function createSpecialistStore(db: Database) {
       const failures: string[] = [];
       for (const card of uniqueBySource(cards)) {
         try {
-          await withWorkspace(db, workspaceId, async (tx) => {
+          await withWorkspaceWrite(db, workspaceId, async (tx) => {
             await saveWorkspaceCase(tx, workspaceId, card);
           });
         } catch (error) {
@@ -644,7 +641,7 @@ export function createSpecialistStore(db: Database) {
       // Delete children first. CASCADE + RLS on workspace_procurement_profiles
       // joins back to the parent row; once the parent is gone the policy
       // hides the child and the whole delete is rolled back.
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const matched = await tx
           .select({ id: workspaceProcurements.id })
           .from(workspaceProcurements)
@@ -708,7 +705,7 @@ export function createSpecialistStore(db: Database) {
       workspaceId: string,
     ): Promise<void> {
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const cases = await tx
           .select({
             id: workspaceProcurements.id,

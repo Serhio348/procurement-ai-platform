@@ -121,7 +121,7 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     url: run.card.url,
     sourceProcurementId: run.card.sourceProcurementId,
     live: true,
-    kindLabel: kindLabel(run.card.kind),
+    kindLabel: procedureKindLabel(run.card.kind),
     ...(buyerName(run.card) === undefined ? {} : { buyerName: buyerName(run.card) }),
     ...(amountLabel(run.card) === undefined ? {} : { amountLabel: amountLabel(run.card) }),
     documents: run.documents,
@@ -400,7 +400,7 @@ export function statusLabel(status: ProcedureStatus): string {
   }
 }
 
-function kindLabel(kind: ProcedureKind): string {
+export function procedureKindLabel(kind: ProcedureKind): string {
   switch (kind) {
     case "electronic_auction":
       return "электронный аукцион";
@@ -415,4 +415,15 @@ function kindLabel(kind: ProcedureKind): string {
     case "other":
       return "иная процедура";
   }
+}
+
+/** Prefer the stored label; fall back to the platform card kind when listing is slim. */
+export function cardProcedureKindLabel(card: {
+  kindLabel?: string | undefined;
+  sourceCard?: { kind?: ProcedureKind | undefined } | undefined;
+}): string | undefined {
+  if (card.kindLabel !== undefined && card.kindLabel.trim().length > 0) return card.kindLabel;
+  const kind = card.sourceCard?.kind;
+  if (kind === undefined) return undefined;
+  return procedureKindLabel(kind);
 }

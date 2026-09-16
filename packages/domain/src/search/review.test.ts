@@ -83,6 +83,29 @@ describe("reviewByIntentCard", () => {
     expect(outcome?.reason).toMatch(/монтаж/i);
   });
 
+  it("does not settle electrical SMR without the object word — model may decide", () => {
+    const montagePlan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "монтаж электрооборудования",
+        "пусконаладочные работы",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+    const outcome = reviewByIntentCard(
+      card(
+        "Закупка строительно-монтажных работ по объектам: модернизация РЭС с установкой ДГУ, реконструкция ПС с заменой КРУН-10 кВ",
+        [
+          { title: "Техническая модернизация Докшицкого РЭС с установкой ДГУ" },
+          { title: "Реконструкция ПС 110/35/10 кВ с заменой КРУН-10 кВ" },
+        ],
+      ),
+      montagePlan,
+    );
+    expect(outcome).toBeUndefined();
+  });
+
   it("leaves commissioning of a grain complex open for the model instead of calling it irrelevant", () => {
     // No electrical object anywhere on the card: not a match, but also not a
     // proven miss — the code did not see a veto or a foreign purpose.

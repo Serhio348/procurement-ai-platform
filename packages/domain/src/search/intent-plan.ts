@@ -120,15 +120,18 @@ export function planAllowsBareObject(plan: { intent: string }): boolean {
 /**
  * Every saved phrase remains a platform query. When the plan allows a bare
  * object to count as a match, those objects may add extra site queries.
+ * Works profiles that already seek монтаж also query «строительно-монтажные
+ * работы»: goszakupki.by often uses that wording instead of «электромонтаж».
  */
 export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
 ): string[] {
   const extra = planAllowsBareObject(plan) ? plan.objects : [];
+  const synonyms = worksMontagePlatformSynonyms(plan);
   const terms: string[] = [];
   const seen = new Set<string>();
-  for (const value of [...fallbackKeywords, ...extra]) {
+  for (const value of [...fallbackKeywords, ...extra, ...synonyms]) {
     const term = value.trim();
     const key = term.toLocaleLowerCase("ru-BY");
     if (term.length === 0 || seen.has(key)) continue;
@@ -136,6 +139,15 @@ export function platformSearchTerms(
     terms.push(term);
   }
   return terms;
+}
+
+function worksMontagePlatformSynonyms(plan: SearchIntentPlanValue): string[] {
+  if (plan.intent !== "works") return [];
+  const wantsMontage = plan.desired_actions.some((item) =>
+    /монтаж|электромонтаж|смр/iu.test(item),
+  );
+  if (!wantsMontage) return [];
+  return ["строительно-монтажные работы"];
 }
 
 /**

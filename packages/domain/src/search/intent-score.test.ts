@@ -423,6 +423,53 @@ describe("scoreSearchIntent", () => {
     expect(mixedSupply.decision).not.toBe("match");
   });
 
+  it("leaves electrical SMR without the exact object word for the model, not a works veto", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "монтаж электрооборудования",
+        "монтаж электросилового оборудования",
+        "пусконаладочные работы",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+    const title =
+      "Закупка строительно-монтажных работ по объектам: Лот № 1: «Техническая модернизация Докшицкого РЭС с установкой ДГУ», Лот № 3: «Реконструкция ПС 110/35/10 кВ с заменой КРУН-10 кВ»";
+    const scored = scoreSearchIntentFromProcedure(
+      ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "etrade/3671294",
+        url: "https://goszakupki.by/etrade/view/3671294",
+        title,
+        lots: [
+          {
+            number: "1",
+            title: "Техническая модернизация Докшицкого РЭС с установкой ДГУ",
+          },
+          {
+            number: "3",
+            title: "Реконструкция ПС 110/35/10 кВ с заменой КРУН-10 кВ",
+          },
+        ],
+        fetchedAt: "2026-09-16T00:00:00.000Z",
+      }),
+      plan,
+    );
+    // No literal «электрооборудование», but монтаж is in СМР — not veto.
+    // Discard/review stays open so search-review can call the model.
+    expect(scored.decision).not.toBe("veto");
+    expect(scored.decision).not.toBe("match");
+    expect(scored.matchedDesired.length).toBeGreaterThan(0);
+
+    const supply = inferSearchIntentPlan({
+      name: "КТПБ, КРУ",
+      keywords: ["КТПБ", "КРУ", "10 кВ"],
+      excludeKeywords: [],
+    });
+    expect(scoreSearchIntent({ title }, supply).decision).toBe("veto");
+  });
+
   it("does not match a works profile on commissioning alone without the object", () => {
     const worksPlan = inferSearchIntentPlan({
       name: "Монтаж и пусконаладка электросилового оборудования",
@@ -549,7 +596,7 @@ describe("inferSearchIntentPlan", () => {
 });
 
 describe("extraPlatformSearchTerms", () => {
-  it("keeps every saved phrase and adds distinct plan objects", () => {
+  it("keeps every saved phrase and adds SMR synonym for montage works", () => {
     const plan = SearchIntentPlan.parse({
       objects: ["электрооборудование", "КТП"],
       desired_actions: ["монтаж"],
@@ -557,7 +604,11 @@ describe("extraPlatformSearchTerms", () => {
     });
     expect(
       platformSearchTerms(plan, ["монтаж электрооборудования", "электромонтажные работы"]),
-    ).toEqual(["монтаж электрооборудования", "электромонтажные работы"]);
+    ).toEqual([
+      "монтаж электрооборудования",
+      "электромонтажные работы",
+      "строительно-монтажные работы",
+    ]);
   });
 
   it("returns only objects the cheap listing has not already queried", () => {

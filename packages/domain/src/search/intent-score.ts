@@ -82,8 +82,12 @@ export function scoreSearchIntent(
   const objects = objectRole === "mention" ? extraObjects : matchedObjects;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
+  // Supply profiles treat a work-headed title as an exclusion. Works/design
+  // profiles are looking for that work — the head must not become a veto.
   const serviceHead =
-    matchedDesired.length === 0 ? purchaseWorkHead(leadingClause(title)) : undefined;
+    matchedDesired.length === 0 && planAllowsBareObject(plan)
+      ? purchaseWorkHead(leadingClause(title))
+      : undefined;
   const excludedInTitle = [
     ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
     ...(serviceHead === undefined ? [] : [serviceHead.trim()]),
@@ -195,6 +199,10 @@ function lotIntentText(lot: ProcedureCard["lots"][number]): string {
  * matcher; the strongest clause wins. A work-headed title is not an implicit
  * match just because the object is named somewhere. A lot that itself names
  * the desired action and the object can still match.
+ *
+ * Supply profiles prefer a work-head veto when any clause shows it. Works
+ * profiles skip that branch: a reconstruction lot must not settle the whole
+ * card as irrelevant before the model sees an SMR title with монтаж.
  */
 function scoreIntentProcedure(
   card: ProcedureCard,
@@ -212,12 +220,14 @@ function scoreIntentProcedure(
       item.excludedRole !== "subject",
   );
   if (explicit !== undefined) return explicit;
-  const workWithObject = clauses.find(
-    (item) => item.excludedRole === "subject" && item.objectRole !== "none",
-  );
-  if (workWithObject !== undefined) return workWithObject;
-  const work = clauses.find((item) => item.excludedRole === "subject");
-  if (work !== undefined) return work;
+  if (planAllowsBareObject(plan)) {
+    const workWithObject = clauses.find(
+      (item) => item.excludedRole === "subject" && item.objectRole !== "none",
+    );
+    if (workWithObject !== undefined) return workWithObject;
+    const work = clauses.find((item) => item.excludedRole === "subject");
+    if (work !== undefined) return work;
+  }
   const implicit = clauses.find(
     (item) => item.objectRole !== "none" && item.decision !== "discard",
   );

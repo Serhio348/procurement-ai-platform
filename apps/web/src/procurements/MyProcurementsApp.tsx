@@ -221,7 +221,10 @@ export function MyProcurementsApp({
 
   function goToPage(next: number): void {
     setPage(next);
-    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    const root = listRef.current;
+    if (root !== null && typeof root.scrollTo === "function") {
+      root.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }
 
   async function runCardAction(

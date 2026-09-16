@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SpecialistProcurementCard } from "@procurement/contracts";
+import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { MyProcurementsApp } from "./MyProcurementsApp.js";
@@ -545,24 +545,16 @@ describe("MyProcurementsApp", () => {
 
   it("filters mine rows by profile and keeps «Все закупки»", async () => {
     const user = userEvent.setup();
-    const equipment = {
+    const equipment = SpecialistWorkingProfile.parse({
       id: "00000000-0000-4000-8000-000000000901",
       name: "Оборудование",
-      purpose: "",
-      description: "",
       keywords: ["нку"],
-      excludeKeywords: [],
-      statuses: ["accepting_bids" as const],
-      excludeSingleSource: false,
-      filters: {},
-      watchNewProcurements: false,
-    };
-    const networks = {
-      ...equipment,
+    });
+    const networks = SpecialistWorkingProfile.parse({
       id: "00000000-0000-4000-8000-000000000902",
       name: "Сети",
       keywords: ["сети"],
-    };
+    });
     const first = SpecialistProcurementCard.parse({
       ...card,
       title: "НКУ для насосов",

@@ -153,6 +153,15 @@ describe("scoreSearchIntent", () => {
       ).decision,
     ).toBe("match");
     expect(scoreSearchIntent({ title: "КТП 400 кВА" }, plan).decision).toBe("match");
+    expect(
+      scoreSearchIntent(
+        {
+          title:
+            "Выбор поставщика блочной комплектной двухтрансформаторной подстанции (БКТПБ №3) для комплектации объекта строительства: «Реконструкция здания»",
+        },
+        plan,
+      ).decision,
+    ).toBe("match");
   });
 
   it("lets the model widen the cheap plan but never drop its exclusions or objects", () => {

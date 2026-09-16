@@ -168,6 +168,18 @@ describe("selectRelevantSearchCards", () => {
     );
     expect(unknownBadge.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-004"]);
 
+    const siteBadge = selectRelevantSearchCards(
+      [
+        hit("auction-005", "Выбор поставщика подстанции (БКТПБ №3)", {
+          status: "auction_in_progress",
+          sourceStatus: "Подача предложений",
+        }),
+      ],
+      { ...profile, statuses: ["accepting_bids"] },
+      20,
+    );
+    expect(siteBadge.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-005"]);
+
     const everything = selectRelevantSearchCards(hits, { ...profile, statuses: [] }, 20);
     expect(everything.cards).toHaveLength(3);
   });

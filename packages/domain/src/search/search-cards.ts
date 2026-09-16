@@ -164,8 +164,35 @@ export function hitMatchesProfileStatuses(
   statuses: readonly ProcedureStatusValue[] | undefined,
 ): boolean {
   if (statuses === undefined || statuses.length === 0) return true;
-  if (hit.status === undefined || hit.status === "unknown") return true;
-  return statuses.includes(hit.status);
+  const status = statusFromListing(hit);
+  if (status === undefined || status === "unknown") return true;
+  return statuses.includes(status);
+}
+
+/**
+ * Trust the site badge first. «Подача предложений» and «Приём предложений»
+ * are the same accepting-bids state; a wrong enum from the kind column
+ * must not hide that row.
+ */
+function statusFromListing(hit: SearchHitValue): ProcedureStatusValue | undefined {
+  const badge = hit.sourceStatus
+    ?.normalize("NFKC")
+    .toLocaleLowerCase("ru-BY")
+    .replace(/ё/gu, "е");
+  if (badge !== undefined && isAcceptingBidsBadge(badge)) return "accepting_bids";
+  return hit.status;
+}
+
+function isAcceptingBidsBadge(normalized: string): boolean {
+  return (
+    normalized.includes("подача предложений") ||
+    normalized.includes("прием предложений") ||
+    normalized.includes("подать предложени") ||
+    normalized.includes("подача документов") ||
+    normalized.includes("прием документов") ||
+    normalized.includes("подать документ") ||
+    normalized.includes("сбор предложений")
+  );
 }
 
 /**

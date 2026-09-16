@@ -85,6 +85,11 @@ describe("termOccurs", () => {
     expect(termOccurs("Набор аспирационный хирургический тип Янкувер", "НКУ")).toBe(false);
     expect(termOccurs("Закупка НКУ (УКН) 0,4 кВ", "НКУ")).toBe(true);
   });
+
+  it("treats КТПБ inside БКТПБ as the same object the site matched", () => {
+    expect(termOccurs("Выбор поставщика подстанции (БКТПБ №3)", "КТПБ")).toBe(true);
+    expect(termOccurs("2БКТПБ 400кВА-10/0,4 кВ", "КТПБ")).toBe(true);
+  });
 });
 
 describe("listingMatchesAnyKeyword", () => {

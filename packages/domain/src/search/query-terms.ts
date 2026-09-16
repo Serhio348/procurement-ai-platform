@@ -264,8 +264,10 @@ function textStemSequences(text: string): string[][] {
 export function termOccurs(text: string, term: string): boolean {
   const needle = normaliseSearchText(term);
   if (needle.length === 0) return false;
+  const strength = termMatchStrength(text, term);
+  if (strength === "exact" || strength === "embedded") return true;
   if (!needle.includes(" ") && withoutHyphens(needle, "").length <= 3) {
-    return termMatchStrength(text, term) === "exact";
+    return false;
   }
   for (const hay of textStemSequences(text)) {
     for (const needles of termStemSequences(term)) {

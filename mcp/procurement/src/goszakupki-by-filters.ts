@@ -74,6 +74,14 @@ export function goszakupkiStatusIds(
   for (const option of options) {
     const mapped = procedureStatus(option.label);
     if (mapped === "unknown" || !wanted.has(mapped)) continue;
+    // Profile «Подача предложений» is one site checkbox. «Подача документов/
+    // сведений» is another code (SubmissionEss) and must not be added.
+    if (
+      mapped === "accepting_bids" &&
+      option.label.replace(/\s+/gu, " ").toLocaleLowerCase("ru-BY").includes("документ")
+    ) {
+      continue;
+    }
     if (ids.includes(option.value)) continue;
     ids.push(option.value);
   }
@@ -84,11 +92,14 @@ export function searchQueryStatusIds(
   query: Pick<SearchQuery, "statusIds" | "statuses">,
   options: readonly GoszakupkiStatusOption[],
 ): string[] {
+  const allowed = new Set(options.map((option) => option.value));
   const mapped = goszakupkiStatusIds(query.statuses, options);
   const ids: string[] = [];
   for (const value of [...query.statusIds, ...mapped]) {
-    if (value.trim().length === 0 || ids.includes(value)) continue;
-    ids.push(value);
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || ids.includes(trimmed)) continue;
+    if (allowed.size > 0 && !allowed.has(trimmed)) continue;
+    ids.push(trimmed);
   }
   return ids;
 }

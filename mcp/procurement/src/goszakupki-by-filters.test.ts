@@ -28,11 +28,8 @@ describe("goszakupki search status filters", () => {
     ]);
   });
 
-  it("maps the profile Подача предложений checkbox to both accepting-bids site codes", () => {
-    expect(goszakupkiStatusIds(["accepting_bids"], FALLBACK_STATUS_OPTIONS)).toEqual([
-      "Submission",
-      "SubmissionEss",
-    ]);
+  it("maps the profile Подача предложений checkbox to the site Submission code", () => {
+    expect(goszakupkiStatusIds(["accepting_bids"], FALLBACK_STATUS_OPTIONS)).toEqual(["Submission"]);
   });
 
   it("uses the live form values, not the fallback names, when the form was parsed", async () => {
@@ -43,6 +40,15 @@ describe("goszakupki search status filters", () => {
     const options = parseGoszakupkiSearchFilters(html).statuses;
     expect(
       searchQueryStatusIds({ statusIds: [], statuses: ["accepting_bids"] }, options),
-    ).toEqual(["1", "2"]);
+    ).toEqual(["1"]);
+  });
+
+  it("drops a leftover numeric status when the live form uses Submission", () => {
+    expect(
+      searchQueryStatusIds(
+        { statusIds: ["1"], statuses: ["accepting_bids"] },
+        FALLBACK_STATUS_OPTIONS,
+      ),
+    ).toEqual(["Submission"]);
   });
 });

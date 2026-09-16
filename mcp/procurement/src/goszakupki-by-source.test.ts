@@ -227,7 +227,7 @@ describe("GoszakupkiBySource", () => {
     const searchPath = String(get.mock.calls[1]?.[0]);
     expect(decodeURIComponent(searchPath)).toContain("TendersSearch[text]=КТПБ");
     expect(decodeURIComponent(searchPath)).toContain("TendersSearch[status][]=1");
-    expect(decodeURIComponent(searchPath)).toContain("TendersSearch[status][]=2");
+    expect(decodeURIComponent(searchPath)).not.toContain("TendersSearch[status][]=2");
     expect(decodeURIComponent(searchPath)).not.toContain("TendersSearch[type]");
   });
 
@@ -285,7 +285,7 @@ describe("GoszakupkiBySource", () => {
     expect(searchPath).toContain("TendersSearch[auction_date_to]=25.09.2026");
     expect(searchPath).toContain("TendersSearch[type][]=Auction");
     expect(searchPath).toContain("TendersSearch[status][]=1");
-    expect(searchPath).toContain("TendersSearch[status][]=2");
+    expect(searchPath).not.toContain("TendersSearch[status][]=2");
     expect(searchPath).toContain("TendersSearch[region][]=4");
   });
 

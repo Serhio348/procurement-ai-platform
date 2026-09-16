@@ -111,6 +111,37 @@ describe("remembered review verdicts", () => {
     expect(restored.snapshot().reviewedIrrelevant).toEqual([]);
   });
 
+  it("keeps one review verdict per profile and source when loading duplicates", () => {
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profile().id;
+    const restored = SpecialistWorkspace.parse({
+      ...workspace.snapshot(),
+      reviewedIrrelevant: [
+        {
+          profileId,
+          sourceProcurementId: "auction/1",
+          decidedAt: "2026-09-01T10:00:00.000Z",
+          algorithmVersion: "search-review-v4",
+        },
+        {
+          profileId,
+          sourceProcurementId: "auction/1",
+          decidedAt: "2026-09-10T10:00:00.000Z",
+          algorithmVersion: "search-review-v4",
+        },
+      ],
+    });
+
+    expect(restored.snapshot().reviewedIrrelevant).toEqual([
+      {
+        profileId,
+        sourceProcurementId: "auction/1",
+        decidedAt: "2026-09-10T10:00:00.000Z",
+        algorithmVersion: "search-review-v4",
+      },
+    ]);
+  });
+
   it("remembers an irrelevant hit per profile and forgets it when the phrases change", () => {
     const workspace = new SpecialistWorkspace();
     const first = workspace.profile().id;

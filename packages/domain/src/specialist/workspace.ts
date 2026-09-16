@@ -83,8 +83,10 @@ export class SpecialistWorkspace {
       workspace.#decisions.push(SpecialistTriageDecision.parse(decision));
     }
     workspace.#dismissedInboxIds = [...state.dismissedInboxIds];
-    workspace.#reviewedIrrelevant = state.reviewedIrrelevant.filter(
-      (item) => item.algorithmVersion === REVIEW_ALGORITHM_VERSION,
+    workspace.#reviewedIrrelevant = dedupeReviewVerdicts(
+      state.reviewedIrrelevant.filter(
+        (item) => item.algorithmVersion === REVIEW_ALGORITHM_VERSION,
+      ),
     );
     workspace.#archivedSourceIds = new Set(state.archivedSourceIds);
     workspace.#searchIdsByProfile = Object.fromEntries(
@@ -427,4 +429,19 @@ function sourceIdsWithLatestKind(
     if (current === kind) ids.add(sourceProcurementId);
   }
   return ids;
+}
+
+/** One verdict per profile+source; keeps the newest decidedAt. */
+export function dedupeReviewVerdicts<
+  T extends { profileId: string; sourceProcurementId: string; decidedAt: string },
+>(verdicts: readonly T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const verdict of verdicts) {
+    const key = `${verdict.profileId}\0${verdict.sourceProcurementId}`;
+    const previous = byKey.get(key);
+    if (previous === undefined || previous.decidedAt <= verdict.decidedAt) {
+      byKey.set(key, verdict);
+    }
+  }
+  return [...byKey.values()];
 }

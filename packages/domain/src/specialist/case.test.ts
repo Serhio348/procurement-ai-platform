@@ -301,12 +301,31 @@ describe("uuidFromHex", () => {
 });
 
 describe("cardProcedureKindLabel", () => {
-  it("prefers the stored label and falls back to the platform kind", () => {
+  it("prefers the platform field, then a stored label, then a path-aware fallback", () => {
     expect(procedureKindLabel("electronic_auction")).toBe("электронный аукцион");
-    expect(cardProcedureKindLabel({ kindLabel: "открытый конкурс" })).toBe("открытый конкурс");
-    expect(cardProcedureKindLabel({ sourceCard: { kind: "single_source" } })).toBe(
-      "закупка из одного источника",
-    );
+    expect(
+      cardProcedureKindLabel({
+        kindLabel: "иная процедура",
+        sourceProcurementId: "limited/1",
+        sourceCard: {
+          kind: "other",
+          rawFields: { "Вид процедуры закупки": "Конкурс с ограниченным участием" },
+        },
+      }),
+    ).toBe("Конкурс с ограниченным участием");
+    expect(
+      cardProcedureKindLabel({
+        sourceProcurementId: "limited/3664162",
+        sourceCard: { kind: "open_tender" },
+      }),
+    ).toBe("конкурс с ограниченным участием");
+    expect(
+      cardProcedureKindLabel({
+        kindLabel: "иная процедура",
+        sourceProcurementId: "etrade/1",
+        sourceCard: { kind: "other" },
+      }),
+    ).toBe("открытый конкурс");
     expect(cardProcedureKindLabel({})).toBeUndefined();
   });
 });

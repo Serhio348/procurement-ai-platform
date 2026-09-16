@@ -121,7 +121,7 @@ export function compileSpecialistCase(raw: unknown): ReturnType<typeof Specialis
     url: run.card.url,
     sourceProcurementId: run.card.sourceProcurementId,
     live: true,
-    kindLabel: procedureKindLabel(run.card.kind),
+    kindLabel: printedProcedureKindLabel(run.card) ?? procedureKindLabel(run.card.kind),
     ...(buyerName(run.card) === undefined ? {} : { buyerName: buyerName(run.card) }),
     ...(amountLabel(run.card) === undefined ? {} : { amountLabel: amountLabel(run.card) }),
     documents: run.documents,
@@ -417,13 +417,59 @@ export function procedureKindLabel(kind: ProcedureKind): string {
   }
 }
 
-/** Prefer the stored label; fall back to the platform card kind when listing is slim. */
+/** Verbatim «Вид процедуры закупки» from the platform card when the adapter stored it. */
+export function printedProcedureKindLabel(source: {
+  kind?: ProcedureKind | undefined;
+  rawFields?: Record<string, string> | undefined;
+  sourceProcurementId?: string | undefined;
+}): string | undefined {
+  const raw = source.rawFields?.["Вид процедуры закупки"]?.trim();
+  if (raw !== undefined && raw.length > 0) return raw;
+  return procedureKindLabelForSource(source.sourceProcurementId, source.kind);
+}
+
+/**
+ * Prefer the platform field «Вид процедуры закупки», then a stored label,
+ * then a path-aware enum label. Never invent «иная» when the URL family
+ * already names the procedure.
+ */
 export function cardProcedureKindLabel(card: {
   kindLabel?: string | undefined;
-  sourceCard?: { kind?: ProcedureKind | undefined } | undefined;
+  sourceProcurementId?: string | undefined;
+  sourceCard?:
+    | {
+        kind?: ProcedureKind | undefined;
+        rawFields?: Record<string, string> | undefined;
+        sourceProcurementId?: string | undefined;
+      }
+    | undefined;
 }): string | undefined {
-  if (card.kindLabel !== undefined && card.kindLabel.trim().length > 0) return card.kindLabel;
-  const kind = card.sourceCard?.kind;
+  const raw = card.sourceCard?.rawFields?.["Вид процедуры закупки"]?.trim();
+  if (raw !== undefined && raw.length > 0) return raw;
+  if (card.kindLabel !== undefined && card.kindLabel.trim().length > 0) {
+    if (!isCoarseOtherLabel(card.kindLabel)) return card.kindLabel;
+  }
+  return procedureKindLabelForSource(
+    card.sourceCard?.sourceProcurementId ?? card.sourceProcurementId,
+    card.sourceCard?.kind,
+  );
+}
+
+function procedureKindLabelForSource(
+  sourceProcurementId: string | undefined,
+  kind: ProcedureKind | undefined,
+): string | undefined {
+  const family = sourceProcurementId?.split("/")[0];
+  if (family === "limited") return "конкурс с ограниченным участием";
+  if (family === "marketing") return "заявка о ценах (тарифах)";
+  if (family === "etrade" && (kind === undefined || kind === "other" || kind === "open_tender")) {
+    return "открытый конкурс";
+  }
   if (kind === undefined) return undefined;
   return procedureKindLabel(kind);
+}
+
+function isCoarseOtherLabel(label: string): boolean {
+  const normalized = label.normalize("NFKC").toLocaleLowerCase("ru-BY").trim();
+  return normalized === "иная процедура" || normalized === "иная";
 }

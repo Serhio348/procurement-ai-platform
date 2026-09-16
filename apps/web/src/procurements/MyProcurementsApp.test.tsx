@@ -78,6 +78,34 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("закупка из одного источника")).toBeTruthy();
   });
 
+  it("does not show coarse «иная» when the URL family names a limited contest", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[
+            SpecialistProcurementCard.parse({
+              ...card,
+              url: "https://goszakupki.by/limited/view/2",
+              sourceProcurementId: "limited/2",
+              kindLabel: "иная процедура",
+              sourceCard: {
+                sourceId: "goszakupki_by",
+                sourceProcurementId: "limited/2",
+                url: "https://goszakupki.by/limited/view/2",
+                title: card.title,
+                kind: "other",
+                fetchedAt: "2026-09-01T00:00:00.000Z",
+              },
+            }),
+          ]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("конкурс с ограниченным участием")).toBeTruthy();
+    expect(screen.queryByText("иная процедура")).toBeNull();
+  });
+
   it("shows live ingest progress on a participate card", () => {
     render(
       <MemoryRouter initialEntries={["/my-procurements"]}>

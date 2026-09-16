@@ -10,7 +10,7 @@ import {
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
   type ProcedureStatus as ProcedureStatusValue,
 } from "@procurement/contracts";
-import { statusLabel, uuidFromHex } from "../specialist/case.js";
+import { cardProcedureKindLabel, statusLabel, uuidFromHex } from "../specialist/case.js";
 import { cheapClassifyHit, type CheapClassifyProfile } from "./cheap-classify.js";
 import { listingKeepsPlatformHit, termOccurs } from "./query-terms.js";
 import { termMatches } from "./term-match.js";
@@ -336,6 +336,12 @@ function foundCard(
   extras: { relevanceScore?: number; relevanceReason?: string } = {},
 ): SpecialistProcurementCardValue {
   const label = amountLabel(hit);
+  const kindLabel =
+    hit.kindLabel?.trim() ||
+    cardProcedureKindLabel({
+      sourceProcurementId: hit.sourceProcurementId,
+      sourceCard: hit.kind === undefined ? undefined : { kind: hit.kind },
+    });
   return SpecialistProcurementCard.parse({
     id: ProcurementId.parse(uuidFromHex(`${hit.sourceId}:${hit.sourceProcurementId}`)),
     title: hit.title,
@@ -345,6 +351,7 @@ function foundCard(
     sourceProcurementId: hit.sourceProcurementId,
     live: hit.sourceId === "goszakupki_by",
     foundAs,
+    ...(kindLabel === undefined || kindLabel.length === 0 ? {} : { kindLabel }),
     ...(hit.buyerName === undefined ? {} : { buyerName: hit.buyerName }),
     ...(label === undefined ? {} : { amountLabel: label }),
     ...(extras.relevanceScore === undefined ? {} : { relevanceScore: extras.relevanceScore }),

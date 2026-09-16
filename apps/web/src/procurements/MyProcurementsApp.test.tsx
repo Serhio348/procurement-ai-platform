@@ -47,7 +47,8 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
   });
 
-  it("shows the full title, procedure kind, buyer and contact on the mine card", () => {
+  it("clamps a long title on the tile and keeps the full text for hover", async () => {
+    const user = userEvent.setup();
     const longTitle =
       "Комплект панелей по типу ЩО-70 для комплектации объекта «Реконструкция здания главного корпуса и здания поликлиники»";
     render(
@@ -73,6 +74,10 @@ describe("MyProcurementsApp", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("heading", { level: 2, name: longTitle })).toBeTruthy();
+    expect(document.querySelector(".my-procurements-card-title-clamp")).toBeTruthy();
+    expect(document.querySelector(".my-procurements-card-title-full")).toBeNull();
+    await user.hover(screen.getByRole("heading", { level: 2, name: longTitle }));
+    expect(document.querySelector(".my-procurements-card-title-full")?.textContent).toBe(longTitle);
     expect(screen.getByText("Вид процедуры")).toBeTruthy();
     expect(screen.getByText("закупка из одного источника")).toBeTruthy();
     expect(screen.getByText("Брестэнерго")).toBeTruthy();

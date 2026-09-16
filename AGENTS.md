@@ -77,6 +77,7 @@
 - [`docs/architecture/STAGE-73.md`](docs/architecture/STAGE-73.md) — вид процедуры с площадки, не «иная»
 - [`docs/architecture/STAGE-74.md`](docs/architecture/STAGE-74.md) — «Мои закупки»: карточки, страницы и профили
 - [`docs/architecture/STAGE-75.md`](docs/architecture/STAGE-75.md) — upsert вердиктов поиска без 23505
+- [`docs/architecture/STAGE-76.md`](docs/architecture/STAGE-76.md) — заголовок карточки: обрезка, hover, ровная сетка
 
 ---
 
@@ -278,6 +279,7 @@ docs/architecture/ Документы этапов
 - Этап 73 — вид процедуры: поле «Вид процедуры закупки» и путь URL, не «иная»
 - Этап 74 — «Мои закупки»: ровные карточки, пагинация, фильтр по профилю
 - Этап 75 — сохранение профиля: upsert вердиктов, без duplicate key 23505
+- Этап 76 — «Мои закупки»: обрезка длинного заголовка, hover, ровные карточки
   плитки
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,

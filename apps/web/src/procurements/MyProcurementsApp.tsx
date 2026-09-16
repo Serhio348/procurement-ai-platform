@@ -60,6 +60,36 @@ function printDeadline(raw: string | undefined): string | undefined {
   return `${match[3]}.${match[2]}.${match[1]}`;
 }
 
+function CardTitle({ title }: { title: string }): ReactElement {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <h2
+      className={
+        expanded ? "my-procurements-card-title is-expanded" : "my-procurements-card-title"
+      }
+      onMouseEnter={() => {
+        setExpanded(true);
+      }}
+      onMouseLeave={() => {
+        setExpanded(false);
+      }}
+      onFocus={() => {
+        setExpanded(true);
+      }}
+      onBlur={() => {
+        setExpanded(false);
+      }}
+    >
+      <span className="my-procurements-card-title-clamp">{title}</span>
+      {expanded ? (
+        <span className="my-procurements-card-title-full" aria-hidden="true">
+          {title}
+        </span>
+      ) : null}
+    </h2>
+  );
+}
+
 function CardIngestCaption({ ingest }: { ingest: SpecialistIngestProgress | undefined }) {
   const running = runningIngest(ingest);
   if (running === undefined) return null;
@@ -450,7 +480,7 @@ export function MyProcurementsApp({
                             : null}
                           <span className="my-procurements-card-id">{shortId(item.id)}</span>
                         </div>
-                        <h2 className="my-procurements-card-title">{item.title}</h2>
+                        <CardTitle title={item.title} />
                         <CardIngestCaption ingest={activeIngest[item.id]} />
                         <dl className="my-procurements-card-facts">
                           {procedureKind === undefined ? null : (

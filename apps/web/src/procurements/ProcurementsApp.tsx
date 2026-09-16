@@ -487,14 +487,6 @@ export function ProcurementsApp({
               </ul>
             </details>
           ) : null}
-          {listing ? (
-            <div className="search-overlay" role="status" aria-live="polite">
-              <div className="search-spinner">
-                <span className="search-spinner-pct">{searchPct}%</span>
-              </div>
-              <p className="search-overlay-text">Ищем закупки на площадке…</p>
-            </div>
-          ) : null}
           {items.length === 0 ? (
             <p className="empty">Нет закупок в работе</p>
           ) : (

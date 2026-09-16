@@ -32,6 +32,7 @@ describe("createProcurementSearchHits", () => {
       regionIds: [],
       typeIds: [],
       statusIds: [],
+      statuses: [],
       kinds: [],
       offset: 0,
     });

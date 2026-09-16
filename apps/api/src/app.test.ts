@@ -827,7 +827,7 @@ describe("specialist API", () => {
   });
 
   it("sends every filled advanced-search window on the source query", async () => {
-    const search = vi.fn(async () => [
+    const search = vi.fn(async (_query: Record<string, unknown>) => [
       SearchHit.parse({
         sourceId: "goszakupki_by",
         sourceProcurementId: "auction/3664806",
@@ -868,36 +868,22 @@ describe("specialist API", () => {
     });
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
 
-    const query = search.mock.calls[0]?.[0] as {
-      statuses?: string[];
-      typeIds?: string[];
-      regionIds?: string[];
-      buyerUnp?: string;
-      buyerText?: string;
-      procurementNumber?: string;
-      priceFrom?: number;
-      priceTo?: number;
-      publishedFrom?: string;
-      publishedTo?: string;
-      requestEndFrom?: string;
-      requestEndTo?: string;
-      auctionFrom?: string;
-      auctionTo?: string;
-    };
-    expect(query.statuses).toEqual(["accepting_bids"]);
-    expect(query.typeIds).toEqual(["Auction"]);
-    expect(query.regionIds).toEqual(["4"]);
-    expect(query.buyerUnp).toBe("123456789");
-    expect(query.buyerText).toBe("Гродноэнерго");
-    expect(query.procurementNumber).toBe("auc0003664806");
-    expect(query.priceFrom).toBe(1000);
-    expect(query.priceTo).toBe(500000);
-    expect(query.publishedFrom).toBe("2026-09-01T00:00:00+03:00");
-    expect(query.publishedTo).toBe("2026-09-30T00:00:00+03:00");
-    expect(query.requestEndFrom).toBe("2026-09-16T00:00:00+03:00");
-    expect(query.requestEndTo).toBe("2026-10-01T00:00:00+03:00");
-    expect(query.auctionFrom).toBe("2026-09-20T00:00:00+03:00");
-    expect(query.auctionTo).toBe("2026-09-25T00:00:00+03:00");
+    expect(search.mock.calls[0]?.[0]).toMatchObject({
+      statuses: ["accepting_bids"],
+      typeIds: ["Auction"],
+      regionIds: ["4"],
+      buyerUnp: "123456789",
+      buyerText: "Гродноэнерго",
+      procurementNumber: "auc0003664806",
+      priceFrom: 1000,
+      priceTo: 500000,
+      publishedFrom: "2026-09-01T00:00:00+03:00",
+      publishedTo: "2026-09-30T00:00:00+03:00",
+      requestEndFrom: "2026-09-16T00:00:00+03:00",
+      requestEndTo: "2026-10-01T00:00:00+03:00",
+      auctionFrom: "2026-09-20T00:00:00+03:00",
+      auctionTo: "2026-09-25T00:00:00+03:00",
+    });
 
     await app.close();
   });

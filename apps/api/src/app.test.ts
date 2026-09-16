@@ -1018,7 +1018,7 @@ describe("specialist API", () => {
         {
           sourceProcurementId: "auction/watched-review",
           kind: "monitor",
-          decidedAt: "2026-09-05T10:00:00.000Z",
+          madeAt: "2026-09-05T10:00:00.000Z",
         },
       ],
     });

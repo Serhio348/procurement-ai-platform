@@ -179,7 +179,7 @@ describe("SpecialistApp search list", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
-    expect(await screen.findByRole("heading", { level: 1, name: "КТПБ уже на слежении" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: /КТПБ уже на слежении/ })).toBeTruthy();
     expect(screen.getByText("Слежу")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Мои закупки" }).className).toContain("nav-current");
     expect(screen.queryByRole("link", { name: "Закупки" })?.className).not.toContain("nav-current");

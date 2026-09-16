@@ -15,13 +15,12 @@ import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createPostgresAuthDirectory } from "./auth/postgres-directory.js";
 import {
   countCabinetCases,
-  isPersistedCabinetCase,
+  isPersistableCabinetCase,
   isPrunableUndecidedCase,
   isWatchedTriage,
   pageListedCases,
   SpecialistCatalog,
   SpecialistWorkspace,
-  withoutSearchQueue,
 } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type {
@@ -59,6 +58,15 @@ export interface SpecialistPersistence {
   close: () => Promise<void>;
 }
 
+function persistableCabinetCases(cabinet: SpecialistCabinet): SpecialistProcurementCardValue[] {
+  const keep = new Set(
+    cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
+  );
+  return cabinet.catalog
+    .storedCases()
+    .filter((card) => isPersistableCabinetCase(card, keep));
+}
+
 /**
  * PostgreSQL is the system of record when DATABASE_URL answers.
  * The workspace JSON file stays as the offline / CI fallback.
@@ -93,7 +101,7 @@ export async function openSpecialistPersistence(options: {
     state: SpecialistWorkspaceState,
     workspaceId = defaultWorkspaceId,
   ): Promise<void> => {
-    const durable = SpecialistWorkspace.parse(withoutSearchQueue(state));
+    const durable = SpecialistWorkspace.parse(state);
     await saveWorkspaceFile(
       workspaceFilePath(options.workspacePath, workspaceId),
       durable,
@@ -196,7 +204,7 @@ export async function openSpecialistPersistence(options: {
         throw error;
       }
       await hydrateCabinet(cabinet, {
-        ...(fromDb === undefined ? {} : { workspace: withoutSearchQueue(fromDb) }),
+        ...(fromDb === undefined ? {} : { workspace: fromDb }),
         inbox,
       });
     } else {
@@ -210,7 +218,7 @@ export async function openSpecialistPersistence(options: {
         [],
       );
       await hydrateCabinet(cabinet, {
-        workspace: withoutSearchQueue(fromFile.snapshot()),
+        workspace: fromFile.snapshot(),
         cases,
         inbox,
       });
@@ -245,9 +253,7 @@ export async function openSpecialistPersistence(options: {
       cache.set(cabinet.workspaceId, cabinet);
       await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
       await persistCases(
-        cabinet.catalog
-          .storedCases()
-          .filter((card) => isPersistedCabinetCase(card) || card.foundAs === "review"),
+        persistableCabinetCases(cabinet),
         cabinet.workspaceId,
       );
       await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);

@@ -44,7 +44,7 @@ import {
   inferSearchIntentPlan,
   mergeSearchIntentPlans,
   isClosedProcedureStatus,
-  isPersistedCabinetCase,
+  isPersistableCabinetCase,
   isConsoleListedCase,
   partitionHitsByDecision,
   platformSearchTerms,
@@ -208,10 +208,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
     }
     if (options.persistCases !== undefined) {
+      const keep = new Set(
+        cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
+      );
       await options.persistCases(
-        cabinet.catalog
-          .storedCases()
-          .filter((card) => isPersistedCabinetCase(card) || card.foundAs === "review"),
+        cabinet.catalog.storedCases().filter((card) => isPersistableCabinetCase(card, keep)),
         cabinet.workspaceId,
       );
     }
@@ -744,8 +745,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       if (outcome?.verdict === "irrelevant") {
         discarded += 1;
         workspace().rememberIrrelevant(profile.id, item.card.sourceProcurementId, now);
-        catalog().forgetCase(item.card.id);
-        dropped.push(item.card.id);
+        const forgotten = dropFromProfileQueue(item.card.id, profile.id);
+        if (forgotten) dropped.push(item.card.id);
         searchProgress.scored(profile.id, {
           scoredCount,
           matchCount,
@@ -768,9 +769,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         });
         if (scoring.persistEach) {
           workspace().setDismissedInboxIds(catalog().dismissedIds());
-          await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
-          if (options.removeCases !== undefined) {
-            await options.removeCases([item.card.id], cabinet.workspaceId);
+          if (forgotten) {
+            await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
+            if (options.removeCases !== undefined) {
+              await options.removeCases([item.card.id], cabinet.workspaceId);
+            }
           }
           await persist(cabinet);
         }
@@ -786,8 +789,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         existing?.triage === undefined
       ) {
         discarded += 1;
-        catalog().forgetCase(item.card.id);
-        dropped.push(item.card.id);
+        const forgotten = dropFromProfileQueue(item.card.id, profile.id);
+        if (forgotten) dropped.push(item.card.id);
         searchProgress.scored(profile.id, {
           scoredCount,
           matchCount,
@@ -810,9 +813,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         });
         if (scoring.persistEach) {
           workspace().setDismissedInboxIds(catalog().dismissedIds());
-          await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
-          if (options.removeCases !== undefined) {
-            await options.removeCases([item.card.id], cabinet.workspaceId);
+          if (forgotten) {
+            await cabinets.removeCases(cabinet.workspaceId, [item.card.id]);
+            if (options.removeCases !== undefined) {
+              await options.removeCases([item.card.id], cabinet.workspaceId);
+            }
           }
           await persist(cabinet);
         }
@@ -930,6 +935,29 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   }
 
+  function searchQueueHas(profileId: string, cardId: string): boolean {
+    return workspace().searchIds(profileId).includes(cardId);
+  }
+
+  function heldOutsideProfile(cardId: string, profileId: string): boolean {
+    const card = catalog().procurement(cardId);
+    if (card?.triage !== undefined) return true;
+    return workspace()
+      .profiles()
+      .some((item) => item.id !== profileId && searchQueueHas(item.id, cardId));
+  }
+
+  /** Drop a discard from this profile only. Other queues and decisions stay. */
+  function dropFromProfileQueue(cardId: string, profileId: string): boolean {
+    workspace().replaceSearchIds(
+      profileId,
+      workspace().searchIds(profileId).filter((id) => id !== cardId),
+    );
+    if (heldOutsideProfile(cardId, profileId)) return false;
+    catalog().forgetCase(cardId);
+    return true;
+  }
+
   function searchQueueCards(profileId: string): SpecialistProcurementCardValue[] {
     const ids = workspace().searchIds(profileId);
     const byId = new Map<string, SpecialistProcurementCardValue>();
@@ -990,7 +1018,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       const already = known.get(card.sourceProcurementId);
       if (already?.foundAs === "match" && options.skipKnownIrrelevant) {
-        continue;
+        if (searchQueueHas(profile.id, already.id) || already.profileIds.includes(profile.id)) {
+          continue;
+        }
       }
       if (already?.foundAs === "review") {
         if (options.skipKnownIrrelevant) continue;
@@ -1117,7 +1147,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
     logSearchTrace(profile, selected);
     const now = clock();
-    if (offset === 0) workspace().replaceSearchIds(profile.id, []);
+    // Keep unprocessed hits for this profile. A later search appends; decide() removes.
     const collected = await collectPendingHits(selected, profile, now, {
       restoreReviewInbox: true,
       skipKnownIrrelevant: false,

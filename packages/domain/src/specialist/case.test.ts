@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compileSpecialistCase,
   isClosedProcedureStatus,
+  isPersistableCabinetCase,
   isPrunableUndecidedCase,
   uuidFromHex,
 } from "./case.js";
@@ -271,6 +272,20 @@ describe("isPrunableUndecidedCase", () => {
         new Set(),
         new Set(["00000000-0000-4000-8000-000000000001"]),
       ),
+    ).toBe(false);
+  });
+});
+
+describe("isPersistableCabinetCase", () => {
+  it("keeps an undecided search hit that is still in a profile queue", () => {
+    expect(
+      isPersistableCabinetCase(
+        { id: "00000000-0000-4000-8000-000000000001", foundAs: "match" },
+        new Set(["00000000-0000-4000-8000-000000000001"]),
+      ),
+    ).toBe(true);
+    expect(
+      isPersistableCabinetCase({ id: "00000000-0000-4000-8000-000000000001", foundAs: "match" }, new Set()),
     ).toBe(false);
   });
 });

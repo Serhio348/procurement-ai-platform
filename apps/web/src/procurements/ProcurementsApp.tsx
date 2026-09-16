@@ -209,6 +209,15 @@ export function ProcurementsApp({
   const scoring = searchRun?.status === "retrieving" || searchRun?.status === "scoring";
   const listing = busy && busyKind === undefined && !scoring;
   useEffect(() => {
+    if (listing) {
+      setSearchPct(0);
+      const timer = setInterval(() => {
+        setSearchPct((pct) =>
+          pct >= 90 ? pct : pct + Math.max(1, Math.round((90 - pct) * 0.08)),
+        );
+      }, 300);
+      return () => clearInterval(timer);
+    }
     if (searchRun !== undefined && searchRun.retrievedCount > 0) {
       const pct =
         searchRun.status === "done" || searchRun.status === "failed"
@@ -217,16 +226,10 @@ export function ProcurementsApp({
       setSearchPct(pct);
       return undefined;
     }
-    if (!listing && !scoring) {
+    if (!scoring) {
       setSearchPct(0);
-      return undefined;
     }
-    const timer = setInterval(() => {
-      setSearchPct((pct) =>
-        pct >= 90 ? pct : pct + Math.max(1, Math.round((90 - pct) * 0.08)),
-      );
-    }, 300);
-    return () => clearInterval(timer);
+    return undefined;
   }, [searchRun, listing, scoring]);
   useEffect(() => {
     if (searchRun === undefined) return;
@@ -241,6 +244,7 @@ export function ProcurementsApp({
       return;
     }
     if (searchRun.status !== "done") return;
+    if (searchRun.retrievedCount === 0 && searchRun.matchCount === 0) return;
     const listing =
       searchRun.listingDiscardedCount > 0
         ? ` В выдаче площадки не открывали ${String(searchRun.listingDiscardedCount)}.`
@@ -302,9 +306,19 @@ export function ProcurementsApp({
       showingSearch.current = true;
       setCatalogItems((current) => {
         const incoming = result.items.filter(isSearchQueueCard);
-        if (offset === 0) return incoming;
-        const seen = new Set(current.map((item) => item.id));
-        return [...current, ...incoming.filter((item) => !seen.has(item.id))];
+        const other =
+          chosenProfileId.length === 0
+            ? []
+            : current.filter(
+                (item) => isSearchQueueCard(item) && !item.profileIds.includes(chosenProfileId),
+              );
+        if (offset === 0) return [...other, ...incoming];
+        const seen = new Set([...other, ...incoming].map((item) => item.id));
+        return [
+          ...other,
+          ...incoming,
+          ...current.filter((item) => isSearchQueueCard(item) && !seen.has(item.id)),
+        ];
       });
       setHasMore(result.hasMore);
       setNextOffset(offset + 200);

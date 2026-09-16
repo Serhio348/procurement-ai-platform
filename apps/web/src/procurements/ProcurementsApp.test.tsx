@@ -354,6 +354,55 @@ describe("ProcurementsApp", () => {
     expect(screen.getByText("Почему не взяли (1)")).toBeTruthy();
   });
 
+  it("does not keep the previous search at 100% while a new listing runs", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                search={async () => {
+                  await gate;
+                  return {
+                    profileName: "КТП",
+                    relevantCount: 0,
+                    discardedCount: 0,
+                    items: [],
+                  };
+                }}
+                searchRun={{
+                  profileId: "00000000-0000-4000-8000-000000000901",
+                  profileName: "Кабель",
+                  status: "done",
+                  retrievedCount: 80,
+                  scoredCount: 80,
+                  matchCount: 7,
+                  discardedCount: 73,
+                  reviewCount: 0,
+                  listingDiscardedCount: 0,
+                  skipped: [],
+                }}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Искать по профилю" }));
+    const status = screen.getByRole("status").textContent ?? "";
+    expect(status).toMatch(/Ищем закупки на площадке/);
+    expect(status).not.toMatch(/100%/);
+    release();
+  });
+
   it("lets the specialist pick which profile to search", async () => {
     const user = userEvent.setup();
     const substations = SpecialistWorkingProfile.parse({

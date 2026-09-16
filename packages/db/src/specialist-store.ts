@@ -32,6 +32,20 @@ export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
 export const DEFAULT_CASE_LIST_LIMIT = 100;
 
+function searchIdsByProfileFromSettings(
+  settings: Record<string, unknown> | null | undefined,
+): Record<string, string[]> {
+  if (settings === undefined || settings === null) return {};
+  const raw = settings["searchIdsByProfile"];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [profileId, ids] of Object.entries(raw)) {
+    if (!Array.isArray(ids)) continue;
+    out[profileId] = ids.filter((item): item is string => typeof item === "string");
+  }
+  return out;
+}
+
 export interface SpecialistCaseListQuery {
   tab?: SpecialistProcurementListTab;
   limit?: number;
@@ -246,7 +260,7 @@ export function createSpecialistStore(db: Database) {
           archivedSourceIds: caseRows
             .filter((row) => row.archived)
             .map((row) => row.sourceProcurementId),
-          searchIdsByProfile: {},
+          searchIdsByProfile: searchIdsByProfileFromSettings(settingRows[0]?.settings),
         });
       });
     },
@@ -309,14 +323,14 @@ export function createSpecialistStore(db: Database) {
           .values({
             workspaceId,
             activeProfileId: state.activeProfileId,
-            settings: { searchIdsByProfile: {} },
+            settings: { searchIdsByProfile: state.searchIdsByProfile },
             updatedAt: now,
           })
           .onConflictDoUpdate({
             target: workspaceSettings.workspaceId,
             set: {
               activeProfileId: state.activeProfileId,
-              settings: { searchIdsByProfile: {} },
+              settings: { searchIdsByProfile: state.searchIdsByProfile },
               updatedAt: now,
             },
           });

@@ -121,11 +121,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     searchProfile === undefined
       ? undefined
       : async (offset?: number) => {
+          setSearchRun(undefined);
           const result = await searchProfile(offset);
           setProcurements((current) => {
             if (offset === undefined || offset === 0) {
               const kept = current.filter(
-                (item) => isWatchedTriage(item) || isRejectedTriage(item.triage),
+                (item) =>
+                  isWatchedTriage(item) ||
+                  isRejectedTriage(item.triage) ||
+                  (activeProfileId.length > 0 && !item.profileIds.includes(activeProfileId)),
               );
               return mergeProcurementCards(kept, result.items);
             }
@@ -296,12 +300,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             if (next.status !== "done" && next.status !== "failed") return;
             void list({ tab: "search", limit: 200 })
               .then((items) => {
-                setProcurements((current) => {
-                  const kept = current.filter(
-                    (item) => isWatchedTriage(item) || isRejectedTriage(item.triage),
-                  );
-                  return mergeProcurementCards(kept, items);
-                });
+                setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
               })
               .catch(() => undefined);
           })
@@ -310,12 +309,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       if (list !== undefined) {
         void list({ tab: "search", limit: 200 })
           .then((items) => {
-            setProcurements((current) => {
-              const kept = current.filter(
-                (item) => isWatchedTriage(item) || isRejectedTriage(item.triage),
-              );
-              return mergeProcurementCards(kept, items);
-            });
+            setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
           })
           .catch(() => undefined);
       }
@@ -328,7 +322,32 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       }
     }, 800);
     return () => window.clearInterval(timer);
-  }, [refreshInbox, searchRun]);
+  }, [activeProfileId, refreshInbox, searchRun]);
+
+  async function openProfileSearch(id: string): Promise<void> {
+    if (activateProfile !== undefined) {
+      remember(await activateProfile(id), true);
+    } else {
+      setActiveProfileId(id);
+    }
+    const list = listMineRef.current;
+    const pull = searchProgressRef.current;
+    if (list !== undefined) {
+      try {
+        const items = await list({ tab: "search", limit: 200 });
+        setProcurements((current) => mergeSearchPane(current, items, id));
+      } catch {
+        // Keep the cards already on screen for this profile.
+      }
+    }
+    if (pull !== undefined) {
+      try {
+        setSearchRun(await pull());
+      } catch {
+        setSearchRun(undefined);
+      }
+    }
+  }
 
   function showInSearchPane(card: SpecialistProcurementCard): void {
     const next =
@@ -444,7 +463,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 ? {}
                 : {
                     selectProfile: async (id: string) => {
-                      remember(await activateProfile(id), true);
+                      await openProfileSearch(id);
                     },
                   })}
               {...(decide === undefined ? {} : { decide })}
@@ -465,7 +484,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 ? {}
                 : {
                     selectProfile: async (id: string) => {
-                      remember(await activateProfile(id), true);
+                      await openProfileSearch(id);
                     },
                   })}
               {...(decide === undefined ? {} : { decide })}
@@ -623,6 +642,20 @@ function sameInboxItems(
   if (left === right) return true;
   if (left.length !== right.length) return false;
   return left.every((item, index) => item.id === right[index]?.id);
+}
+
+function mergeSearchPane(
+  current: readonly SpecialistProcurementCard[],
+  updates: readonly SpecialistProcurementCard[],
+  profileId: string,
+): SpecialistProcurementCard[] {
+  const kept = current.filter(
+    (item) =>
+      isWatchedTriage(item) ||
+      isRejectedTriage(item.triage) ||
+      (profileId.length > 0 && !item.profileIds.includes(profileId)),
+  );
+  return mergeProcurementCards(kept, updates);
 }
 
 /** Prefer the richer case (documents / source card) when the same id returns twice. */

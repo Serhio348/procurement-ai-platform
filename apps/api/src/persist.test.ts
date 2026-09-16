@@ -51,7 +51,7 @@ describe("openSpecialistPersistence", () => {
     await persistence.close();
   });
 
-  it("does not restore the search queue after a disk restart", async () => {
+  it("restores the search queue after a disk restart", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
     tmpDirs.push(directory);
     const workspacePath = path.join(directory, "specialist-workspace.json");
@@ -70,7 +70,9 @@ describe("openSpecialistPersistence", () => {
     const saved = JSON.parse(await readFile(workspacePath, "utf8")) as {
       searchIdsByProfile: Record<string, string[]>;
     };
-    expect(saved.searchIdsByProfile).toEqual({});
+    expect(saved.searchIdsByProfile).toEqual({
+      [workspace.profile().id]: ["00000000-0000-4000-8000-000000000701"],
+    });
 
     const restarted = await openSpecialistPersistence({
       workspacePath,
@@ -78,7 +80,9 @@ describe("openSpecialistPersistence", () => {
       logger: silentLogger,
     });
     const cabinet = await restarted.cabinets.open(TEST_WORKSPACE_ID);
-    expect(cabinet.workspace.searchIds(cabinet.workspace.profile().id)).toEqual([]);
+    expect(cabinet.workspace.searchIds(cabinet.workspace.profile().id)).toEqual([
+      "00000000-0000-4000-8000-000000000701",
+    ]);
     await restarted.close();
   });
 

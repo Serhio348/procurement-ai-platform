@@ -255,6 +255,75 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("keeps each profile search queue when the specialist switches profile", async () => {
+    const search = vi.fn(async (query: { keywords: string[] }) => {
+      if (query.keywords.includes("кабель")) {
+        return [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/cable-1",
+            url: "https://goszakupki.by/auction/view/cable-1",
+            title: "Поставка кабеля",
+          }),
+        ];
+      }
+      return [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/ktp-1",
+          url: "https://goszakupki.by/auction/view/ktp-1",
+          title: "Поставка КТПБ",
+        }),
+      ];
+    });
+    const persistCases = vi.fn(async (_cards: readonly unknown[]) => undefined);
+    const persistWorkspace = vi.fn(async (_state: unknown) => undefined);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search },
+      persistCases,
+      persistWorkspace,
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const firstId = (
+      JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
+    ).id;
+    const second = JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as {
+      id: string;
+    };
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${second.id}`,
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+    await app.inject({ method: "POST", url: `/api/profiles/${second.id}/activate` });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const secondQueue = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(secondQueue.items.map((item) => item.title)).toEqual(["Поставка КТПБ"]);
+
+    await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
+    const firstQueue = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(JSON.parse(first.body).items.map((item: { title: string }) => item.title)).toEqual([
+      "Поставка кабеля",
+    ]);
+    expect(firstQueue.items.map((item) => item.title)).toEqual(["Поставка кабеля"]);
+    const saved = persistWorkspace.mock.calls.at(-1)?.[0] as {
+      searchIdsByProfile?: Record<string, string[]>;
+    };
+    expect(Object.keys(saved.searchIdsByProfile ?? {}).length).toBeGreaterThanOrEqual(2);
+
+    await app.close();
+  });
+
   it("does not show a listing stub before the platform card is scored", async () => {
     const catalog = new SpecialistCatalog();
     catalog.upsertCase(
@@ -451,7 +520,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("does not persist an unused search hit for restart", async () => {
+  it("persists an unused search hit while it stays in the profile queue", async () => {
     const persistCases = vi.fn(async () => undefined);
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
@@ -485,7 +554,7 @@ describe("specialist API", () => {
       const cards = call[0];
       return Array.isArray(cards) ? (cards as Array<{ sourceProcurementId?: string }>) : [];
     });
-    expect(stored.some((card) => card.sourceProcurementId === "auction/persist-1")).toBe(false);
+    expect(stored.some((card) => card.sourceProcurementId === "auction/persist-1")).toBe(true);
 
     await app.close();
   });
@@ -551,17 +620,18 @@ describe("specialist API", () => {
       ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
     );
 
-    // Eight days later the source no longer returns anything. Untouched cases
-    // vanish from the catalog and the database; the opened one is still untouched
-    // by a decision, so it goes too. The incubator was never stored.
+    // A later empty search must not wipe the unread queue. The incubator was
+    // never stored.
     now = "2026-09-09T10:00:00.000Z";
     hits = [];
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const listedAfterPrune = await app.inject({ method: "GET", url: "/api/procurements" });
     const inboxAfterPrune = await app.inject({ method: "GET", url: "/api/inbox" });
-    expect(titles(listedAfterPrune.body)).toEqual([]);
+    expect(titles(listedAfterPrune.body).sort()).toEqual(
+      ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
+    );
     expect(titles(inboxAfterPrune.body)).toEqual([]);
-    expect(removeCases.mock.calls.some((call) => call[0]?.length === 2)).toBe(true);
+    expect(removeCases.mock.calls.some((call) => call[0]?.length === 2)).toBe(false);
 
     await app.close();
   });
@@ -1036,6 +1106,149 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("puts a shared discovery hit on the second profile without clearing the first queue", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/shared-nku",
+        url: "https://goszakupki.by/auction/view/shared-nku",
+        title: "Поставка НКУ 0,4 кВ",
+      }),
+    ];
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ", keywords: ["НКУ"] },
+    });
+    const firstId = (
+      JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
+    ).id;
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const firstQueue = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(firstQueue.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    const second = JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as {
+      id: string;
+    };
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${second.id}`,
+      payload: { name: "Насосы", keywords: ["НКУ"] },
+    });
+    await app.inject({ method: "POST", url: `/api/profiles/${second.id}/activate` });
+    await app.inject({
+      method: "POST",
+      url: `/api/profiles/${second.id}/watch`,
+      payload: { watchNewProcurements: true },
+    });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(JSON.parse(ran.body).ran).toBe(true);
+    const secondQueue = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(secondQueue.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
+    const firstAgain = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(firstAgain.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    await app.close();
+  });
+
+  it("does not drop another profile queue when discovery scores the same hit as irrelevant", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/keep-other",
+        url: "https://goszakupki.by/auction/view/keep-other",
+        title: "Поставка НКУ 0,4 кВ",
+      }),
+    ];
+    const removeCases = vi.fn(async (_ids: readonly string[]) => undefined);
+    const review = vi.fn(async (reviewed: readonly SearchHit[], profile: { name: string }) =>
+      reviewed.map(
+        (): ReviewOutcome =>
+          profile.name === "Насосы"
+            ? {
+                verdict: "irrelevant",
+                decidedBy: "model",
+                reason: "Не для насосов.",
+                matchedTerms: [],
+                confidence: 0.95,
+              }
+            : {
+                verdict: "relevant",
+                decidedBy: "card",
+                reason: "В лотах есть НКУ.",
+                matchedTerms: ["НКУ"],
+                confidence: 1,
+              },
+      ),
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      searchReview: { review },
+      removeCases,
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ", keywords: ["НКУ"] },
+    });
+    const firstId = (
+      JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
+    ).id;
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(async () => {
+      const listed = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+      expect(
+        (JSON.parse(listed.body).items as Array<{ title: string }>).map((item) => item.title),
+      ).toEqual(["Поставка НКУ 0,4 кВ"]);
+    });
+
+    const second = JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as {
+      id: string;
+    };
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${second.id}`,
+      payload: { name: "Насосы", keywords: ["НКУ"] },
+    });
+    await app.inject({ method: "POST", url: `/api/profiles/${second.id}/activate` });
+    await app.inject({
+      method: "POST",
+      url: `/api/profiles/${second.id}/watch`,
+      payload: { watchNewProcurements: true },
+    });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(JSON.parse(ran.body).ran).toBe(true);
+    expect(review.mock.calls.some((call) => call[1]?.name === "Насосы")).toBe(true);
+    const secondQueue = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(secondQueue.items).toEqual([]);
+    expect(removeCases).not.toHaveBeenCalled();
+
+    await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
+    const firstAgain = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+    ) as { items: Array<{ title: string }> };
+    expect(firstAgain.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    await app.close();
+  });
+
   it("asks the source only for procedures posted since the previous pass, and starts over when phrases change", async () => {
     const search = vi.fn(async (_query: { publishedFrom?: string | undefined }) => [] as SearchHit[]);
     let now = "2026-09-09T10:00:00.000Z";
@@ -1333,7 +1546,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("shows an explicitly requested finished match without storing it", async () => {
+  it("shows an explicitly requested finished match and keeps it in the search queue", async () => {
     const persistCases = vi.fn(async (_cards: readonly unknown[]) => undefined);
     const review = vi.fn(async (): Promise<ReviewOutcome[]> => [
       {
@@ -1389,7 +1602,7 @@ describe("specialist API", () => {
         status: "completed",
       }),
     ]);
-    expect(stored.some((card) => card.sourceProcurementId === "auction/closed-hit")).toBe(false);
+    expect(stored.some((card) => card.sourceProcurementId === "auction/closed-hit")).toBe(true);
 
     await app.close();
   });

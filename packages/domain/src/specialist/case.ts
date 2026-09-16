@@ -336,9 +336,19 @@ export function isClosedProcedureStatus(status: ProcedureStatus): boolean {
   return status === "completed" || status === "cancelled" || status === "failed";
 }
 
-/** Only a specialist decision belongs in SQL. A search hit is a temporary queue row. */
+/** A specialist decision belongs in SQL. */
 export function isPersistedCabinetCase(card: { triage?: string | undefined }): boolean {
   return card.triage !== undefined;
+}
+
+/** Decisions, review stubs, and the current per-profile search queue. */
+export function isPersistableCabinetCase(
+  card: { id?: string | undefined; triage?: string | undefined; foundAs?: string | undefined },
+  keepCaseIds: ReadonlySet<string>,
+): boolean {
+  if (isPersistedCabinetCase(card)) return true;
+  if (card.foundAs === "review") return true;
+  return card.id !== undefined && keepCaseIds.has(card.id);
 }
 
 /**

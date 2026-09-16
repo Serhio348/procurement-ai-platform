@@ -261,7 +261,7 @@ export function ProcurementsApp({
     catalogRef.current = catalog;
     // Parent refreshed a card (decide / inbox). Update rows already on screen
     // without swapping a search hit list for the whole database catalog.
-    setCatalogItems((current) => {
+    setCatalogItems(() => {
       const incoming = catalog.filter((item) => belongsToChosenProfile(item, chosenProfileId));
       return uniqueBySource(incoming);
     });
@@ -401,7 +401,6 @@ export function ProcurementsApp({
                       showingSearch.current = false;
                       const next = catalog.filter((item) => belongsToChosenProfile(item, id));
                       setCatalogItems(uniqueBySource(next));
-                      const profile = profiles.find((item) => item.id === id);
                       const keep = next.find((item) => item.id === selected?.id) ?? next[0];
                       void (async () => {
                         if (selectProfile !== undefined) await selectProfile(id);

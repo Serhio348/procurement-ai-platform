@@ -110,16 +110,22 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
 }
 
 /**
- * Every saved phrase remains a platform query. For a supply profile, plan
- * objects may add extra site queries. For works they must not: searching
- * the bare equipment noun pulls поставка listings and starves the work
- * phrases of the get-budget.
+ * True when the object noun without a desired verb is still "ours"
+ * (typical supply). Works and design need the verb from the plan.
+ */
+export function planAllowsBareObject(plan: { intent: string }): boolean {
+  return plan.intent !== "works" && plan.intent !== "design";
+}
+
+/**
+ * Every saved phrase remains a platform query. When the plan allows a bare
+ * object to count as a match, those objects may add extra site queries.
  */
 export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
 ): string[] {
-  const extra = plan.intent === "works" || plan.intent === "design" ? [] : plan.objects;
+  const extra = planAllowsBareObject(plan) ? plan.objects : [];
   const terms: string[] = [];
   const seen = new Set<string>();
   for (const value of [...fallbackKeywords, ...extra]) {

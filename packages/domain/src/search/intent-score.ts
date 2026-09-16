@@ -1,5 +1,5 @@
 import type { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
-import { inferSearchIntentPlan } from "./intent-plan.js";
+import { inferSearchIntentPlan, planAllowsBareObject } from "./intent-plan.js";
 import { firstTermIndex, termOccurs } from "./query-terms.js";
 
 /**
@@ -83,9 +83,7 @@ export function scoreSearchIntent(
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
   const serviceHead =
-    plan.intent !== "works" && matchedDesired.length === 0
-      ? purchaseWorkHead(leadingClause(title))
-      : undefined;
+    matchedDesired.length === 0 ? purchaseWorkHead(leadingClause(title)) : undefined;
   const excludedInTitle = [
     ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
     ...(serviceHead === undefined ? [] : [serviceHead.trim()]),
@@ -106,7 +104,7 @@ export function scoreSearchIntent(
     objectRole === "subject" &&
     matchedDesired.length === 0 &&
     excludedRole !== "subject" &&
-    plan.intent !== "works"
+    planAllowsBareObject(plan)
   ) {
     score += SEARCH_INTENT_WEIGHTS.IMPLICIT_PURCHASE_WEIGHT;
   }
@@ -180,10 +178,7 @@ export function scoreSearchIntentFromProcedure(
   card: ProcedureCard,
   plan: SearchIntentPlan,
 ): SearchIntentScore {
-  if (plan.intent === "works" || plan.intent === "design" || plan.intent === "mixed") {
-    return scoreSearchIntent({ title: procedureIntentText(card) }, plan);
-  }
-  return scorePurchaseProcedure(card, plan);
+  return scoreIntentProcedure(card, plan);
 }
 
 function lotIntentText(lot: ProcedureCard["lots"][number]): string {
@@ -196,11 +191,12 @@ function lotIntentText(lot: ProcedureCard["lots"][number]): string {
 }
 
 /**
- * Purchase profile: a work-headed title or works-only lot is not an implicit
- * supply just because the equipment is named. A lot that itself says
- * поставка / изготовление of the object can still match.
+ * One picker for every profile. Title and each lot are scored with the same
+ * matcher; the strongest clause wins. A work-headed title is not an implicit
+ * match just because the object is named somewhere. A lot that itself names
+ * the desired action and the object can still match.
  */
-function scorePurchaseProcedure(
+function scoreIntentProcedure(
   card: ProcedureCard,
   plan: SearchIntentPlan,
 ): SearchIntentScore {
@@ -209,13 +205,13 @@ function scorePurchaseProcedure(
   const clauses = [titleScore, ...lotScores];
   const mixed = clauses.find((item) => item.excludedRole === "peer" && item.objectRole !== "none");
   if (mixed !== undefined) return mixed;
-  const supply = clauses.find(
+  const explicit = clauses.find(
     (item) =>
       item.matchedDesired.length > 0 &&
       item.objectRole !== "none" &&
       item.excludedRole !== "subject",
   );
-  if (supply !== undefined) return supply;
+  if (explicit !== undefined) return explicit;
   const workWithObject = clauses.find(
     (item) => item.excludedRole === "subject" && item.objectRole !== "none",
   );
@@ -379,8 +375,7 @@ function decisionFor(
     if (desiredCount > 0) return "review";
     return "discard";
   }
-  // Works: the equipment noun without монтаж / ПНР is a supply or repair row.
-  if ((plan.intent === "works" || plan.intent === "design") && desiredCount === 0) {
+  if (!planAllowsBareObject(plan) && desiredCount === 0) {
     return "discard";
   }
   if (contextRole === "missing") return "review";
@@ -438,7 +433,11 @@ function relevanceReason(input: {
   }
   if (input.excludedRole === "mention") {
     parts.push("Упоминается сопутствующая работа, но не как предмет закупки.");
-  } else if (input.excluded.length === 0 && input.decision === "match") {
+  } else if (
+    input.excluded.length === 0 &&
+    input.decision === "match" &&
+    !input.desired.some((item) => /монтаж|наладк|проект|строительств/iu.test(item))
+  ) {
     parts.push("Признаков монтажных работ не обнаружено.");
   }
   if (parts.length === 0) return "По смыслу профиля закупка неясна — нужна проверка.";

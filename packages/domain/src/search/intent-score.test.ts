@@ -444,6 +444,54 @@ describe("scoreSearchIntent", () => {
     expect(scoreSearchIntentFromProcedure(card, worksPlan).decision).toBe("match");
     expect(scoreSearchIntentFromProcedure(card, nkuPlan).decision).not.toBe("match");
   });
+
+  it("reads the lot subject when the procedure title is generic or names a supply", () => {
+    const worksPlan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "монтаж электрооборудования",
+        "монтаж электросилового оборудования",
+        "пусконаладочные работы",
+        "наладка электрооборудования",
+      ],
+      excludeKeywords: [],
+    });
+
+    const inLot = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Открытый конкурс по объекту школа №5",
+        "Монтаж электросилового оборудования распределительного пункта, пусконаладочные работы",
+      ),
+      worksPlan,
+    );
+    expect(inLot.decision).toBe("match");
+    expect(inLot.matchedDesired.length).toBeGreaterThan(0);
+
+    const supplyHead = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Поставка электрооборудования для котельной",
+        "Монтаж электрооборудования и пусконаладочные работы",
+      ),
+      worksPlan,
+    );
+    expect(supplyHead.decision).toBe("match");
+    expect(supplyHead.matchedDesired).toEqual(expect.arrayContaining(["монтаж"]));
+
+    const split = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Электрооборудование распределительного пункта",
+        "Монтаж и пусконаладка",
+      ),
+      worksPlan,
+    );
+    expect(split.decision).not.toBe("match");
+
+    const supplyLot = scoreSearchIntentFromProcedure(
+      procedureCard("Открытый конкурс", "Поставка НКУ 0,4 кВ"),
+      nkuPlan,
+    );
+    expect(supplyLot.decision).toBe("match");
+  });
 });
 
 describe("parseSearchIntentPlan", () => {

@@ -8,7 +8,7 @@ import { parseGoszakupkiSearchPage } from "./goszakupki-by-parser.js";
 /**
  * Same GET as the site advanced search. No adapter scoring.
  *
- *   npm run diagnose:posted-search -- --text КТПБ --status 1
+ *   npm run diagnose:posted-search -- --text КТПБ --status Submission
  */
 
 await loadRepoEnv();
@@ -25,9 +25,24 @@ const options = parseGoszakupkiSearchFilters(form.body).statuses;
 out(`FORM ${String(form.status)} ${form.url}`);
 out(`status fields in HTML: ${options.length === 0 ? "none" : options.map((item) => `${item.value}=${item.label}`).join("; ")}`);
 
+const allowed = new Set(options.map((item) => item.value));
+let ids = statusIds;
+if (ids.length === 0) {
+  ids = options.filter((item) => item.label === "Подача предложений").map((item) => item.value);
+}
+const unknown = ids.filter((id) => allowed.size > 0 && !allowed.has(id));
+if (unknown.length > 0) {
+  const submission = options.find((item) => item.label === "Подача предложений")?.value;
+  out(`status codes not on the form: ${unknown.join(", ")}`);
+  if (submission !== undefined) {
+    out(`using ${submission} for Подача предложений`);
+    ids = [submission];
+  }
+}
+
 const parameters = new URLSearchParams();
 parameters.set("TendersSearch[text]", text);
-for (const id of statusIds) parameters.append("TendersSearch[status][]", id);
+for (const id of ids) parameters.append("TendersSearch[status][]", id);
 const path = `/tenders/posted?${parameters.toString()}`;
 out(`GET ${path}`);
 out(`decoded ${decodeURIComponent(path)}`);

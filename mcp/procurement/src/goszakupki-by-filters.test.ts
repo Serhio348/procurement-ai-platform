@@ -30,8 +30,8 @@ describe("goszakupki search status filters", () => {
 
   it("maps the profile Подача предложений checkbox to both accepting-bids site codes", () => {
     expect(goszakupkiStatusIds(["accepting_bids"], FALLBACK_STATUS_OPTIONS)).toEqual([
-      "Request",
-      "RequestDocs",
+      "Submission",
+      "SubmissionEss",
     ]);
   });
 

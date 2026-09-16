@@ -11,18 +11,27 @@ export interface GoszakupkiStatusOption {
 }
 
 /**
- * Yii class names used when the listing page arrives without the search
- * form (pjax fragment). Live `/tenders/posted` is parsed first; these
- * names match the same convention as the type filter (`Auction`, `Request`).
+ * Live `/tenders/posted` Select2 values (2026-09-16). Numeric 1–7 are not
+ * accepted: the site answers HTTP 500.
  */
 export const FALLBACK_STATUS_OPTIONS: readonly GoszakupkiStatusOption[] = [
-  { value: "Request", label: "Подача предложений" },
-  { value: "RequestDocs", label: "Подача документов/сведений" },
-  { value: "Consideration", label: "Рассмотрение предложений" },
-  { value: "Auction", label: "Проведение аукциона" },
-  { value: "Completed", label: "Завершена" },
-  { value: "Canceled", label: "Отменена" },
-  { value: "NotTookPlace", label: "Не состоялась" },
+  { value: "Submission", label: "Подача предложений" },
+  { value: "SubmissionEss", label: "Подача документов/сведений" },
+  { value: "Examination", label: "Рассмотрение предложений" },
+  { value: "WaitingForBargain", label: "Ожидание торгов" },
+  { value: "Bargain", label: "Проводятся торги" },
+  { value: "Quantification", label: "Определение победителя" },
+  { value: "Signing", label: "Подписание договора" },
+  { value: "Closed", label: "Завершен" },
+  { value: "Canceled", label: "Отменен" },
+  { value: "Manque", label: "Признан несостоявшимся" },
+  { value: "Paused", label: "Приостановлен" },
+  { value: "Preselection", label: "Предварительный отбор" },
+  { value: "DocsApproval", label: "Утверждение конкурсных документов" },
+  { value: "Different", label: "Различен по лотам" },
+  { value: "ProviderSelected", label: "Выбран продавец (поставщик)" },
+  { value: "ExaminationEss", label: "Рассмотрение документов/сведений" },
+  { value: "ManqueEss", label: "Завершен без выбора" },
 ];
 
 export function parseGoszakupkiSearchFilters(html: string): {

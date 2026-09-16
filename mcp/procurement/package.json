@@ -18,6 +18,7 @@
     "capture-case": "tsx src/capture-specialist-case.ts",
     "collect-eval-hits": "tsx src/collect-eval-hits.ts",
     "diagnose-site-search": "tsx src/diagnose-site-search.ts",
+    "diagnose-posted-search": "tsx src/diagnose-posted-search.ts",
     "live-limited-pipeline": "tsx src/live-limited-pipeline.ts"
   },
   "dependencies": {

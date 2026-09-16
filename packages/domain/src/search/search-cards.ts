@@ -154,14 +154,17 @@ export function hitMatchesProfileKeywords(
 
 /**
  * A hit without a parsed status is kept: missing data is not a finished
- * procedure. A hit whose status is normalized but not watched is dropped.
+ * procedure. The same for `unknown`: the listing badge was not mapped, so
+ * dropping it would hide «Подача предложений» when the profile watches
+ * «Приём предложений». A hit whose status is normalized but not watched
+ * is dropped.
  */
 export function hitMatchesProfileStatuses(
   hit: SearchHitValue,
   statuses: readonly ProcedureStatusValue[] | undefined,
 ): boolean {
   if (statuses === undefined || statuses.length === 0) return true;
-  if (hit.status === undefined) return true;
+  if (hit.status === undefined || hit.status === "unknown") return true;
   return statuses.includes(hit.status);
 }
 

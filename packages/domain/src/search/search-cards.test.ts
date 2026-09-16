@@ -156,6 +156,18 @@ describe("selectRelevantSearchCards", () => {
       "auction-003",
     ]);
 
+    const unknownBadge = selectRelevantSearchCards(
+      [
+        hit("auction-004", "Комплектная трансформаторная подстанция", {
+          status: "unknown",
+          sourceStatus: "Подача предложений",
+        }),
+      ],
+      { ...profile, statuses: ["accepting_bids"] },
+      20,
+    );
+    expect(unknownBadge.cards.map((card) => card.sourceProcurementId)).toEqual(["auction-004"]);
+
     const everything = selectRelevantSearchCards(hits, { ...profile, statuses: [] }, 20);
     expect(everything.cards).toHaveLength(3);
   });

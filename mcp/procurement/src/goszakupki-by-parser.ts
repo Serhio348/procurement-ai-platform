@@ -52,13 +52,15 @@ export function parseGoszakupkiSearchPage(
   pageUrl: string,
 ): ParsedGoszakupkiSearchPage {
   const $ = cheerio.load(html);
+  const table = $("tr[data-key]").first().closest("table");
+  const columns = listingColumns($, table);
   const rows = $("tr[data-key]")
     .toArray()
     .map((row) => {
       const cells = $(row).children("td");
-      const link = cells.eq(1).find('a[href*="/view/"]').first();
+      const link = $(row).find('a[href*="/view/"]').first();
       const href = link.attr("href");
-      if (cells.length < 6 || href === undefined) return undefined;
+      if (cells.length < 4 || href === undefined) return undefined;
       const targetUrl = new URL(href, pageUrl);
       const identity = targetUrl.pathname.match(
         /^\/(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)\/?$/,
@@ -67,13 +69,14 @@ export function parseGoszakupkiSearchPage(
       const family = identity[1];
       const title = text(link);
       if (title.length === 0) return undefined;
-      const buyerCell = cells.eq(1).clone();
+      const titleCell = link.closest("td");
+      const buyerCell = titleCell.clone();
       buyerCell.find("a").remove();
       const buyerName = text(buyerCell);
-      const sourceStatus = text(cells.eq(3));
-      const amount = parsePlatformAmount(text(cells.eq(5)));
-      const bidsDeadline = parsePlatformInstant(text(cells.eq(4)));
-      const kind = procedureKind(text(cells.eq(2)));
+      const sourceStatus = text(cells.eq(columns.status));
+      const amount = parsePlatformAmount(text(cells.eq(columns.amount)));
+      const bidsDeadline = parsePlatformInstant(text(cells.eq(columns.deadline)));
+      const kind = procedureKind(text(cells.eq(columns.kind)));
       return {
         hit: SearchHit.parse({
           sourceId: "goszakupki_by",
@@ -595,27 +598,73 @@ function aggregateSourceStatus(lots: readonly SourceLot[]): string | undefined {
   return statuses.length === 0 ? undefined : statuses.join("; ");
 }
 
+/**
+ * Listing column order is not a contract. The live table uses «Предложения,
+ * документы до» where the fixture said «Окончание приема предложений», and a
+ * checkbox column would shift every index. Read cells by header text.
+ */
+function listingColumns(
+  $: CheerioAPI,
+  table: Cheerio<AnyNode>,
+): { kind: number; status: number; deadline: number; amount: number } {
+  const headers = table
+    .find("thead th")
+    .toArray()
+    .map((header) => normalise(text($(header))));
+  const find = (...needles: string[]): number | undefined => {
+    for (const needle of needles) {
+      const index = headers.findIndex((item) => item.includes(needle));
+      if (index >= 0) return index;
+    }
+    return undefined;
+  };
+  return {
+    kind: find("вид") ?? 2,
+    status: find("статус") ?? 3,
+    deadline: find("окончани", "документы до") ?? 4,
+    amount: find("стоимость") ?? 5,
+  };
+}
+
 function procedureStatus(sourceStatus: string | undefined): ProcedureStatus {
   if (sourceStatus === undefined) return "unknown";
   const normalized = normalise(sourceStatus);
   // Checked first: a failed lot may still carry "рассмотрение" in its badge text.
   if (normalized.includes("несостоя")) return "failed";
-  if (
-    normalized.includes("подача предложений") ||
-    normalized.includes("подача документов") ||
-    normalized.includes("подать предложени") ||
-    normalized.includes("подать документ")
-  ) {
-    return "accepting_bids";
-  }
+  if (isAcceptingBidsStatus(normalized)) return "accepting_bids";
   if (normalized.includes("отмен")) return "cancelled";
   if (normalized.includes("заверш") || normalized.includes("заключен")) return "completed";
   if (normalized.includes("подписан")) return "bidding_closed";
-  if (normalized.includes("проведени") || normalized.includes("аукцион")) {
+  if (
+    /торги\s+идут|идут\s+торг/u.test(normalized) ||
+    (normalized.includes("проведени") &&
+      (normalized.includes("аукцион") || normalized.includes("торг")))
+  ) {
     return "auction_in_progress";
   }
   if (normalized.includes("рассмотр")) return "under_review";
+  if (normalized.includes("объявлен")) return "announced";
   return "unknown";
+}
+
+/**
+ * Site badge is «Подача предложений»; the profile checkbox is labelled
+ * «Приём предложений». Both, and the spelling without ё, are the same
+ * accepting-bids state. Do not treat «Электронный аукцион» (procedure kind)
+ * as a status — that used to map every auction row to auction_in_progress.
+ */
+function isAcceptingBidsStatus(normalized: string): boolean {
+  return (
+    normalized.includes("подача предложений") ||
+    normalized.includes("подача документов") ||
+    normalized.includes("подать предложени") ||
+    normalized.includes("подать документ") ||
+    normalized.includes("прием предложений") ||
+    normalized.includes("приём предложений") ||
+    normalized.includes("прием документов") ||
+    normalized.includes("приём документов") ||
+    normalized.includes("сбор предложений")
+  );
 }
 
 function procedureKind(label: string | undefined): ProcedureKind {

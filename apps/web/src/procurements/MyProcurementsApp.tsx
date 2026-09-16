@@ -450,20 +450,18 @@ export function MyProcurementsApp({
                             : null}
                           <span className="my-procurements-card-id">{shortId(item.id)}</span>
                         </div>
-                        <h2 className="my-procurements-card-title" title={item.title}>
-                          {item.title}
-                        </h2>
+                        <h2 className="my-procurements-card-title">{item.title}</h2>
                         <CardIngestCaption ingest={activeIngest[item.id]} />
                         <dl className="my-procurements-card-facts">
                           {procedureKind === undefined ? null : (
-                            <div>
-                              <dt>Вид</dt>
+                            <div className="my-procurements-card-fact-kind">
+                              <dt>Вид процедуры</dt>
                               <dd className="my-procurements-card-kind">{procedureKind}</dd>
                             </div>
                           )}
                           {item.amountLabel ? (
                             <div>
-                              <dt>Сумма</dt>
+                              <dt>Стоимость</dt>
                               <dd className="my-procurements-card-amount">{item.amountLabel}</dd>
                             </div>
                           ) : null}
@@ -474,14 +472,18 @@ export function MyProcurementsApp({
                             </div>
                           )}
                         </dl>
-                        {item.buyerName ? (
-                          <p className="my-procurements-card-buyer" title={item.buyerName}>
-                            {item.buyerName}
-                          </p>
+                        {item.buyerName || item.sourceCard?.buyer?.contact ? (
+                          <div className="my-procurements-card-buyer-block">
+                            {item.buyerName ? (
+                              <p className="my-procurements-card-buyer">{item.buyerName}</p>
+                            ) : null}
+                            {item.sourceCard?.buyer?.contact ? (
+                              <p className="my-procurements-card-contact">
+                                {item.sourceCard.buyer.contact}
+                              </p>
+                            ) : null}
+                          </div>
                         ) : null}
-                        <span className="my-procurements-card-footer" aria-hidden="true">
-                          Открыть карточку <span className="my-procurements-card-arrow">→</span>
-                        </span>
                       </button>
                       {isTrash ? (
                         <div className="my-procurements-card-actions">

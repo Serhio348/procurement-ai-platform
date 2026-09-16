@@ -47,7 +47,7 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
   });
 
-  it("shows a card title and procedure kind without a separate label row", () => {
+  it("shows the full title, procedure kind, buyer and contact on the mine card", () => {
     const longTitle =
       "Комплект панелей по типу ЩО-70 для комплектации объекта «Реконструкция здания главного корпуса и здания поликлиники»";
     render(
@@ -58,6 +58,14 @@ describe("MyProcurementsApp", () => {
               ...card,
               title: longTitle,
               kindLabel: "закупка из одного источника",
+              buyerName: "Брестэнерго",
+              sourceCard: {
+                ...card.sourceCard!,
+                buyer: {
+                  name: "Брестэнерго",
+                  contact: "Иванов Иван, +375291112233",
+                },
+              },
             }),
           ]}
           now={() => new Date("2026-08-01T10:00:00+03:00")}
@@ -65,8 +73,10 @@ describe("MyProcurementsApp", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("heading", { level: 2, name: longTitle })).toBeTruthy();
+    expect(screen.getByText("Вид процедуры")).toBeTruthy();
     expect(screen.getByText("закупка из одного источника")).toBeTruthy();
-    expect(screen.getByText("Открыть карточку")).toBeTruthy();
+    expect(screen.getByText("Брестэнерго")).toBeTruthy();
+    expect(screen.getByText("Иванов Иван, +375291112233")).toBeTruthy();
   });
 
   it("derives procedure kind from the platform card when kindLabel is missing", () => {

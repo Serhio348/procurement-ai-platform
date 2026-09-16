@@ -111,7 +111,7 @@ export const DEFAULT_CASE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  * watermark the source returns only what was posted since the last pass, so
  * this is a ceiling for the first pass and for busy days, not a per-hour cap.
  */
-export const DEFAULT_DISCOVERY_LIMIT = 100;
+export const DEFAULT_DISCOVERY_LIMIT = 200;
 /**
  * Decided cases one background pass re-reads. Each one costs a procurement.get,
  * so the ceiling keeps a growing watch list from turning an hourly pass into a
@@ -358,11 +358,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     if (tab === "search") {
       const items: SpecialistProcurementCardValue[] = [];
+      const seen = new Set<string>();
       for (const id of workspace().searchIds(workspace().profile().id)) {
-        const card = await resolveCase(id);
+        const card = (catalog().procurement(id) ?? (await resolveCase(id)));
         if (card === undefined) continue;
         if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
         if (!isScoredSearchMatch(card)) continue;
+        if (seen.has(card.sourceProcurementId)) continue;
+        seen.add(card.sourceProcurementId);
         items.push(slimListedCard(card));
       }
       return SpecialistProcurementListResponse.parse({
@@ -962,6 +965,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const ids = workspace().searchIds(profileId);
     const byId = new Map<string, SpecialistProcurementCardValue>();
     for (const item of catalog().procurements()) byId.set(item.id, item);
+    const seen = new Set<string>();
     return ids
       .map((id) => byId.get(id))
       .filter((card): card is SpecialistProcurementCardValue => card !== undefined)
@@ -970,7 +974,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           isScoredSearchMatch(card) &&
           !isRejectedTriage(card.triage) &&
           !isWatchedTriage(card),
-      );
+      )
+      .filter((card) => {
+        if (seen.has(card.sourceProcurementId)) return false;
+        seen.add(card.sourceProcurementId);
+        return true;
+      });
   }
 
   /**

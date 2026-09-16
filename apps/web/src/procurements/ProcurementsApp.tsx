@@ -197,7 +197,7 @@ export function ProcurementsApp({
 }) {
   const params = useParams();
   const navigate = useNavigate();
-  const [catalogItems, setCatalogItems] = useState(catalog);
+  const [catalogItems, setCatalogItems] = useState(() => uniqueBySource(catalog.filter(isSearchQueueCard)));
   const [chosenProfileId, setChosenProfileId] = useState(activeProfileId ?? profiles[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
@@ -263,25 +263,19 @@ export function ProcurementsApp({
     // without swapping a search hit list for the whole database catalog.
     setCatalogItems((current) => {
       const incoming = catalog.filter(isSearchQueueCard);
-      if (!showingSearch.current) return incoming;
-      const byId = new Map(incoming.map((item) => [item.id, item] as const));
-      const merged = current
-        .map((item) => byId.get(item.id) ?? item)
-        .filter(isSearchQueueCard);
-      const seen = new Set(merged.map((item) => item.id));
-      for (const item of incoming) {
-        if (!seen.has(item.id)) merged.push(item);
-      }
-      return merged;
+      if (!showingSearch.current) return uniqueBySource(incoming);
+      return uniqueBySource([...incoming, ...current.filter(isSearchQueueCard)]);
     });
   }
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
-  const items = catalogItems.filter((item) => {
-    if (!isSearchQueueCard(item)) return false;
-    if (chosenProfile === undefined) return true;
-    if (item.profileIds.length === 0) return true;
-    return item.profileIds.includes(chosenProfile.id);
-  });
+  const items = uniqueBySource(
+    catalogItems.filter((item) => {
+      if (!isSearchQueueCard(item)) return false;
+      if (chosenProfile === undefined) return true;
+      if (item.profileIds.length === 0) return true;
+      return item.profileIds.includes(chosenProfile.id);
+    }),
+  );
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
   const ingestForSelected =
     selected !== undefined &&
@@ -306,22 +300,25 @@ export function ProcurementsApp({
       showingSearch.current = true;
       setCatalogItems((current) => {
         const incoming = result.items.filter(isSearchQueueCard);
+        const incomingSources = new Set(incoming.map((item) => item.sourceProcurementId));
         const other =
           chosenProfileId.length === 0
             ? []
             : current.filter(
-                (item) => isSearchQueueCard(item) && !item.profileIds.includes(chosenProfileId),
+                (item) =>
+                  isSearchQueueCard(item) &&
+                  !item.profileIds.includes(chosenProfileId) &&
+                  !incomingSources.has(item.sourceProcurementId),
               );
-        if (offset === 0) return [...other, ...incoming];
-        const seen = new Set([...other, ...incoming].map((item) => item.id));
-        return [
-          ...other,
+        if (offset === 0) return uniqueBySource([...incoming, ...other]);
+        return uniqueBySource([
           ...incoming,
-          ...current.filter((item) => isSearchQueueCard(item) && !seen.has(item.id)),
-        ];
+          ...other,
+          ...current.filter(isSearchQueueCard),
+        ]);
       });
       setHasMore(result.hasMore);
-      setNextOffset(offset + 200);
+      setNextOffset(offset + 400);
       const run = result.run;
       const scored = run === undefined ? undefined : `${String(run.scoredCount)} из ${String(run.retrievedCount)}`;
       setNotice(
@@ -752,6 +749,19 @@ export function ProcurementsApp({
       </main>
     </Shell>
   );
+}
+
+function uniqueBySource(
+  cards: readonly SpecialistProcurementCard[],
+): SpecialistProcurementCard[] {
+  const seen = new Set<string>();
+  const out: SpecialistProcurementCard[] = [];
+  for (const card of cards) {
+    if (seen.has(card.sourceProcurementId)) continue;
+    seen.add(card.sourceProcurementId);
+    out.push(card);
+  }
+  return out;
 }
 
 function isSearchQueueCard(item: SpecialistProcurementCard): boolean {

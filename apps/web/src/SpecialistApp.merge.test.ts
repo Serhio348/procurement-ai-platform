@@ -48,4 +48,25 @@ describe("mergeProcurementCards", () => {
     expect(merged[1]?.sourceCard).toBeDefined();
     expect(merged[1]?.statusLabel).toBe("Рассмотрение предложений");
   });
+
+  it("keeps one row when the same source returns under two ids", () => {
+    const fromSearch = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000011",
+      title: "Комплекс средств защиты",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/marketing/view/3674081",
+      sourceProcurementId: "marketing/3674081",
+      foundAs: "match",
+    });
+    const fromStore = SpecialistProcurementCard.parse({
+      ...fromSearch,
+      id: "00000000-0000-4000-8000-000000000012",
+    });
+
+    const merged = mergeProcurementCards([fromSearch], [fromStore]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.sourceProcurementId).toBe("marketing/3674081");
+    expect(merged[0]?.id).toBe(fromStore.id);
+  });
 });

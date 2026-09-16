@@ -800,9 +800,11 @@ function tileCardExpression() {
 function parseCaseRow(row: WorkspaceCaseRow): SpecialistProcurementCardValue | undefined {
   const parsed = SpecialistProcurementCard.safeParse(row.card);
   if (!parsed.success) return undefined;
+  // Keep the card id from JSON. The SQL row id is cabinet-local so two
+  // workspaces can store the same source; swapping it here made search
+  // return a second identity for a hit the session already had.
   return SpecialistProcurementCard.parse({
     ...parsed.data,
-    id: row.id,
     canonicalProcurementId: row.procurementId,
     archived: row.archived,
     ...(row.triage === null ? {} : { triage: row.triage }),

@@ -298,7 +298,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             setSearchRun(next);
             if (list === undefined) return;
             if (next.status !== "done" && next.status !== "failed") return;
-            void list({ tab: "search", limit: 200 })
+            void list({ tab: "search", limit: 400 })
               .then((items) => {
                 setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
               })
@@ -307,7 +307,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           .catch(() => undefined);
       }
       if (list !== undefined) {
-        void list({ tab: "search", limit: 200 })
+        void list({ tab: "search", limit: 400 })
           .then((items) => {
             setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
           })
@@ -334,7 +334,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     const pull = searchProgressRef.current;
     if (list !== undefined) {
       try {
-        const items = await list({ tab: "search", limit: 200 });
+        const items = await list({ tab: "search", limit: 400 });
         setProcurements((current) => mergeSearchPane(current, items, id));
       } catch {
         // Keep the cards already on screen for this profile.
@@ -649,11 +649,13 @@ function mergeSearchPane(
   updates: readonly SpecialistProcurementCard[],
   profileId: string,
 ): SpecialistProcurementCard[] {
+  const updateSources = new Set(updates.map((item) => item.sourceProcurementId));
   const kept = current.filter(
     (item) =>
-      isWatchedTriage(item) ||
-      isRejectedTriage(item.triage) ||
-      (profileId.length > 0 && !item.profileIds.includes(profileId)),
+      !updateSources.has(item.sourceProcurementId) &&
+      (isWatchedTriage(item) ||
+        isRejectedTriage(item.triage) ||
+        (profileId.length > 0 && !item.profileIds.includes(profileId))),
   );
   return mergeProcurementCards(kept, updates);
 }
@@ -664,10 +666,16 @@ export function mergeProcurementCards(
   updates: readonly SpecialistProcurementCard[],
 ): SpecialistProcurementCard[] {
   const byId = new Map(current.map((item) => [item.id, item] as const));
+  const idBySource = new Map(current.map((item) => [item.sourceProcurementId, item.id] as const));
   for (const update of updates) {
-    const previous = byId.get(update.id);
+    const previousId = byId.has(update.id) ? update.id : idBySource.get(update.sourceProcurementId);
+    const previous = previousId === undefined ? undefined : byId.get(previousId);
+    if (previous !== undefined && previous.id !== update.id) {
+      byId.delete(previous.id);
+    }
     if (previous === undefined) {
       byId.set(update.id, update);
+      idBySource.set(update.sourceProcurementId, update.id);
       continue;
     }
     byId.set(update.id, {
@@ -680,10 +688,15 @@ export function mergeProcurementCards(
       watchSnapshot: update.watchSnapshot ?? previous.watchSnapshot,
       actions: update.actions.length > 0 ? update.actions : previous.actions,
     });
+    idBySource.set(update.sourceProcurementId, update.id);
   }
-  const order = [...current.map((item) => item.id)];
-  for (const update of updates) {
-    if (!order.includes(update.id)) order.push(update.id);
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const item of [...current, ...updates]) {
+    const id = idBySource.get(item.sourceProcurementId);
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    order.push(id);
   }
   return order
     .map((id) => byId.get(id))

@@ -403,6 +403,31 @@ describe("ProcurementsApp", () => {
     release();
   });
 
+  it("shows one row when the same procedure arrives under two ids", () => {
+    const first = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000411",
+      title: "Комплекс средств защиты и инструмента",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/marketing/view/3674081",
+      sourceProcurementId: "marketing/3674081",
+      foundAs: "match",
+    });
+    const second = SpecialistProcurementCard.parse({
+      ...first,
+      id: "00000000-0000-4000-8000-000000000412",
+    });
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route path="/procurements" element={<ProcurementsApp items={[first, second]} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getAllByRole("button", { name: /Комплекс средств защиты/ })).toHaveLength(1);
+  });
+
   it("lets the specialist pick which profile to search", async () => {
     const user = userEvent.setup();
     const substations = SpecialistWorkingProfile.parse({

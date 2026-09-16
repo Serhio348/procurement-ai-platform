@@ -121,6 +121,40 @@ describe("scoreSearchIntent", () => {
     expect(scoreSearchIntent({ title: "Поставка КТП с услугами шефмонтажа" }, plan).decision).toBe("match");
   });
 
+  it("vetoes reconstruction, construction and contractor titles for a supply profile", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Электротехническое оборудование",
+      keywords: ["КТПБ", "КТП", "НКУ", "подстанция"],
+      excludeKeywords: [],
+    });
+    for (const title of [
+      "Реконструкция трансформаторной подстанции",
+      "Строительство КТП 10/0,4 кВ",
+      "Прокладка кабеля к КТП",
+      "Выбор подрядчика на монтаж КТП",
+      "Выбор субподрядной организации по объекту КТП",
+    ]) {
+      const scored = scoreSearchIntent({ title }, plan);
+      expect(scored.decision, title).toBe("veto");
+      expect(scored.reason, title).toMatch(
+        /предмет закупки — (реконструкция|строительство|прокладка|подрядные работы|монтажные работы|работы)/,
+      );
+    }
+    expect(
+      scoreSearchIntentFromProcedure(
+        procedureCard("Реконструкция котельной", "НКУ 0,4 кВ"),
+        plan,
+      ).decision,
+    ).toBe("veto");
+    expect(
+      scoreSearchIntentFromProcedure(
+        procedureCard("Реконструкция котельной", "Поставка НКУ 0,4 кВ"),
+        plan,
+      ).decision,
+    ).toBe("match");
+    expect(scoreSearchIntent({ title: "КТП 400 кВА" }, plan).decision).toBe("match");
+  });
+
   it("lets the model widen the cheap plan but never drop its exclusions or objects", () => {
     const inferred = inferSearchIntentPlan({ name: "КТП", keywords: ["КТП"], excludeKeywords: [] });
     const fromModel = SearchIntentPlan.parse({
@@ -190,7 +224,7 @@ describe("scoreSearchIntent", () => {
   it("does not auto-match NCU that appears only in extra text", () => {
     const result = scoreSearchIntent(
       {
-        title: "Реконструкция насосной станции",
+        title: "Закупка для насосной станции",
         extraText: "в комплекте упомянуто НКУ",
       },
       nkuPlan,
@@ -198,6 +232,18 @@ describe("scoreSearchIntent", () => {
     expect(result.decision).not.toBe("match");
     expect(result.score).toBeLessThan(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
     expect(result.reason).toMatch(/дополнительн/i);
+  });
+
+  it("vetoes a reconstruction title even when NCU is only in extra text", () => {
+    const result = scoreSearchIntent(
+      {
+        title: "Реконструкция насосной станции",
+        extraText: "в комплекте упомянуто НКУ",
+      },
+      nkuPlan,
+    );
+    expect(result.decision).toBe("veto");
+    expect(result.reason).toMatch(/реконструкц/i);
   });
 
   it("discards a title with no target object instead of sending score 0 to review", () => {

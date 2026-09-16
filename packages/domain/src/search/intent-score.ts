@@ -62,13 +62,7 @@ const WORK_LEAD =
 const SIDE_MENTION =
   /с\s+последующ|силами\s+заказчика|включая\s+|в\s+том\s+числе/iu;
 
-/**
- * A title whose head noun is a generic service/work carrier. For a purchase
- * profile that is the subject, whatever equipment is named after it:
- * «Инжиниринговые услуги (… сетей электроснабжения)» is not a supply.
- */
-const SERVICE_HEAD =
-  /^(?:[\p{L}-]+\s+)?(?:услуг[аи]|работ[аы]|выполнени[ея]\s+работ|оказани[ея]\s+услуг|обслуживани[ея]|инжиниринг\p{L}*|эксплуатаци[яи])(?=$|[^\p{L}])/iu;
+const HEAD_FILLER = /^(по|на|для|к|ко|о|об|с|со|от|до|из|и|или|при)$/iu;
 
 /**
  * Code-owned 0–100 score. The model must not call this and must not invent
@@ -90,7 +84,7 @@ export function scoreSearchIntent(
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
   const serviceHead =
     plan.intent !== "works" && matchedDesired.length === 0
-      ? SERVICE_HEAD.exec(leadingClause(title).trim())?.[0]
+      ? purchaseWorkHead(leadingClause(title))
       : undefined;
   const excludedInTitle = [
     ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
@@ -186,7 +180,53 @@ export function scoreSearchIntentFromProcedure(
   card: ProcedureCard,
   plan: SearchIntentPlan,
 ): SearchIntentScore {
-  return scoreSearchIntent({ title: procedureIntentText(card) }, plan);
+  if (plan.intent === "works" || plan.intent === "design" || plan.intent === "mixed") {
+    return scoreSearchIntent({ title: procedureIntentText(card) }, plan);
+  }
+  return scorePurchaseProcedure(card, plan);
+}
+
+function lotIntentText(lot: ProcedureCard["lots"][number]): string {
+  const parts: string[] = [lot.title];
+  if (lot.description !== undefined && lot.description.length > 0) {
+    parts.push(lot.description);
+  }
+  for (const position of lot.positions) parts.push(position.title);
+  return parts.join(" ");
+}
+
+/**
+ * Purchase profile: a work-headed title or works-only lot is not an implicit
+ * supply just because the equipment is named. A lot that itself says
+ * поставка / изготовление of the object can still match.
+ */
+function scorePurchaseProcedure(
+  card: ProcedureCard,
+  plan: SearchIntentPlan,
+): SearchIntentScore {
+  const titleScore = scoreSearchIntent({ title: card.title }, plan);
+  const lotScores = card.lots.map((lot) => scoreSearchIntent({ title: lotIntentText(lot) }, plan));
+  const clauses = [titleScore, ...lotScores];
+  const mixed = clauses.find((item) => item.excludedRole === "peer" && item.objectRole !== "none");
+  if (mixed !== undefined) return mixed;
+  const supply = clauses.find(
+    (item) =>
+      item.matchedDesired.length > 0 &&
+      item.objectRole !== "none" &&
+      item.excludedRole !== "subject",
+  );
+  if (supply !== undefined) return supply;
+  const workWithObject = clauses.find(
+    (item) => item.excludedRole === "subject" && item.objectRole !== "none",
+  );
+  if (workWithObject !== undefined) return workWithObject;
+  const work = clauses.find((item) => item.excludedRole === "subject");
+  if (work !== undefined) return work;
+  const implicit = clauses.find(
+    (item) => item.objectRole !== "none" && item.decision !== "discard",
+  );
+  if (implicit !== undefined) return implicit;
+  return titleScore;
 }
 
 function contextRoleFor(
@@ -224,7 +264,11 @@ function excludedActionRole(
   const inLead = found.some((item) => termOccurs(lead, item));
   if (!inLead) return "mention";
   if (desiredIndex !== -1 && enumeratesTogether(title, found, matchedDesired)) return "peer";
-  if (found.some((item) => startsWithTerm(lead, item)) || WORK_LEAD.test(lead.trim())) {
+  if (
+    found.some((item) => startsWithTerm(lead, item)) ||
+    WORK_LEAD.test(lead.trim()) ||
+    purchaseWorkHead(lead) !== undefined
+  ) {
     return "subject";
   }
   return "subject";
@@ -251,8 +295,58 @@ function enumeratesTogether(
 }
 
 function leadingClause(title: string): string {
-  const cut = title.search(/[,;(]|с\s+последующ/iu);
+  const cut = title.search(/[\n,;(]|с\s+последующ/iu);
   return cut === -1 ? title : title.slice(0, cut);
+}
+
+/**
+ * First content words of the title name the subject. For a purchase profile
+ * «Реконструкция КТП» / «Выбор подрядчика … КТП» is works, not an implicit
+ * supply of the equipment mentioned later or only in a lot line.
+ */
+function purchaseWorkHead(lead: string): string | undefined {
+  const trimmed = lead.trim();
+  if (trimmed.length === 0) return undefined;
+  const prefix = trimmed.slice(0, 120);
+  if (/выполнени[ея]\s+работ/iu.test(prefix)) return "работы";
+  if (/оказани[ея]\s+услуг/iu.test(prefix)) return "услуги";
+  if (/(?:капитальн|текущ)\p{L}*\s+ремонт/iu.test(prefix)) return "ремонт";
+  if (/устройств\p{L}*\s+(?:сетей|дорог|фундамент|покрыт|систем)/iu.test(prefix)) {
+    return "работы";
+  }
+  const tokens = trimmed.split(/[^\p{L}\p{N}-]+/u).filter((token) => token.length > 0);
+  const content: string[] = [];
+  for (const token of tokens) {
+    if (HEAD_FILLER.test(token)) continue;
+    content.push(token);
+    if (content.length === 2) break;
+  }
+  for (const token of content) {
+    const label = workHeadLabel(token);
+    if (label !== undefined) return label;
+  }
+  return undefined;
+}
+
+function workHeadLabel(token: string): string | undefined {
+  const lower = token.toLocaleLowerCase("ru-BY").replace(/ё/gu, "е");
+  if (lower === "смр") return "СМР";
+  if (lower === "пнр") return "пусконаладочные работы";
+  if (/^услуг/u.test(lower)) return "услуги";
+  if (/^работ/u.test(lower) && !/^разработ/u.test(lower)) return "работы";
+  if (/^выполнени/u.test(lower)) return "работы";
+  if (/^оказани/u.test(lower)) return "услуги";
+  if (/^обслуживан/u.test(lower)) return "обслуживание";
+  if (/^инжиниринг/u.test(lower)) return "услуги";
+  if (/^эксплуатац/u.test(lower)) return "эксплуатация";
+  if (/^реконструкц/u.test(lower)) return "реконструкция";
+  if (/^строительств/u.test(lower) || /^строительно/u.test(lower)) return "строительство";
+  if (/^прокладк/u.test(lower)) return "прокладка";
+  if (/^подряд/u.test(lower) || /^субподряд/u.test(lower)) return "подрядные работы";
+  if (/^демонтаж/u.test(lower)) return "демонтаж";
+  if (/^электромонтаж/u.test(lower) || /^шефмонтаж/u.test(lower)) return "монтажные работы";
+  if (/^модернизац/u.test(lower)) return "работы";
+  return undefined;
 }
 
 function startsWithTerm(text: string, term: string): boolean {
@@ -352,6 +446,11 @@ function workLabel(action: string): string {
   if (lower.includes("услуг") || lower.includes("инжиниринг")) return "услуги";
   if (/^работ|выполнени/u.test(lower)) return "работы";
   if (lower.includes("эксплуатац")) return "эксплуатация";
+  if (lower.includes("реконструкц")) return "реконструкция";
+  if (lower.includes("строительств") || lower === "смр") return "строительство";
+  if (lower.includes("проклад")) return "прокладка";
+  if (lower.includes("подряд")) return "подрядные работы";
+  if (lower.includes("демонтаж")) return "демонтаж";
   if (lower.includes("монтаж")) return "монтажные работы";
   if (lower.includes("ремонт")) return "ремонт";
   if (lower.includes("обслуж")) return "обслуживание";

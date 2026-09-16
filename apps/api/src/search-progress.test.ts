@@ -15,6 +15,8 @@ describe("createSearchProgressHub", () => {
       matchCount: 0,
       discardedCount: 2,
       reviewCount: 8,
+      listingDiscardedCount: 0,
+      skipped: [],
     });
     hub.scored(profileId, { scoredCount: 1, matchCount: 1, discardedCount: 2, reviewCount: 0 });
     expect(hub.snapshot(profileId)).toMatchObject({

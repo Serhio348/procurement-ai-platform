@@ -278,7 +278,7 @@ export type SpecialistProcurementListTab = z.infer<typeof SpecialistProcurementL
 
 export const SpecialistProcurementListQuery = z.object({
   tab: SpecialistProcurementListTab.default("listed"),
-  limit: z.coerce.number().int().positive().max(200).default(100),
+  limit: z.coerce.number().int().positive().max(500).default(100),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
 export type SpecialistProcurementListQuery = z.infer<typeof SpecialistProcurementListQuery>;

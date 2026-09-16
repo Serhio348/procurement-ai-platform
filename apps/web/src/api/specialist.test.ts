@@ -88,7 +88,7 @@ describe("searchProcurements", () => {
       });
     });
     expect(method).toBe("POST");
-    expect(body).toBe('{"limit":200,"offset":0}');
+    expect(body).toBe('{"limit":400,"offset":0}');
     expect(result.relevantCount).toBe(1);
     expect(result.items[0]?.title).toBe("Комплектная трансформаторная подстанция");
   });

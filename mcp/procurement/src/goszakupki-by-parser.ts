@@ -47,6 +47,9 @@ export interface ParsedGoszakupkiSearchPage {
   hasNextPage: boolean;
 }
 
+const PROCEDURE_VIEW_PATH =
+  /^\/(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)\/?$/;
+
 export function parseGoszakupkiSearchPage(
   html: string,
   pageUrl: string,
@@ -58,18 +61,10 @@ export function parseGoszakupkiSearchPage(
     .toArray()
     .map((row) => {
       const cells = $(row).children("td");
-      const link = $(row).find('a[href*="/view/"]').first();
-      const href = link.attr("href");
-      if (cells.length < 4 || href === undefined) return undefined;
-      const targetUrl = new URL(href, pageUrl);
-      const identity = targetUrl.pathname.match(
-        /^\/(auction|marketing|request|etrade|single-source|limited)\/view\/(\d+)\/?$/,
-      );
-      if (identity?.[1] === undefined || identity[2] === undefined) return undefined;
-      const family = identity[1];
-      const title = text(link);
-      if (title.length === 0) return undefined;
-      const titleCell = link.closest("td");
+      const procedure = listingProcedureLink($, row, pageUrl);
+      if (cells.length < 4 || procedure === undefined) return undefined;
+      const targetUrl = new URL(procedure.href, pageUrl);
+      const titleCell = procedure.anchor.closest("td");
       const buyerCell = titleCell.clone();
       buyerCell.find("a").remove();
       const buyerName = text(buyerCell);
@@ -80,10 +75,10 @@ export function parseGoszakupkiSearchPage(
       return {
         hit: SearchHit.parse({
           sourceId: "goszakupki_by",
-          sourceProcurementId: `${family}/${identity[2]}`,
+          sourceProcurementId: `${procedure.family}/${procedure.id}`,
           url: targetUrl.href,
-          title,
-          pageFamily: pageFamilyFromSegment(family),
+          title: procedure.title,
+          pageFamily: pageFamilyFromSegment(procedure.family),
           kind,
           ...(sourceStatus.length === 0
             ? {}
@@ -101,6 +96,57 @@ export function parseGoszakupkiSearchPage(
     .filter((row) => row !== undefined);
   const hasNextPage = $(".pagination li.next:not(.disabled) a[href]").length > 0;
   return { rows, hasNextPage };
+}
+
+/**
+ * Live GIAS ids are often a link whose href contains `/view/` but is not the
+ * procedure card. Taking the first such link used to drop the whole row.
+ * Prefer the procedure `/auction|marketing|…/view/{id}` whose text is a title.
+ */
+function listingProcedureLink(
+  $: CheerioAPI,
+  row: AnyNode,
+  pageUrl: string,
+):
+  | {
+      href: string;
+      family: string;
+      id: string;
+      title: string;
+      anchor: Cheerio<AnyNode>;
+    }
+  | undefined {
+  const candidates: Array<{
+    href: string;
+    family: string;
+    id: string;
+    title: string;
+    anchor: Cheerio<AnyNode>;
+  }> = [];
+  for (const element of $(row).find("a[href]").toArray()) {
+    const anchor = $(element);
+    const href = anchor.attr("href");
+    if (href === undefined) continue;
+    let pathname: string;
+    try {
+      pathname = new URL(href, pageUrl).pathname;
+    } catch {
+      continue;
+    }
+    const identity = pathname.match(PROCEDURE_VIEW_PATH);
+    if (identity?.[1] === undefined || identity[2] === undefined) continue;
+    candidates.push({
+      href,
+      family: identity[1],
+      id: identity[2],
+      title: text(anchor),
+      anchor,
+    });
+  }
+  const titled = candidates.filter(
+    (item) => item.title.length > 0 && !/^\d+$/u.test(item.title),
+  );
+  return titled[0] ?? candidates.find((item) => item.title.length > 0);
 }
 
 export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGoszakupkiCard {

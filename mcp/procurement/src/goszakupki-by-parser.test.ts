@@ -89,6 +89,38 @@ describe("parseGoszakupkiCard", () => {
     expect(parsed.rows[1]?.hit.status).toBe("accepting_bids");
   });
 
+  it("keeps the procedure card when a GIAS /view/ link sits before the title", () => {
+    const html = `<!doctype html><table>
+      <thead><tr>
+        <th></th>
+        <th>Номер закупки</th>
+        <th>Организация / Предмет закупки</th>
+        <th>Вид процедуры закупки</th>
+        <th>Статус</th>
+        <th>Предложения, документы до</th>
+        <th>Ориентировочная/предельная стоимость</th>
+      </tr></thead>
+      <tbody>
+        <tr data-key="0">
+          <td><input type="checkbox"></td>
+          <td><a href="https://gias.by/gias/#/purchase/current/view/4761844">4761844</a></td>
+          <td>Гродноэнерго<br><a href="/auction/view/3664806">Выбор поставщика блочной комплектной подстанции (БКТПБ №3)</a></td>
+          <td>Электронный аукцион</td>
+          <td><span class="badge">Подача предложений</span></td>
+          <td>27.09.2026</td>
+          <td>526 056.26 BYN</td>
+        </tr>
+      </tbody>
+    </table>`;
+    const parsed = parseGoszakupkiSearchPage(html, "https://goszakupki.by/tenders/posted");
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]?.hit).toMatchObject({
+      sourceProcurementId: "auction/3664806",
+      title: "Выбор поставщика блочной комплектной подстанции (БКТПБ №3)",
+      sourceStatus: "Подача предложений",
+    });
+  });
+
   it.each([
     ["auction", "9000001", "auction", "electronic_auction", "Поставка комплектной", "2026-09-01"],
     ["marketing", "9000002", "marketing", "other", "Поверка измерительных", "2026-09-01"],

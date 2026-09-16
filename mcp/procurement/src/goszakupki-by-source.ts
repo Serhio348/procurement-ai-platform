@@ -12,7 +12,7 @@ import {
   type SearchQuery,
   type SourceProcurementId,
 } from "@procurement/contracts";
-import { hitMatchesProfileStatuses, listingKeepsPlatformHit } from "@procurement/domain";
+import { listingKeepsPlatformHit } from "@procurement/domain";
 import { silentLogger, type Logger } from "@procurement/observability";
 import { expandPublicDocumentation } from "./documentation-expand.js";
 import type { ParsedGoszakupkiCard } from "./goszakupki-by-parser.js";
@@ -340,7 +340,6 @@ function matchesSearchRow(
   if (searchedTerm !== undefined && !listingKeepsPlatformHit(haystack, [searchedTerm])) {
     return false;
   }
-  if (!hitMatchesProfileStatuses(row.hit, query.statuses)) return false;
   return true;
 }
 

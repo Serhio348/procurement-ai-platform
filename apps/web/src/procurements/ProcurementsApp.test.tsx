@@ -354,6 +354,47 @@ describe("ProcurementsApp", () => {
     expect(screen.getByText("Почему не взяли (1)")).toBeTruthy();
   });
 
+  it("still lists listing skips when the run opened no cards", () => {
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                searchRun={{
+                  profileId: "00000000-0000-4000-8000-000000000901",
+                  profileName: "КТП",
+                  status: "done",
+                  retrievedCount: 0,
+                  scoredCount: 0,
+                  matchCount: 0,
+                  discardedCount: 0,
+                  reviewCount: 0,
+                  listingDiscardedCount: 1,
+                  skipped: [
+                    {
+                      sourceProcurementId: "marketing/1037877",
+                      title: "шкаф АСКУЭ",
+                      reason: "статус процедуры не входит в профиль",
+                      stage: "listing",
+                    },
+                  ],
+                }}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/не открывали 1/)).toBeTruthy();
+    expect(screen.getByText("Почему не взяли (1)")).toBeTruthy();
+    expect(screen.getByText("статус процедуры не входит в профиль")).toBeTruthy();
+    expect(screen.getByText("шкаф АСКУЭ")).toBeTruthy();
+  });
+
   it("does not keep the previous search at 100% while a new listing runs", async () => {
     const user = userEvent.setup();
     let release!: () => void;

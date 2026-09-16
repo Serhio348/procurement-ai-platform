@@ -1,4 +1,9 @@
-import { SearchQuery } from "@procurement/contracts";
+import { SearchQuery, SourceProcurementId } from "@procurement/contracts";
+import {
+  inferSearchIntentPlan,
+  scoreSearchIntentFromProcedure,
+  selectRelevantSearchCards,
+} from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import * as cheerio from "cheerio";
 import { readFile } from "node:fs/promises";
@@ -9,15 +14,19 @@ import { parseGoszakupkiSearchPage } from "./goszakupki-by-parser.js";
 import { GoszakupkiBySource } from "./goszakupki-by-source.js";
 
 /**
- * Same GET as the site advanced search. No adapter scoring.
+ * Site GET, then the same adapter + listing selection the console uses.
  *
  *   npm run diagnose:posted-search -- --text КТПБ --status Submission
+ *   npm run diagnose:posted-search -- --text КТПБ --status Submission --get
  */
 
 await loadRepoEnv();
 
-const text = arg("--text") ?? "КТПБ";
+const texts = all("--text");
+const text = texts[0] ?? "КТПБ";
+const keywords = texts.length === 0 ? [text] : texts;
 const statusIds = all("--status");
+const openCards = process.argv.includes("--get");
 const client = new GoszakupkiHttpClient({
   requestsPerMinute: 20,
   timeoutMs: 45_000,
@@ -91,20 +100,64 @@ const source = new GoszakupkiBySource({
 const adapter = await source.search(
   SearchQuery.parse({
     sourceId: "goszakupki_by",
-    keywords: [text],
+    keywords,
     statuses: ["accepting_bids"],
     limit: 50,
   }),
 );
-out(`ADAPTER hits=${String(adapter.hits.length)}`);
+out(`ADAPTER hits=${String(adapter.hits.length)} keywords=${keywords.join(" | ")}`);
 for (const hit of adapter.hits) {
-  out(`ADAPTER ${hit.sourceProcurementId}  ${hit.sourceStatus ?? "—"}  ${hit.title}`);
+  out(
+    `ADAPTER ${hit.sourceProcurementId}  ${hit.sourceStatus ?? "—"}  ${hit.title}  terms=${(hit.matchedSearchTerms ?? []).join(",")}`,
+  );
 }
 
-function arg(name: string): string | undefined {
-  const index = process.argv.indexOf(name);
-  if (index < 0) return undefined;
-  return process.argv[index + 1];
+const plan = inferSearchIntentPlan({
+  name: text,
+  keywords,
+  excludeKeywords: [],
+});
+const selected = selectRelevantSearchCards(
+  adapter.hits,
+  {
+    keywords,
+    excludeKeywords: [],
+    statuses: ["accepting_bids"],
+    intent: plan,
+  },
+  50,
+);
+out("");
+out("CONSOLE listing (same selectRelevantSearchCards as the API)");
+out(`  plan objects=${plan.objects.join(", ") || "—"} intent=${plan.intent}`);
+for (const card of selected.cards) {
+  out(`  MATCH ${card.sourceProcurementId}  ${card.title}`);
+}
+for (const card of selected.ambiguousCards) {
+  out(`  REVIEW ${card.sourceProcurementId}  ${card.title}`);
+}
+for (const item of selected.discarded) {
+  out(`  SKIP ${item.hit.sourceProcurementId}  ${item.reason}  ${item.hit.title}`);
+}
+if (selected.cards.length + selected.ambiguousCards.length + selected.discarded.length === 0) {
+  out("  (adapter returned no hits)");
+}
+
+if (openCards) {
+  out("");
+  out("CARD procurement.get + scoreSearchIntentFromProcedure");
+  for (const hit of adapter.hits) {
+    const card = await source.get(SourceProcurementId.parse(hit.sourceProcurementId));
+    const scored = scoreSearchIntentFromProcedure(card, plan);
+    out(`CARD ${hit.sourceProcurementId}  ${scored.decision}  ${scored.reason}`);
+    out(`  title ${card.title}`);
+    if (card.lots.length === 0) {
+      out("  lots none");
+    }
+    for (const lot of card.lots) {
+      out(`  lot ${lot.title}`);
+    }
+  }
 }
 
 function all(name: string): string[] {

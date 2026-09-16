@@ -244,7 +244,6 @@ export function ProcurementsApp({
       return;
     }
     if (searchRun.status !== "done") return;
-    if (searchRun.retrievedCount === 0 && searchRun.matchCount === 0) return;
     const listing =
       searchRun.listingDiscardedCount > 0
         ? ` В выдаче площадки не открывали ${String(searchRun.listingDiscardedCount)}.`
@@ -463,7 +462,7 @@ export function ProcurementsApp({
           ) : null}
           {notice === undefined ? null : <p className="search-notice">{notice}</p>}
           {searchRun !== undefined && searchRun.skipped.length > 0 ? (
-            <details className="search-skipped">
+            <details className="search-skipped" open>
               <summary>
                 Почему не взяли ({String(searchRun.skipped.length)})
               </summary>

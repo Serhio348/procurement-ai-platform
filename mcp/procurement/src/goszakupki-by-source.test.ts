@@ -231,6 +231,87 @@ describe("GoszakupkiBySource", () => {
     expect(decodeURIComponent(searchPath)).not.toContain("TendersSearch[type]");
   });
 
+  it("sends Submission when the listing page has no search form", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body:
+        path === "/tenders/posted"
+          ? "<html><body></body></html>"
+          : searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТПБ"],
+        statuses: ["accepting_bids"],
+        limit: 10,
+      }),
+    );
+
+    const searchPath = decodeURIComponent(String(get.mock.calls[1]?.[0]));
+    expect(searchPath).toContain("TendersSearch[status][]=Submission");
+    expect(searchPath).not.toContain("TendersSearch[status][]=1");
+  });
+
+  it("still returns a completed listing row the site leaked so the console can show the status skip", async () => {
+    const listingHtml = `<!doctype html><table>
+      <thead><tr>
+        <th></th>
+        <th>Номер закупки</th>
+        <th>Организация / Предмет закупки</th>
+        <th>Вид процедуры закупки</th>
+        <th>Статус</th>
+        <th>Предложения, документы до</th>
+        <th>Ориентировочная/предельная стоимость</th>
+      </tr></thead>
+      <tbody>
+        <tr data-key="0">
+          <td><input type="checkbox"></td>
+          <td><a href="https://gias.by/gias/#/purchase/current/view/4761844">4761844</a></td>
+          <td>Гродноэнерго<br><a href="/auction/view/3664806">Выбор поставщика блочной комплектной подстанции (БКТПБ №3)</a></td>
+          <td>Электронный аукцион</td>
+          <td><span class="badge">Подача предложений</span></td>
+          <td>27.09.2026</td>
+          <td>526 056.26 BYN</td>
+        </tr>
+        <tr data-key="1">
+          <td><input type="checkbox"></td>
+          <td><a href="https://gias.by/gias/#/purchase/current/view/1037877">1037877</a></td>
+          <td>Заказчик<br><a href="/marketing/view/1037877">шкаф АСКУЭ</a></td>
+          <td>Запрос ценовых предложений</td>
+          <td><span class="badge">Завершен</span></td>
+          <td>01.01.2020</td>
+          <td>1 BYN</td>
+        </tr>
+      </tbody>
+    </table>`;
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: path === "/tenders/posted" ? "<html></html>" : listingHtml,
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТПБ"],
+        statuses: ["accepting_bids"],
+        limit: 10,
+      }),
+    );
+
+    expect(result.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "auction/3664806",
+      "marketing/1037877",
+    ]);
+    expect(result.hits[0]?.title).toContain("БКТПБ №3");
+    expect(result.hits[1]?.sourceStatus).toBe("Завершен");
+  });
+
   it("puts every filled advanced-search window on the site URL", async () => {
     const formHtml = await readFile(
       fileURLToPath(

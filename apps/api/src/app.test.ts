@@ -1028,6 +1028,69 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("re-checks a saved review candidate on the next search instead of just restoring it (R05)", async () => {
+    const hit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/re-1",
+      url: "https://goszakupki.by/auction/view/re-1",
+      title: "Закупка НКУ",
+    });
+    const review = vi
+      .fn()
+      .mockImplementationOnce(async (reviewed: readonly SearchHit[]) =>
+        reviewed.map(
+          (): ReviewOutcome => ({
+            verdict: "needs_human",
+            decidedBy: "none",
+            reason: "Модель недоступна — проверьте по смыслу.",
+            matchedTerms: [],
+            confidence: 0,
+          }),
+        ),
+      )
+      .mockImplementation(async (reviewed: readonly SearchHit[]) =>
+        reviewed.map(
+          (): ReviewOutcome => ({
+            verdict: "relevant",
+            decidedBy: "model",
+            reason: "В лотах есть НКУ.",
+            matchedTerms: ["НКУ"],
+            confidence: 0.95,
+          }),
+        ),
+      );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [hit] },
+      searchReview: { review },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(async () => {
+      const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+      expect(
+        (JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title),
+      ).toEqual(["Закупка НКУ"]);
+    });
+    expect(review).toHaveBeenCalledTimes(1);
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
+    await vi.waitFor(async () => {
+      const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+      expect(
+        (JSON.parse(listed.body).items as Array<{ title: string }>).map((item) => item.title),
+      ).toContain("Закупка НКУ");
+    });
+
+    await app.close();
+  });
+
   it("puts a dismissed review hit back in the inbox on the next search", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),

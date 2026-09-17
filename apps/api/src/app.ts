@@ -872,7 +872,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         }
       } else {
         ambiguousCount += 1;
-        if (remembered.isNew) queueFoundInbox(remembered.card, now);
+        // Manual search resurfaces a still-undecided row (incl. a dismissed
+        // one); a discovery pass only announces genuinely new candidates so
+        // it cannot nag the specialist about the same card every hour.
+        if (remembered.isNew || !scoring.inboxForMatches) queueFoundInbox(remembered.card, now);
       }
       searchProgress.scored(profile.id, {
         scoredCount,
@@ -995,20 +998,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   /**
-   * Listing rows that still need a card score. Already-match and already-review
-   * cases are not opened again; a button search may put a dismissed review
-   * row back in the inbox, discovery must not.
+   * Listing rows that still need a card score. A stored review case means
+   * "could not decide", not a verdict: it goes back to pending so the card
+   * (and the model, when it is back) gets another look under the current
+   * profile — in the cabinet inbox it just waits for a human either way.
    */
   async function collectPendingHits(
     selected: ReturnType<typeof selectRelevantSearchCards>,
     profile: SpecialistWorkingProfile,
-    now: string,
-    options: { restoreReviewInbox: boolean; skipKnownIrrelevant: boolean },
+    options: { skipKnownIrrelevant: boolean },
   ): Promise<{
     pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>;
     skippedRejected: number;
     discardedFromReview: number;
-    restoredReview: number;
   }> {
     const rejected = workspace().rejectedSourceIds();
     const sourceIds = selected.ambiguousCards.map((item) => item.sourceProcurementId);
@@ -1021,7 +1023,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     let skippedRejected = 0;
     let discardedFromReview = 0;
-    let restoredReview = 0;
     const pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }> = [];
     for (const [index, card] of selected.ambiguousCards.entries()) {
       const hit = selected.ambiguousHits[index];
@@ -1043,18 +1044,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           continue;
         }
       }
-      if (already?.foundAs === "review") {
-        if (options.skipKnownIrrelevant) continue;
-        if (options.restoreReviewInbox) {
-          const remembered = await rememberFound(card, profile.id, now);
-          restoredReview += 1;
-          queueFoundInbox(remembered.card, now);
-          continue;
-        }
-      }
       pending.push({ card, hit });
     }
-    return { pending, skippedRejected, discardedFromReview, restoredReview };
+    return { pending, skippedRejected, discardedFromReview };
   }
 
   /**
@@ -1173,8 +1165,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (offset === 0) {
       workspace().replaceSearchIds(profile.id, []);
     }
-    const collected = await collectPendingHits(selected, profile, now, {
-      restoreReviewInbox: true,
+    const collected = await collectPendingHits(selected, profile, {
       skipKnownIrrelevant: false,
     });
     const listingDiscarded =
@@ -1188,7 +1179,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       scoredCount: 0,
       matchCount: 0,
       discardedCount: 0,
-      reviewCount: collected.restoredReview,
+      reviewCount: 0,
       listingDiscardedCount: listingDiscarded,
       skipped: selected.discarded.map((item) => ({
         sourceProcurementId: item.hit.sourceProcurementId,
@@ -1198,7 +1189,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       })),
     });
     let discardedCount = listingDiscarded;
-    let ambiguousCount = collected.restoredReview;
+    let ambiguousCount = 0;
     if (!background) {
       const scored = await scorePendingHits(collected.pending, profile, now, plan, {
         inboxForMatches: false,
@@ -1325,8 +1316,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         );
         logSearchTrace(profile, selected);
         const now = clock();
-        const collected = await collectPendingHits(selected, profile, now, {
-          restoreReviewInbox: false,
+        const collected = await collectPendingHits(selected, profile, {
           skipKnownIrrelevant: true,
         });
         const reviewed = await scorePendingHits(collected.pending, profile, now, plan, {

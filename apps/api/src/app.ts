@@ -222,6 +222,31 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   };
 
+  const persistProgress = async (
+    caseIds: readonly string[],
+    cabinet = currentCabinet(),
+  ): Promise<void> => {
+    await cabinets.persistProgress(cabinet, caseIds);
+    if (options.persistWorkspace !== undefined) {
+      await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+    }
+    if (options.persistCases !== undefined) {
+      const keep = new Set(
+        cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
+      );
+      const wanted = new Set(caseIds);
+      await options.persistCases(
+        cabinet.catalog
+          .storedCases()
+          .filter((card) => wanted.has(card.id) && isPersistableCabinetCase(card, keep)),
+        cabinet.workspaceId,
+      );
+    }
+    if (options.persistInbox !== undefined) {
+      await options.persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
+    }
+  };
+
   async function persistWorkspaceOnly(): Promise<void> {
     const cabinet = currentCabinet();
     await cabinets.persistWorkspaceOnly(cabinet);
@@ -768,7 +793,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               await options.removeCases([item.card.id], cabinet.workspaceId);
             }
           }
-          await persist(cabinet);
+          await persistProgress(forgotten ? [] : [item.card.id], cabinet);
         }
         continue;
       }
@@ -812,7 +837,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               await options.removeCases([item.card.id], cabinet.workspaceId);
             }
           }
-          await persist(cabinet);
+          await persistProgress(forgotten ? [] : [item.card.id], cabinet);
         }
         continue;
       }
@@ -868,7 +893,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
       if (scoring.persistEach) {
         workspace().setDismissedInboxIds(catalog().dismissedIds());
-        await persist(cabinet);
+        await persistProgress([remembered.card.id], cabinet);
       }
     }
     workspace().setDismissedInboxIds(catalog().dismissedIds());

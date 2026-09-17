@@ -6,6 +6,7 @@ import {
   postgresErrorMessage,
   toIsoDateTime,
   uniqueBySource,
+  dedupeReviewVerdicts,
 } from "./specialist-store.js";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 
@@ -122,5 +123,22 @@ describe("postgresErrorMessage", () => {
       cause,
     });
     expect(postgresErrorMessage(wrapped)).toContain("22P02");
+  });
+});
+
+
+describe("dedupeReviewVerdicts", () => {
+  it("keeps the latest decidedAt for the same profile and source", () => {
+    const older = {
+      profileId: "00000000-0000-4000-8000-000000000001",
+      sourceProcurementId: "auction/1",
+      decidedAt: "2026-09-01T00:00:00.000Z",
+      algorithmVersion: "v1",
+    };
+    const newer = {
+      ...older,
+      decidedAt: "2026-09-02T00:00:00.000Z",
+    };
+    expect(dedupeReviewVerdicts([older, newer, older])).toEqual([newer]);
   });
 });

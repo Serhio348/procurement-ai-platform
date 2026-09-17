@@ -94,6 +94,24 @@ export async function openSpecialistPersistence(options: {
 
   const memoryCabinets = createMemoryCabinetRegistry();
   const cache = new Map<string, SpecialistCabinet>();
+  /** One writer chain per cabinet so profile/inbox/cases saves do not deadlock. */
+  const workspaceWriteTail = new Map<string, Promise<unknown>>();
+
+  const enqueueWorkspaceWrite = async <T>(
+    workspaceId: string,
+    work: () => Promise<T>,
+  ): Promise<T> => {
+    const previous = workspaceWriteTail.get(workspaceId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(work);
+    workspaceWriteTail.set(
+      workspaceId,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  };
 
   const defaultWorkspaceId = TEST_WORKSPACE_ID;
 
@@ -140,17 +158,18 @@ export async function openSpecialistPersistence(options: {
   const persistInbox = async (
     items: readonly InboxFixtureItem[],
     workspaceId = defaultWorkspaceId,
+    dismissedChangeIds: readonly string[] = [],
   ): Promise<void> => {
     await writeJson(inboxFilePath(options.workspacePath, workspaceId), items);
     if (store === undefined) return;
     try {
-      await store.saveInbox(items, workspaceId);
+      await store.saveInbox(items, workspaceId, dismissedChangeIds);
     } catch (error) {
       options.logger.error("PostgreSQL inbox save failed", error);
       await recordJournal(journal, {
         kind: "platform",
         level: "error",
-        message: "Не удалось записать Входящие в PostgreSQL.",
+        message: persistInboxErrorMessage(error),
       });
     }
   };
@@ -159,31 +178,33 @@ export async function openSpecialistPersistence(options: {
     ids: readonly string[],
     workspaceId = defaultWorkspaceId,
   ): Promise<void> => {
-    if (store !== undefined) {
-      try {
-        await store.removeCases(ids, workspaceId);
-      } catch (error) {
-        options.logger.error("PostgreSQL case removal failed", error);
-        await recordJournal(journal, {
-          kind: "platform",
-          level: "error",
-          message: "Не удалось удалить устаревшие карточки из PostgreSQL.",
-        });
-        throw error;
+    return enqueueWorkspaceWrite(workspaceId, async () => {
+      if (store !== undefined) {
+        try {
+          await store.removeCases(ids, workspaceId);
+        } catch (error) {
+          options.logger.error("PostgreSQL case removal failed", error);
+          await recordJournal(journal, {
+            kind: "platform",
+            level: "error",
+            message: "Не удалось удалить устаревшие карточки из PostgreSQL.",
+          });
+          throw error;
+        }
+        // Postgres is the system of record. Rewriting the leftover cases dump
+        // would read every card on each trash delete.
+        return;
       }
-      // Postgres is the system of record. Rewriting the leftover cases dump
-      // would read every card on each trash delete.
-      return;
-    }
-    const wanted = new Set(ids);
-    const cards = await readJson<SpecialistProcurementCardValue[]>(
-      casesFilePath(options.workspacePath, workspaceId),
-      [],
-    );
-    await writeJson(
-      casesFilePath(options.workspacePath, workspaceId),
-      cards.filter((card) => !wanted.has(card.id)),
-    );
+      const wanted = new Set(ids);
+      const cards = await readJson<SpecialistProcurementCardValue[]>(
+        casesFilePath(options.workspacePath, workspaceId),
+        [],
+      );
+      await writeJson(
+        casesFilePath(options.workspacePath, workspaceId),
+        cards.filter((card) => !wanted.has(card.id)),
+      );
+    });
   };
 
   const openCabinet = async (workspaceId: string): Promise<SpecialistCabinet> => {
@@ -250,17 +271,66 @@ export async function openSpecialistPersistence(options: {
       return store.listWorkspaceIds();
     },
     async persist(cabinet) {
-      cache.set(cabinet.workspaceId, cabinet);
-      await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
-      await persistCases(
-        persistableCabinetCases(cabinet),
-        cabinet.workspaceId,
-      );
-      await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
+      return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
+        cache.set(cabinet.workspaceId, cabinet);
+        const snapshot = cabinet.workspace.snapshot();
+        const cards = persistableCabinetCases(cabinet);
+        const inbox = cabinet.catalog.inboxItems();
+        await writeJson(casesFilePath(options.workspacePath, cabinet.workspaceId), cards);
+        await writeJson(inboxFilePath(options.workspacePath, cabinet.workspaceId), inbox);
+        await saveWorkspaceFile(
+          workspaceFilePath(options.workspacePath, cabinet.workspaceId),
+          SpecialistWorkspace.parse(snapshot),
+        );
+        if (store !== undefined) {
+          try {
+            await store.saveCabinet(snapshot, cards, inbox, cabinet.workspaceId);
+          } catch (error) {
+            options.logger.error("PostgreSQL cabinet save failed; disk copy remains", error);
+            await recordJournal(journal, {
+              kind: "platform",
+              level: "error",
+              message: persistWorkspaceErrorMessage(error),
+            });
+          }
+        }
+      });
+    },
+    async persistProgress(cabinet, caseIds) {
+      return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
+        cache.set(cabinet.workspaceId, cabinet);
+        const snapshot = cabinet.workspace.snapshot();
+        const wanted = new Set(caseIds);
+        const cards = persistableCabinetCases(cabinet).filter((card) => wanted.has(card.id));
+        const inbox = cabinet.catalog.inboxItems();
+        // Disk: keep full cases file in sync when possible via merge write of touched cards only
+        // is unsafe; write full persistable set for durability of search queue.
+        const allPersistable = persistableCabinetCases(cabinet);
+        await writeJson(casesFilePath(options.workspacePath, cabinet.workspaceId), allPersistable);
+        await writeJson(inboxFilePath(options.workspacePath, cabinet.workspaceId), inbox);
+        await saveWorkspaceFile(
+          workspaceFilePath(options.workspacePath, cabinet.workspaceId),
+          SpecialistWorkspace.parse(snapshot),
+        );
+        if (store !== undefined) {
+          try {
+            await store.saveCabinet(snapshot, cards, inbox, cabinet.workspaceId);
+          } catch (error) {
+            options.logger.error("PostgreSQL cabinet progress save failed; disk copy remains", error);
+            await recordJournal(journal, {
+              kind: "platform",
+              level: "error",
+              message: persistWorkspaceErrorMessage(error),
+            });
+          }
+        }
+      });
     },
     async persistWorkspaceOnly(cabinet) {
-      cache.set(cabinet.workspaceId, cabinet);
-      await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+      return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
+        cache.set(cabinet.workspaceId, cabinet);
+        await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+      });
     },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);
@@ -466,3 +536,11 @@ function persistWorkspaceErrorMessage(error: unknown): string {
   if (detail.length === 0) return prefix;
   return `${prefix} ${detail}`.slice(0, 2000);
 }
+
+function persistInboxErrorMessage(error: unknown): string {
+  const detail = postgresErrorMessage(error).replaceAll(/\s+/g, " ").trim();
+  const prefix = "Не удалось записать Входящие в PostgreSQL.";
+  if (detail.length === 0) return prefix;
+  return `${prefix} ${detail}`.slice(0, 2000);
+}
+

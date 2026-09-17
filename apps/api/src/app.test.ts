@@ -15,6 +15,7 @@ import {
   SpecialistCatalog,
   SpecialistWorkspace,
   inferSearchIntentPlan,
+  scoreSearchIntentFromProcedure,
   type ReviewOutcome,
 } from "@procurement/domain";
 import { McpToolCallError, type McpToolCaller } from "@procurement/mcp-client";
@@ -1024,6 +1025,57 @@ describe("specialist API", () => {
     expect(search.mock.calls[0]?.[0].keywords).toEqual(["НКУ"]);
     expect(search.mock.calls[1]?.[0].keywords).toEqual(["шкаф управления"]);
     expect(titles).toEqual(["Поставка НКУ для насосов", "Поставка шкафа управления насосами"]);
+
+    await app.close();
+  });
+
+  it("stores the card-level code score on a matched case, not the listing zero (R06)", async () => {
+    const hit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/score-1",
+      url: "https://goszakupki.by/auction/view/score-1",
+      title: "Закупка НКУ",
+    });
+    const fetchedCard = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/score-1",
+      url: "https://goszakupki.by/auction/view/score-1",
+      title: "Поставка НКУ для насосов",
+      lots: [{ number: "1", title: "НКУ-0,4 кВ, 2 шт." }],
+      fetchedAt: "2026-09-09T00:00:00.000Z",
+    });
+    const caller: McpToolCaller = {
+      callTool: vi.fn(async () => ({ structuredContent: fetchedCard })) as McpToolCaller["callTool"],
+    };
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [hit] },
+      searchReview: createProcurementSearchReview({ caller }),
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+    const plan = inferSearchIntentPlan({
+      name: "НКУ для управления насосами",
+      keywords: ["НКУ"],
+      excludeKeywords: [],
+    });
+    const expected = scoreSearchIntentFromProcedure(fetchedCard, plan).score;
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await vi.waitFor(async () => {
+      const listed = await app.inject({ method: "GET", url: "/api/procurements" });
+      const items = JSON.parse(listed.body).items as Array<{
+        title: string;
+        relevanceScore?: number;
+        relevanceReason?: string;
+      }>;
+      const card = items.find((item) => item.title === "Закупка НКУ");
+      expect(card?.relevanceScore).toBe(expected);
+      expect(card?.relevanceScore).toBeGreaterThan(0);
+    });
 
     await app.close();
   });

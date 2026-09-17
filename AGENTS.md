@@ -80,6 +80,7 @@
 - [`docs/architecture/STAGE-71.md`](docs/architecture/STAGE-71.md) — дедупликация не прячет непрочитанные страницы площадки (R11)
 - [`docs/architecture/STAGE-72.md`](docs/architecture/STAGE-72.md) — лимит обращений к модели соблюдается на прогон, а не на карточку (R13)
 - [`docs/architecture/STAGE-73.md`](docs/architecture/STAGE-73.md) — review-кандидат перепроверяется, а не воскрешается как есть (R05)
+- [`docs/architecture/STAGE-74.md`](docs/architecture/STAGE-74.md) — оценка card-level проверки доходит до карточки UI (R06)
 
 ---
 

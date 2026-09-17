@@ -38,6 +38,11 @@ export interface ReviewOutcome {
   reason: string;
   matchedTerms: readonly string[];
   confidence: number;
+  /**
+   * Code-owned 0–100 score of the platform card behind this outcome. Absent
+   * when no card was scored; the model never produces this number.
+   */
+  score?: number;
   /** Procedure status from procurement.get when the card was fetched. */
   status?: ProcedureStatus;
 }
@@ -100,6 +105,7 @@ export function outcomeFromIntentCard(scored: SearchIntentScore): ReviewOutcome 
       reason: scored.reason,
       matchedTerms: [...scored.matchedObjects, ...scored.matchedDesired],
       confidence: 1,
+      score: scored.score,
     };
   }
   if (scored.decision === "veto" || scored.contextRole === "mismatch") {
@@ -109,6 +115,7 @@ export function outcomeFromIntentCard(scored: SearchIntentScore): ReviewOutcome 
       reason: scored.reason,
       matchedTerms: [],
       confidence: 1,
+      score: scored.score,
     };
   }
   return undefined;

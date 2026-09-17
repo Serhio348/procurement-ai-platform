@@ -846,6 +846,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               status: procedureStatus,
               statusLabel: statusLabel(procedureStatus),
               ...(outcome.verdict === "relevant" ? { foundAs: "match" as const } : {}),
+              ...(outcome.score === undefined ? {} : { relevanceScore: outcome.score }),
               ...(outcome.reason.length === 0
                 ? {}
                 : {

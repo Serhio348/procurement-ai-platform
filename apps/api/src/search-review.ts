@@ -89,7 +89,10 @@ export function createProcurementSearchReview(
           if (hit === undefined) continue;
           const card = await fetchCard(client, hit, logger);
           const finish = (outcome: ReviewOutcome): void => {
-            results[index] = attachCardStatus(outcome, card);
+            results[index] = attachCardStatus(
+              scored === undefined ? outcome : { ...outcome, score: scored.score },
+              card,
+            );
           };
           let scored: SearchIntentScore | undefined;
           if (card !== undefined && profile.intent !== undefined) {

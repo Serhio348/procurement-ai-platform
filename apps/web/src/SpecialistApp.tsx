@@ -413,9 +413,25 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 ? {}
                 : {
                     remove: async (id: string) => {
-                      const listed = await deleteProfile(id);
-                      setProfiles(listed.items);
-                      setActiveProfileId(listed.activeProfileId);
+                      const previous = profiles;
+                      const previousActive = activeProfileId;
+                      const next = previous.filter((item) => item.id !== id);
+                      if (next.length === 0) {
+                        throw new Error("Нельзя удалить единственный профиль");
+                      }
+                      setProfiles(next);
+                      if (previousActive === id) {
+                        setActiveProfileId(next[0]!.id);
+                      }
+                      try {
+                        const listed = await deleteProfile(id);
+                        setProfiles(listed.items);
+                        setActiveProfileId(listed.activeProfileId);
+                      } catch (error) {
+                        setProfiles(previous);
+                        setActiveProfileId(previousActive);
+                        throw error;
+                      }
                     },
                   })}
             />

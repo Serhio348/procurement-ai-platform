@@ -73,6 +73,7 @@
 - [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score; завершённые без решения не хранятся
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
+- [`docs/architecture/STAGE-68.md`](docs/architecture/STAGE-68.md) — удаление профиля: крестик и быстрый persist
 
 ---
 
@@ -270,8 +271,8 @@ docs/architecture/ Документы этапов
   оставить совпадение
 - Этап 66 — поиск по профилю не затирает чужую очередь; карточки живут,
   пока специалист не разберёт их
-- Этап 68 — крестик удаления профиля: `persistWorkspaceOnly` без переписи
-  всех карточек; UI показывает ожидание и ошибку
+- Этап 68 — крестик удаления профиля: `saveWorkspaceMeta` / optimistic UI;
+  без переписи вердиктов, решений и inbox; строка исчезает сразу
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

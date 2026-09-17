@@ -246,6 +246,61 @@ describe("scoreSearchIntent", () => {
     expect(mergedWorks.excluded_actions).not.toContain("монтаж");
   });
 
+  it("keeps profile constraints when the model contradicts them (R09)", () => {
+    const inferred = SearchIntentPlan.parse({
+      objects: ["НКУ"],
+      required_context: ["насос"],
+      excluded_context: ["освещение"],
+      desired_actions: ["поставка"],
+      excluded_actions: ["монтаж"],
+      intent: "equipment_purchase",
+    });
+    const model = SearchIntentPlan.parse({
+      objects: ["шкаф управления"],
+      required_context: ["освещение"],
+      excluded_context: [],
+      desired_actions: ["монтаж"],
+      excluded_actions: ["пусконаладка"],
+      intent: "equipment_purchase",
+    });
+    const merged = mergeSearchIntentPlans(inferred, model);
+    // The model widens the purpose, it must not replace «насос».
+    expect(merged.required_context).toEqual(["насос", "освещение"]);
+    // An action the profile excludes cannot become desired through the model.
+    expect(merged.desired_actions).not.toContain("монтаж");
+    expect(merged.excluded_actions).toEqual(
+      expect.arrayContaining(["монтаж", "пусконаладка"]),
+    );
+
+    // The excluded purpose beats the required-context word the model added.
+    const scored = scoreSearchIntent({ title: "Поставка НКУ для освещения" }, merged);
+    expect(scored.contextRole).toBe("mismatch");
+    expect(scored.decision).toBe("discard");
+    expect(scored.reason).toMatch(/освещен/i);
+  });
+
+  it("keeps model exclusions when it reframes a purchase plan as works (R09)", () => {
+    const inferred = inferSearchIntentPlan({
+      name: "НКУ",
+      keywords: ["НКУ"],
+      excludeKeywords: [],
+    });
+    expect(inferred.intent).toBe("equipment_purchase");
+    const model = SearchIntentPlan.parse({
+      objects: [],
+      required_context: [],
+      excluded_context: [],
+      desired_actions: ["монтаж"],
+      excluded_actions: ["поставка"],
+      intent: "works",
+    });
+    const merged = mergeSearchIntentPlans(inferred, model);
+    expect(merged.intent).toBe("works");
+    // The works-profile shield protects inferred works verbs only; a model
+    // that reframed the intent must not silently drop its own exclusions.
+    expect(merged.excluded_actions).toContain("поставка");
+  });
+
   it("leaves supply and works listed as equals for the model instead of a word-order veto", () => {
     const supplyPlan = SearchIntentPlan.parse({
       objects: ["КТП"],

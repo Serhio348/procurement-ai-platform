@@ -12,7 +12,7 @@ import { resolvePlatformKeywords, sameSearchPhrases } from "./looking-for.js";
 
 /** How long a review verdict of "irrelevant" is trusted before the hit may be looked at again. */
 export const REVIEW_VERDICT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-export const REVIEW_ALGORITHM_VERSION = "search-review-v6";
+export const REVIEW_ALGORITHM_VERSION = "search-review-v7";
 
 /**
  * Margin subtracted from lastDiscoveryAt when asking the source for new

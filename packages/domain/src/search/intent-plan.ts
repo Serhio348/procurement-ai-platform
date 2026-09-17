@@ -140,10 +140,9 @@ export function platformSearchTerms(
 
 /**
  * The model may widen the deterministic plan, never narrow it. Objects and
- * actions are unioned; the intent label follows the model only when the
- * cheap plan did not see work phrases (a model cannot turn a works profile
- * back into a purchase). Required/excluded context comes from the model
- * when it named any, because the cheap parser only reads «для …».
+ * actions and context are unioned; the intent label follows the model only
+ * when the cheap plan did not see work phrases (a model cannot turn a works
+ * profile back into a purchase).
  */
 export function mergeSearchIntentPlans(
   inferred: SearchIntentPlanValue,
@@ -156,15 +155,26 @@ export function mergeSearchIntentPlans(
   };
   const intent = inferred.intent === "works" ? "works" : fromModel.intent;
   const excluded = union(inferred.excluded_actions, fromModel.excluded_actions).filter(
-    // A works profile must not veto its own work verbs even if the model listed them.
-    (item) => intent !== "works" || !inferred.desired_actions.some((d) => matchesAny(d, [item])),
+    // A works profile must not veto its own work verbs even if the model listed
+    // them. The shield keys on the inferred intent: a model that reframed a
+    // purchase plan as works must not silently drop its own exclusions.
+    (item) =>
+      inferred.intent !== "works" ||
+      !inferred.desired_actions.some((d) => matchesAny(d, [item])),
+  );
+  // An exclusion is the stronger rule: the model cannot turn a verb the plan
+  // excludes into a desired action by listing it under desired_actions.
+  const desired = union(inferred.desired_actions, fromModel.desired_actions).filter(
+    (item) => !matchesAny(item, excluded),
   );
   return SearchIntentPlan.parse({
     objects: union(inferred.objects, fromModel.objects),
-    required_context:
-      fromModel.required_context.length > 0 ? fromModel.required_context : inferred.required_context,
+    // Union, not replacement: the model widens the purpose, it must not drop
+    // the one the profile stated. A conflict with excluded_context is resolved
+    // by the scorer, which checks exclusions first.
+    required_context: union(inferred.required_context, fromModel.required_context),
     excluded_context: union(inferred.excluded_context, fromModel.excluded_context),
-    desired_actions: union(inferred.desired_actions, fromModel.desired_actions),
+    desired_actions: desired,
     excluded_actions: excluded,
     intent,
   });

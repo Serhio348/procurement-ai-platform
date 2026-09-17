@@ -75,6 +75,7 @@
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
 - [`docs/architecture/STAGE-67.md`](docs/architecture/STAGE-67.md) — решение по лотам не зависит от их порядка (R07)
 - [`docs/architecture/STAGE-68.md`](docs/architecture/STAGE-68.md) — «включая» помечает второстепенную клаузу, а не отменяет veto (R08)
+- [`docs/architecture/STAGE-69.md`](docs/architecture/STAGE-69.md) — merge плана: ограничения профиля сильнее предположений модели (R09)
 
 ---
 

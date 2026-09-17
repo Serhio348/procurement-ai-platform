@@ -243,15 +243,15 @@ function contextRoleFor(
 ): { role: IntentContextRole; matched: string[] } {
   const required = plan.required_context ?? [];
   const excluded = plan.excluded_context ?? [];
+  // An exclusion is the stronger rule: even a required-context word loses to
+  // an excluded purpose, so a model-added required term cannot whitelist it.
+  const excludedMatched = excluded.filter((item) => termOccurs(`${title} ${extra}`, item));
+  if (excludedMatched.length > 0) return { role: "mismatch", matched: excludedMatched };
   const inTitle = required.filter((item) => termOccurs(title, item));
   const inExtra =
     inTitle.length === 0 ? required.filter((item) => termOccurs(extra, item)) : [];
   const matched = inTitle.length > 0 ? inTitle : inExtra;
   if (matched.length > 0) return { role: "match", matched };
-  const hay = `${title} ${extra}`;
-  if (excluded.some((item) => termOccurs(hay, item))) {
-    return { role: "mismatch", matched: [] };
-  }
   if (required.length === 0) return { role: "none", matched: [] };
   return { role: "missing", matched: [] };
 }
@@ -454,7 +454,9 @@ function relevanceReason(input: {
     return `Оборудование ${equipment} найдено, но предмет закупки — ${workLabel(work)}.`;
   }
   if (input.contextRole === "mismatch" && equipment !== undefined) {
-    return `Оборудование ${equipment} найдено, но назначение не совпадает с профилем.`;
+    const excluded =
+      input.matchedContext.length > 0 ? `: ${input.matchedContext.join(", ")}` : "";
+    return `Оборудование ${equipment} найдено, но назначение исключено профилем${excluded}.`;
   }
   if (input.objectRole === "none") {
     return "Целевое оборудование в названии не найдено.";

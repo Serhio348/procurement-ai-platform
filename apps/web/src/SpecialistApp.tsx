@@ -580,7 +580,7 @@ function InboxRoute({
             onResolve: async (id, action) => {
               const result = await resolve(id, action);
               if (result.card !== undefined && action === "open") {
-                void navigate(`/procurements/${result.card.id}`);
+                void navigate(inboxOpenPath(result.card));
               }
             },
           })}
@@ -643,6 +643,13 @@ function sameInboxItems(
   if (left === right) return true;
   if (left.length !== right.length) return false;
   return left.every((item, index) => item.id === right[index]?.id);
+}
+
+/** Where «Открыть карточку» should land after the inbox row is dismissed. */
+export function inboxOpenPath(card: SpecialistProcurementCard): string {
+  if (isWatchedTriage(card)) return `/my-procurements/${card.id}`;
+  if (isRejectedTriage(card.triage)) return `/trash/${card.id}`;
+  return `/procurements/${card.id}`;
 }
 
 function mergeSearchPane(

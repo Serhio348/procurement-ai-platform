@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import {
   SpecialistIngestProgress,
   SpecialistProcurementCard,
@@ -627,28 +628,32 @@ describe("ProcurementsApp", () => {
       sourceProcurementId: "auction-002",
     });
 
+    function Harness() {
+      const [items, setItems] = useState([found, other]);
+      const decide = async (id: string, kind: "monitor" | "participate" | "reject") => {
+        const updated = items
+          .map((item) => (item.id === id ? { ...item, triage: kind } : item))
+          .find((item) => item.id === id);
+        if (updated === undefined) return [];
+        // Parent search pane drops watched/rejected the same way SpecialistApp does.
+        setItems((current) =>
+          current
+            .map((item) => (item.id === id ? updated : item))
+            .filter((item) => item.triage !== "monitor" && item.triage !== "participate" && item.triage !== "reject"),
+        );
+        return [updated];
+      };
+      return (
+        <Routes>
+          <Route path="/procurements" element={<ProcurementsApp items={items} decide={decide} />} />
+          <Route path="/procurements/:id" element={<ProcurementsApp items={items} decide={decide} />} />
+        </Routes>
+      );
+    }
+
     render(
       <MemoryRouter initialEntries={["/procurements"]}>
-        <Routes>
-          <Route
-            path="/procurements"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
-          <Route
-            path="/procurements/:id"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
-        </Routes>
+        <Harness />
       </MemoryRouter>,
     );
 

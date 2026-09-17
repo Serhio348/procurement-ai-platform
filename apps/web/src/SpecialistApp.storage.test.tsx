@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
 import { inboxItemFromFoundCard, SpecialistCatalog } from "@procurement/domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SpecialistApp } from "./SpecialistApp.js";
+import { inboxOpenPath, SpecialistApp } from "./SpecialistApp.js";
 
 const profile = SpecialistWorkingProfile.parse({
   id: "00000000-0000-4000-8000-000000000901",
@@ -39,6 +39,32 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+describe("inboxOpenPath", () => {
+  it("sends watched and rejected opens away from Закупки", () => {
+    expect(inboxOpenPath(found)).toBe(`/procurements/${found.id}`);
+    expect(
+      inboxOpenPath(
+        SpecialistProcurementCard.parse({
+          ...found,
+          id: "00000000-0000-4000-8000-000000000003",
+          sourceProcurementId: "request/3",
+          triage: "monitor",
+        }),
+      ),
+    ).toBe("/my-procurements/00000000-0000-4000-8000-000000000003");
+    expect(
+      inboxOpenPath(
+        SpecialistProcurementCard.parse({
+          ...found,
+          id: "00000000-0000-4000-8000-000000000004",
+          sourceProcurementId: "request/4",
+          triage: "reject",
+        }),
+      ),
+    ).toBe("/trash/00000000-0000-4000-8000-000000000004");
+  });
 });
 
 describe("SpecialistApp search list", () => {
@@ -120,5 +146,42 @@ describe("SpecialistApp search list", () => {
     expect(await screen.findByRole("button", { name: "Отслеживать" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "КТПБ из входящих" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
+  });
+
+  it("opens a watched review from the inbox into Мои закупки", async () => {
+    window.history.pushState({}, "", "/");
+    const user = userEvent.setup();
+    const watched = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "КТПБ уже на слежении",
+      status: "announced",
+      statusLabel: "объявлена",
+      url: "https://goszakupki.by/auction/view/402",
+      sourceProcurementId: "auction/402",
+      foundAs: "match",
+      triage: "monitor",
+      profileIds: [profile.id],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(watched);
+    catalog.record(inboxItemFromFoundCard(watched, "2026-09-06T12:00:00.000Z"));
+
+    render(
+      <SpecialistApp
+        inbox={catalog.urgentInbox()}
+        procurements={[found]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        resolveInbox={async () => ({ items: [], card: watched, documents: [] })}
+        decide={async () => [watched]}
+        loadCard={async () => watched}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
+    expect(await screen.findByRole("heading", { level: 1, name: /КТПБ уже на слежении/ })).toBeTruthy();
+    expect(screen.getByText("Слежу")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Мои закупки" }).className).toContain("nav-current");
+    expect(screen.queryByRole("link", { name: "Закупки" })?.className).not.toContain("nav-current");
   });
 });

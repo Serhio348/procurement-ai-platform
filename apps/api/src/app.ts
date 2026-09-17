@@ -122,6 +122,13 @@ export const DEFAULT_WATCH_LIMIT = 40;
 
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
+  /**
+   * Same search plus the source's own truncation flag when the adapter
+   * reports one. Optional so simple test doubles can return plain hits.
+   */
+  searchDetailed?: (
+    query: Omit<SearchQuery, "sourceId">,
+  ) => Promise<{ hits: readonly SearchHit[]; hasMore?: boolean }>;
 }
 
 export interface SpecialistApi extends FastifyInstance {
@@ -606,13 +613,25 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     limit: number,
     offset: number,
     publishedFrom?: string,
-  ): Promise<{ plan: SearchIntentPlan; hits: SearchHit[] }> {
+  ): Promise<{ plan: SearchIntentPlan; hits: SearchHit[]; hasMore: boolean }> {
     const inferred = inferSearchIntentPlan({
       name: profileDisplayName(profile),
       keywords: profile.keywords,
       excludeKeywords: profile.excludeKeywords,
     });
     const listingTerms = platformSearchTerms(inferred, profile.keywords);
+    const searchDetailed = async (
+      query: Omit<SearchQuery, "sourceId">,
+    ): Promise<{ hits: readonly SearchHit[]; hasMore: boolean }> => {
+      if (searchHits.searchDetailed !== undefined) {
+        const page = await searchHits.searchDetailed(query);
+        // undefined means the source did not report truncation — a full
+        // window is the honest "more may follow" signal.
+        return { hits: page.hits, hasMore: page.hasMore ?? page.hits.length >= query.limit };
+      }
+      const hits = await searchHits.search(query);
+      return { hits, hasMore: hits.length >= query.limit };
+    };
     const siteQuery = buildSearchQuery(profile, limit, offset, publishedFrom, listingTerms);
     logger.info("Specialist profile search query", {
       profileName: profileDisplayName(profile),
@@ -623,29 +642,29 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       regionIds: siteQuery.regionIds,
       publishedFrom: siteQuery.publishedFrom ?? "",
     });
-    const [plan, firstHits] = await Promise.all([
+    const [plan, firstPage] = await Promise.all([
       resolveSearchPlan(profile),
-      searchHits.search(siteQuery),
+      searchDetailed(siteQuery),
     ]);
     const extraTerms = extraPlatformSearchTerms(listingTerms, plan, profile.keywords);
-    const extraHits =
+    const extraPage =
       extraTerms.length === 0
-        ? []
-        : await searchHits.search(
+        ? { hits: [] as readonly SearchHit[], hasMore: false }
+        : await searchDetailed(
             buildSearchQuery(profile, limit, offset, publishedFrom, extraTerms),
           );
-    const hits = mergeSearchHits(firstHits, extraHits);
+    const hits = mergeSearchHits(firstPage.hits, extraPage.hits);
     logger.info("Specialist profile search retrieval", {
       profileName: profileDisplayName(profile),
       originalTerms: [...profile.keywords],
       listingTerms,
       derivedTerms: extraTerms,
-      firstHits: firstHits.length,
-      extraHits: extraHits.length,
+      firstHits: firstPage.hits.length,
+      extraHits: extraPage.hits.length,
       candidates: hits.length,
       perTerm: countHitsPerTerm(hits),
     });
-    return { plan, hits };
+    return { plan, hits, hasMore: firstPage.hasMore || extraPage.hasMore };
   }
 
   /**
@@ -1132,7 +1151,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
     const profile = workspace().profile();
-    const { plan, hits } = await fetchProfileHits(profile, limit, offset);
+    const { plan, hits, hasMore } = await fetchProfileHits(profile, limit, offset);
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -1210,7 +1229,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       relevantCount: items.length,
       discardedCount,
       ambiguousCount,
-      hasMore: hits.length >= limit,
+      hasMore: hasMore || hits.length >= limit,
       items,
       ...(run === undefined ? {} : { run }),
     });

@@ -23,6 +23,12 @@ export type ProcurementSearchRequest = z.infer<typeof ProcurementSearchRequest>;
 
 export const ProcurementSearchResponse = z.object({
   hits: z.array(SearchHit),
+  /**
+   * True when the source still had unread rows beyond the returned window —
+   * overlapping search terms may have hidden later pages after dedup, or a
+   * safety page cap stopped the scan early.
+   */
+  hasMore: z.boolean().optional(),
 });
 export type ProcurementSearchResponse = z.infer<typeof ProcurementSearchResponse>;
 

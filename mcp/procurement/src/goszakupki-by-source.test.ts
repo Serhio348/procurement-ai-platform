@@ -489,6 +489,82 @@ describe("GoszakupkiBySource", () => {
     expect(pagesForA).toBeLessThanOrEqual(3);
   });
 
+  it("keeps reading pages until the unique-candidate budget is met (R11)", async () => {
+    // Both phrases return the same first page of 20 rows and own a second
+    // page. Splitting the budget before dedup used to stop after page 1 of
+    // each term and reported 20 hits for limit 40 — hiding page 2.
+    const pageOf = (page: number): string => {
+      const rows = Array.from({ length: 20 }, (_unused, index) => {
+        const id = 9000000 + page * 100 + index;
+        return `<tr data-key="${index}">
+          <td><input type="checkbox"></td>
+          <td><a href="https://gias.by/gias/#/purchase/current/view/${id}">${id}</a></td>
+          <td>Заказчик<br><a href="/auction/view/${id}">Закупка ${id}</a></td>
+          <td>Электронный аукцион</td>
+          <td><span class="badge">Подача предложений</span></td>
+          <td>27.09.2026</td>
+          <td>1 BYN</td>
+        </tr>`;
+      }).join("\n");
+      const pager =
+        page < 2
+          ? `<ul class="pagination"><li class="next"><a href="/tenders/posted?page=${page + 1}">›</a></li></ul>`
+          : "";
+      return `<!doctype html><table><thead><tr>
+        <th></th><th>Номер закупки</th><th>Организация / Предмет закупки</th>
+        <th>Вид процедуры закупки</th><th>Статус</th>
+        <th>Предложения, документы до</th><th>Стоимость</th>
+      </tr></thead><tbody>${rows}</tbody></table>${pager}`;
+    };
+    const get = vi.fn(async (path: string) => {
+      const url = new URL(`https://goszakupki.by${path}`);
+      const page = Number(url.searchParams.get("page") ?? "1");
+      return {
+        status: 200,
+        url: `https://goszakupki.by${path}`,
+        body: pageOf(page),
+      };
+    });
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["A", "B"],
+        limit: 40,
+      }),
+    );
+
+    expect(result.hits).toHaveLength(40);
+    // Shared rows are credited to every phrase that found them.
+    const shared = result.hits.find(
+      (hit) => hit.sourceProcurementId === "auction/9000100",
+    );
+    expect(shared?.matchedSearchTerms).toHaveLength(2);
+    expect(shared?.matchedSearchTerms).toEqual(expect.arrayContaining(["A", "B"]));
+    // The second phrase still owns unread rows — the source is not exhausted.
+    expect(result.hasMore).toBe(true);
+  });
+
+  it("reports no more pages only once every phrase is exhausted", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: searchHtml.replace('class="next"', 'class="next disabled"'),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["КТП", "сети электроснабжения"],
+        limit: 100,
+      }),
+    );
+
+    expect(result.hasMore).toBe(false);
+  });
+
   it("keeps a listing row the site returned when the keyword is not in the title", async () => {
     const get = vi.fn(async (path: string) => ({
       status: 200,

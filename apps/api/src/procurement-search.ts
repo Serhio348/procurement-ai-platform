@@ -30,6 +30,9 @@ export function createProcurementSearchHits(
   options: ProcurementSearchHitsOptions,
 ): {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
+  searchDetailed: (
+    query: Omit<SearchQuery, "sourceId">,
+  ) => Promise<{ hits: readonly SearchHit[]; hasMore?: boolean }>;
 } {
   const sourceId = SourceId.parse(options.sourceId);
   const client = new ProcurementMcpClient({
@@ -41,23 +44,32 @@ export function createProcurementSearchHits(
     logger: options.logger ?? silentLogger,
   });
 
+  const call = (query: Omit<SearchQuery, "sourceId">) => {
+    if (query.keywords.length === 0) {
+      throw new McpToolCallError(
+        "invalid_request",
+        "procurement.search",
+        "В профиле нет ключевых слов для поиска.",
+      );
+    }
+    return client.search(
+      ProcurementSearchRequest.parse({
+        sourceId,
+        ...query,
+      }),
+      RequestId.parse(randomUUID()),
+    );
+  };
+
   return {
     async search(query: Omit<SearchQuery, "sourceId">): Promise<readonly SearchHit[]> {
-      if (query.keywords.length === 0) {
-        throw new McpToolCallError(
-          "invalid_request",
-          "procurement.search",
-          "В профиле нет ключевых слов для поиска.",
-        );
-      }
-      const response = await client.search(
-        ProcurementSearchRequest.parse({
-          sourceId,
-          ...query,
-        }),
-        RequestId.parse(randomUUID()),
-      );
-      return response.hits;
+      return (await call(query)).hits;
+    },
+    async searchDetailed(
+      query: Omit<SearchQuery, "sourceId">,
+    ): Promise<{ hits: readonly SearchHit[]; hasMore?: boolean }> {
+      const response = await call(query);
+      return { hits: response.hits, ...(response.hasMore === undefined ? {} : { hasMore: response.hasMore }) };
     },
   };
 }

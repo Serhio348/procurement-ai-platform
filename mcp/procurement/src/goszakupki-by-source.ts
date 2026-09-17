@@ -37,8 +37,8 @@ export interface GoszakupkiBySourceOptions {
   logger?: Logger;
 }
 
-/** Smallest slice of the result budget a single profile phrase is owed. */
-export const MIN_ROWS_PER_SEARCH_TERM = 20;
+/** Safety bound on pages one phrase may consume during a single search. */
+export const MAX_SEARCH_PAGES_PER_TERM = 30;
 
 interface CacheEntry {
   expiresAt: number;
@@ -65,82 +65,112 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
 
   /**
    * Retrieval only. Each profile phrase is its own platform query (the site
-   * filters by substring, so a joined phrase returns nothing) and owns its
-   * own slice of the result budget: a broad first phrase cannot starve the
-   * rest. Rows are merged round-robin and de-duplicated by procedure id,
-   * keeping every phrase that found them. Nothing here decides relevance.
+   * filters by substring, so a joined phrase returns nothing) and always
+   * gets its first page: a broad phrase cannot starve the rest. After that
+   * the scan keeps reading whichever phrase still has pages until the
+   * unique-candidate window (offset + limit) is filled — otherwise phrases
+   * whose results overlap would hide later pages entirely after dedup.
+   * Rows are merged round-robin and de-duplicated by procedure id, keeping
+   * every phrase that found them. Nothing here decides relevance.
    */
   async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
     const statusIds = await this.#resolvedStatusIds(query);
     const filteredQuery = { ...query, statusIds };
     const terms = filteredQuery.keywords.length === 0 ? [undefined] : filteredQuery.keywords;
-    const buckets: SearchBucket[] = [];
-    const rowsPerTerm = Math.max(
-      MIN_ROWS_PER_SEARCH_TERM,
-      Math.ceil((filteredQuery.offset + filteredQuery.limit) / terms.length),
-    );
-    const pagesPerTerm = Math.min(30, Math.ceil(rowsPerTerm / 20) + 1);
+    const budget = filteredQuery.offset + filteredQuery.limit;
+    const unique = new Set<string>();
+    const scans: TermScan[] = terms.map((term) => ({
+      term,
+      rows: [],
+      seen: new Set<string>(),
+      nextPage: 1,
+      hasNext: true,
+      pages: 0,
+      seenRows: 0,
+    }));
 
-    for (const term of terms) {
-      const termRows = new Map<string, SearchRow>();
-      let seenRows = 0;
-      let pages = 0;
-      for (let page = 1; page <= pagesPerTerm; page += 1) {
-        const path = searchPath(filteredQuery, term, page);
-        const response = await this.#client.get(path);
-        pages += 1;
-        if (response.status < 200 || response.status >= 300) {
-          throw new SourceAccessError(
-            this.sourceId,
-            `search returned unexpected HTTP ${response.status}`,
-          );
-        }
-        const parsed = parseGoszakupkiSearchPage(response.body, response.url);
-        this.#logger.info("goszakupki.by search GET", {
-          component: "goszakupki-by-source",
-          decoded: decodeURIComponent(path),
-          parsed: parsed.rows.map(
-            (row) => `${row.hit.sourceProcurementId} ${row.hit.sourceStatus ?? "—"}`,
-          ),
-        });
-        seenRows += parsed.rows.length;
-        for (const row of parsed.rows) {
-          if (query.kinds.length > 0 && !query.kinds.includes(row.kind)) continue;
-          termRows.set(row.hit.sourceProcurementId, row);
-        }
-        if (!parsed.hasNextPage) break;
-        if (termRows.size >= rowsPerTerm) break;
+    const fetchNextPage = async (scan: TermScan): Promise<void> => {
+      const path = searchPath(filteredQuery, scan.term, scan.nextPage);
+      const response = await this.#client.get(path);
+      scan.pages += 1;
+      scan.nextPage += 1;
+      if (response.status < 200 || response.status >= 300) {
+        throw new SourceAccessError(
+          this.sourceId,
+          `search returned unexpected HTTP ${response.status}`,
+        );
       }
+      const parsed = parseGoszakupkiSearchPage(response.body, response.url);
+      this.#logger.info("goszakupki.by search GET", {
+        component: "goszakupki-by-source",
+        decoded: decodeURIComponent(path),
+        parsed: parsed.rows.map(
+          (row) => `${row.hit.sourceProcurementId} ${row.hit.sourceStatus ?? "—"}`,
+        ),
+      });
+      scan.seenRows += parsed.rows.length;
+      for (const row of parsed.rows) {
+        if (filteredQuery.kinds.length > 0 && !filteredQuery.kinds.includes(row.kind)) {
+          continue;
+        }
+        const id = row.hit.sourceProcurementId;
+        if (scan.seen.has(id)) continue;
+        scan.seen.add(id);
+        unique.add(id);
+        scan.rows.push(row);
+      }
+      scan.hasNext = parsed.hasNextPage;
+    };
+
+    for (const scan of scans) {
+      await fetchNextPage(scan);
+    }
+    const alive = (): TermScan[] =>
+      scans.filter((scan) => scan.hasNext && scan.pages < MAX_SEARCH_PAGES_PER_TERM);
+    let remaining = alive();
+    while (unique.size < budget && remaining.length > 0) {
+      for (const scan of remaining) {
+        if (unique.size >= budget) break;
+        await fetchNextPage(scan);
+      }
+      remaining = alive();
+    }
+    for (const scan of scans) {
       this.#logger.info("goszakupki.by search term", {
         component: "goszakupki-by-source",
-        term: term ?? "",
-        pages,
-        rows: seenRows,
-        kept: termRows.size,
-      });
-      buckets.push({
-        term,
-        rows: [...termRows.values()].sort(
-          (left, right) =>
-            sourceSequence(right.hit.sourceProcurementId) -
-            sourceSequence(left.hit.sourceProcurementId),
-        ),
+        term: scan.term ?? "",
+        pages: scan.pages,
+        rows: scan.seenRows,
+        kept: scan.rows.length,
+        hasNext: scan.hasNext,
       });
     }
 
+    const buckets: SearchBucket[] = scans.map((scan) => ({
+      term: scan.term,
+      rows: [...scan.rows].sort(
+        (left, right) =>
+          sourceSequence(right.hit.sourceProcurementId) -
+          sourceSequence(left.hit.sourceProcurementId),
+      ),
+    }));
     const merged = interleaveSearchBuckets(buckets);
     const hits = merged
       .slice(filteredQuery.offset, filteredQuery.offset + filteredQuery.limit)
       .map(({ row, terms: found }) =>
         found.length === 0 ? row.hit : { ...row.hit, matchedSearchTerms: found },
       );
+    // An unread phrase page is the source's own "more may follow" signal —
+    // including a phrase that stopped at the page cap.
+    const hasMore = scans.some((scan) => scan.hasNext);
     this.#logger.info("goszakupki.by search merged", {
       component: "goszakupki-by-source",
       terms: terms.map((term) => term ?? ""),
       candidates: merged.length,
       returned: hits.length,
+      hasMore,
     });
-    return ProcurementSearchResponse.parse({ hits });
+    return ProcurementSearchResponse.parse({ hits, hasMore });
   }
 
   async #resolvedStatusIds(query: SearchQuery): Promise<string[]> {
@@ -324,6 +354,16 @@ function sourceDate(value: string | undefined): string | undefined {
 }
 
 type SearchRow = ReturnType<typeof parseGoszakupkiSearchPage>["rows"][number];
+
+interface TermScan {
+  term: string | undefined;
+  rows: SearchRow[];
+  seen: Set<string>;
+  nextPage: number;
+  hasNext: boolean;
+  pages: number;
+  seenRows: number;
+}
 
 interface SearchBucket {
   term: string | undefined;

@@ -77,6 +77,7 @@
 - [`docs/architecture/STAGE-68.md`](docs/architecture/STAGE-68.md) — «включая» помечает второстепенную клаузу, а не отменяет veto (R08)
 - [`docs/architecture/STAGE-69.md`](docs/architecture/STAGE-69.md) — merge плана: ограничения профиля сильнее предположений модели (R09)
 - [`docs/architecture/STAGE-70.md`](docs/architecture/STAGE-70.md) — объект извлекается из фразы поставки и коротких обозначений (R10)
+- [`docs/architecture/STAGE-71.md`](docs/architecture/STAGE-71.md) — дедупликация не прячет непрочитанные страницы площадки (R11)
 
 ---
 

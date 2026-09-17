@@ -257,7 +257,7 @@ describe("createProcurementSearchReview", () => {
     expect(outcome?.decidedBy).toBe("model");
   });
 
-  it("hands commissioning without the profile object to the model instead of a silent card discard", async () => {
+  it("drops commissioning without the profile object at card level without calling the model", async () => {
     const classify = vi.fn(async () => ({
       verdict: "irrelevant",
       confidence: 0.95,
@@ -292,7 +292,7 @@ describe("createProcurementSearchReview", () => {
     );
 
     expect(outcome?.verdict).toBe("irrelevant");
-    expect(outcome?.decidedBy).toBe("model");
-    expect(classify).toHaveBeenCalledTimes(1);
+    expect(outcome?.decidedBy).toBe("card");
+    expect(classify).not.toHaveBeenCalled();
   });
 });

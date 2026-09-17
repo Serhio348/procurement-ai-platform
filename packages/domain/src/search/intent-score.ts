@@ -1,5 +1,11 @@
 import type { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
-import { inferSearchIntentPlan, planAllowsBareObject } from "./intent-plan.js";
+import {
+  inferSearchIntentPlan,
+  isGenericWorkPhrase,
+  planAllowsBareObject,
+} from "./intent-plan.js";
+
+export { isGenericWorkPhrase } from "./intent-plan.js";
 import { firstTermIndex, termOccurs } from "./query-terms.js";
 
 /**
@@ -68,6 +74,57 @@ const HEAD_FILLER = /^(по|на|для|к|ко|о|об|с|со|от|до|из|�
  * Code-owned 0–100 score. The model must not call this and must not invent
  * a parallel number.
  */
+
+/** True when the text names a plan object or a required_context term. */
+export function hasProfileSubjectSignal(text: string, plan: SearchIntentPlan): boolean {
+  if (plan.objects.some((item) => termOccurs(text, item))) return true;
+  const required = plan.required_context ?? [];
+  return required.some((item) => termOccurs(text, item));
+}
+
+const WORKS_NO_SUBJECT_REASON =
+  "В тексте нет объектов или назначения из профиля — совпали только общие слова работ, закупка отброшена.";
+
+/**
+ * Works profiles are domain-agnostic: the profile's objects/context define the
+ * industry. Without those in the text, a bare SMR/ПНР hit is dropped (veto).
+ * If a specific profile work phrase matched but the object is still missing,
+ * the hit stays open for the model (review), never auto-match.
+ */
+function applyWorksSubjectGate(
+  scored: SearchIntentScore,
+  plan: SearchIntentPlan,
+  text: string,
+): SearchIntentScore {
+  if (plan.intent !== "works") return scored;
+  if (scored.decision === "veto") return scored;
+  if (scored.objectRole !== "none") return scored;
+  if (scored.contextRole === "match") return scored;
+  if (hasProfileSubjectSignal(text, plan)) return scored;
+
+  const desired = scored.matchedDesired;
+  const onlyGeneric =
+    desired.length === 0 || desired.every((item) => isGenericWorkPhrase(item));
+  if (onlyGeneric) {
+    return {
+      ...scored,
+      score: 0,
+      decision: "veto",
+      reason: WORKS_NO_SUBJECT_REASON,
+    };
+  }
+  // Profile-specific work phrase without its object: let the model judge by profile.
+  if (scored.decision === "match" || scored.decision === "discard") {
+    return {
+      ...scored,
+      decision: "review",
+      reason:
+        "Есть специфичная фраза работ из профиля, но объект профиля в тексте не назван — нужна проверка модели.",
+    };
+  }
+  return scored;
+}
+
 export function scoreSearchIntent(
   hit: SearchIntentHitText,
   plan: SearchIntentPlan,
@@ -82,8 +139,11 @@ export function scoreSearchIntent(
   const objects = objectRole === "mention" ? extraObjects : matchedObjects;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
-  const serviceHead =
+  const workHead =
     matchedDesired.length === 0 ? purchaseWorkHead(leadingClause(title)) : undefined;
+  // Purchase profiles: a work-headed title is not supply. Works profiles: the
+  // opposite — work in the title is the desired shape, never an exclusion.
+  const serviceHead = plan.intent === "works" ? undefined : workHead;
   const excludedInTitle = [
     ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
     ...(serviceHead === undefined ? [] : [serviceHead.trim()]),
@@ -93,16 +153,33 @@ export function scoreSearchIntent(
   const context = contextRoleFor(title, extra, plan);
   const matchedContext = context.matched;
 
+  // Soft A+C keeps keywords separate («электрооборудование», «монтаж») and
+  // strips bare work verbs from desired. When the plan has no desired phrases
+  // left, the object is present, and the title still names works, score that
+  // as an implicit desired action — specialists must not glue chips into one
+  // site query. If the plan still lists specific desired phrases that simply
+  // did not match this title, do not invent a works match.
+  const implicitWorks =
+    plan.intent === "works" &&
+    plan.desired_actions.length === 0 &&
+    matchedDesired.length === 0 &&
+    objectRole !== "none" &&
+    excludedRole !== "subject" &&
+    titleHasWorksSignal(title, workHead);
+  const effectiveDesired = implicitWorks
+    ? [implicitWorksDesiredLabel(title, workHead)]
+    : matchedDesired;
+
   let score = 0;
   if (objectRole === "subject") score += SEARCH_INTENT_WEIGHTS.OBJECT_MATCH_WEIGHT;
   else if (objectRole === "mention") score += SEARCH_INTENT_WEIGHTS.OBJECT_MENTION_WEIGHT;
-  if (matchedDesired.length > 0) score += SEARCH_INTENT_WEIGHTS.DESIRED_ACTION_WEIGHT;
-  if (objectRole === "subject" && matchedDesired.length > 0 && excludedRole !== "subject") {
+  if (effectiveDesired.length > 0) score += SEARCH_INTENT_WEIGHTS.DESIRED_ACTION_WEIGHT;
+  if (objectRole === "subject" && effectiveDesired.length > 0 && excludedRole !== "subject") {
     score += SEARCH_INTENT_WEIGHTS.COMBO_BONUS;
   }
   if (
     objectRole === "subject" &&
-    matchedDesired.length === 0 &&
+    effectiveDesired.length === 0 &&
     excludedRole !== "subject" &&
     planAllowsBareObject(plan)
   ) {
@@ -110,7 +187,7 @@ export function scoreSearchIntent(
   }
   if (
     objectRole === "none" &&
-    matchedDesired.length > 0 &&
+    effectiveDesired.length > 0 &&
     excludedRole !== "subject" &&
     plan.objects.length === 0
   ) {
@@ -124,13 +201,20 @@ export function scoreSearchIntent(
   }
 
   score = clampScore(score);
-  const decision = decisionFor(score, excludedRole, objectRole, context.role, matchedDesired.length, plan);
-  return {
+  const decision = decisionFor(
+    score,
+    excludedRole,
+    objectRole,
+    context.role,
+    effectiveDesired.length,
+    plan,
+  );
+  const scored: SearchIntentScore = {
     score,
     decision,
     reason: relevanceReason({
       objects,
-      desired: matchedDesired,
+      desired: effectiveDesired,
       excluded: excludedInTitle,
       excludedRole,
       objectRole,
@@ -139,16 +223,45 @@ export function scoreSearchIntent(
       decision,
     }),
     matchedObjects: objects,
-    matchedDesired,
+    matchedDesired: effectiveDesired,
     matchedContext,
     excludedActions: excludedInTitle,
     excludedRole,
     objectRole,
     contextRole: context.role,
     ...(excludedRole === "peer"
-      ? { mixedActions: { desired: matchedDesired, excluded: excludedInTitle } }
+      ? { mixedActions: { desired: effectiveDesired, excluded: excludedInTitle } }
       : {}),
   };
+
+  // Works profile with a subject hit and a work signal in the title, but none
+  // of the saved desired phrases matched (e.g. profile has «электромонтажные
+  // работы» while the site says «строительно-монтажные … РЭС/КРУН»). Do not
+  // discard: send to the model instead of requiring glued keywords.
+  if (
+    plan.intent === "works" &&
+    objectRole !== "none" &&
+    effectiveDesired.length === 0 &&
+    plan.desired_actions.length > 0 &&
+    excludedRole !== "subject" &&
+    titleHasWorksSignal(title, workHead) &&
+    (decision === "discard" || decision === "review")
+  ) {
+    const label = implicitWorksDesiredLabel(title, workHead);
+    return applyWorksSubjectGate(
+      {
+        ...scored,
+        decision: "review",
+        matchedDesired: [label],
+        reason:
+          "Предмет профиля есть, в заголовке видны работы, но точная фраза из профиля не совпала — нужна проверка модели.",
+      },
+      plan,
+      `${title}\n${extra}`,
+    );
+  }
+
+  return applyWorksSubjectGate(scored, plan, `${title}\n${extra}`);
 }
 
 export function scoreSearchIntentFromProfile(
@@ -178,7 +291,7 @@ export function scoreSearchIntentFromProcedure(
   card: ProcedureCard,
   plan: SearchIntentPlan,
 ): SearchIntentScore {
-  return scoreIntentProcedure(card, plan);
+  return applyWorksSubjectGate(scoreIntentProcedure(card, plan), plan, procedureIntentText(card));
 }
 
 function lotIntentText(lot: ProcedureCard["lots"][number]): string {
@@ -218,6 +331,8 @@ function scoreIntentProcedure(
   if (workWithObject !== undefined) return workWithObject;
   const work = clauses.find((item) => item.excludedRole === "subject");
   if (work !== undefined) return work;
+  const energyVeto = clauses.find((item) => item.decision === "veto");
+  if (energyVeto !== undefined) return energyVeto;
   const implicit = clauses.find(
     (item) => item.objectRole !== "none" && item.decision !== "discard",
   );
@@ -296,6 +411,29 @@ function leadingClause(title: string): string {
 }
 
 /**
+ * True when the title names works even if desired_actions has no glued phrase.
+ * Bare «монтаж» / СМР stay out of the plan; the title still carries the signal.
+ */
+function titleHasWorksSignal(title: string, workHead: string | undefined): boolean {
+  if (workHead !== undefined) return true;
+  if (termOccurs(title, "монтаж") || termOccurs(title, "пусконаладка")) return true;
+  if (termOccurs(title, "смр") || termOccurs(title, "пнр")) return true;
+  if (/строительно[-\s]?монтажн/iu.test(title)) return true;
+  if (/пуско[-\s]?наладочн/iu.test(title)) return true;
+  if (/электромонтажн/iu.test(title)) return true;
+  return false;
+}
+
+function implicitWorksDesiredLabel(title: string, workHead: string | undefined): string {
+  const fromHead = workHead?.trim() ?? "";
+  if (fromHead.length > 0) return fromHead;
+  if (termOccurs(title, "монтаж")) return "монтаж";
+  if (termOccurs(title, "пусконаладка")) return "пусконаладка";
+  if (termOccurs(title, "смр") || /строительно[-\s]?монтажн/iu.test(title)) return "СМР";
+  return "работы";
+}
+
+/**
  * First content words of the title name the subject. For a purchase profile
  * «Реконструкция КТП» / «Выбор подрядчика … КТП» is works, not an implicit
  * supply of the equipment mentioned later or only in a lot line.
@@ -338,7 +476,9 @@ function workHeadLabel(token: string): string | undefined {
   if (/^реконструкц/u.test(lower)) return "реконструкция";
   if (/^строительств/u.test(lower) || /^строительно/u.test(lower)) return "строительство";
   if (/^прокладк/u.test(lower)) return "прокладка";
-  if (/^подряд/u.test(lower) || /^субподряд/u.test(lower)) return "подрядные работы";
+  if (/^подряд/u.test(lower) || /^субподряд/u.test(lower) || /^генподряд/u.test(lower)) {
+    return "подрядные работы";
+  }
   if (/^демонтаж/u.test(lower)) return "демонтаж";
   if (/^электромонтаж/u.test(lower) || /^шефмонтаж/u.test(lower)) return "монтажные работы";
   if (/^модернизац/u.test(lower)) return "работы";

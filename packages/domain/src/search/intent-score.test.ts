@@ -8,6 +8,7 @@ import {
   platformSearchTerms,
 } from "./intent-plan.js";
 import {
+  hasProfileSubjectSignal,
   scoreSearchIntent,
   scoreSearchIntentFromProcedure,
   SEARCH_INTENT_WEIGHTS,
@@ -308,7 +309,11 @@ describe("scoreSearchIntent", () => {
   it("matches a works profile from lot subject when the procedure title is empty of objects", () => {
     const worksPlan = inferSearchIntentPlan({
       name: "Монтаж и пусконаладка электросилового оборудования",
-      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      keywords: [
+        "монтаж электрооборудования",
+        "пусконаладка электрооборудования",
+        "электрооборудование",
+      ],
       excludeKeywords: [],
     });
     const result = scoreSearchIntentFromProcedure(
@@ -321,7 +326,7 @@ describe("scoreSearchIntent", () => {
     expect(worksPlan.intent).toBe("works");
     expect(result.decision).toBe("match");
     expect(result.matchedObjects).toContain("электрооборудование");
-    expect(result.matchedDesired).toEqual(expect.arrayContaining(["монтаж", "пусконаладка"]));
+    expect(result.matchedDesired.some((item) => /монтаж/iu.test(item))).toBe(true);
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
   });
 
@@ -376,7 +381,8 @@ describe("scoreSearchIntent", () => {
     });
     expect(plan.intent).toBe("works");
     expect(plan.objects).toContain("электрооборудования");
-    expect(plan.desired_actions).toContain("монтаж");
+    expect(plan.desired_actions).toContain("монтаж электрооборудования");
+    expect(plan.desired_actions).not.toContain("монтаж");
     expect(plan.excluded_actions).toEqual(
       expect.arrayContaining(["поставка", "ремонт", "демонтаж"]),
     );
@@ -391,12 +397,12 @@ describe("scoreSearchIntent", () => {
     expect(relevant.decision).toBe("match");
 
     const grain = scoreSearchIntent({ title: "Пусконаладка зернового комплекса" }, plan);
-    expect(grain.decision).not.toBe("match");
+    expect(grain.decision).toBe("veto");
     expect(grain.matchedObjects).toEqual([]);
 
-    // Unrelated equipment is not a works match either: no object, no work verb.
+    // Unrelated equipment is not a works match either: no object, no energy signal.
     const boiler = scoreSearchIntent({ title: "Котёл твердотопливный КВр-0,5" }, plan);
-    expect(boiler.decision).toBe("discard");
+    expect(boiler.decision).toBe("veto");
 
     const repair = scoreSearchIntent(
       { title: "Текущий ремонт электрооборудования с частичной заменой проводки" },
@@ -411,7 +417,7 @@ describe("scoreSearchIntent", () => {
       },
       plan,
     );
-    expect(pump.decision).toBe("discard");
+    expect(pump.decision).toBe("veto");
 
     const mixedSupply = scoreSearchIntent(
       {
@@ -426,7 +432,11 @@ describe("scoreSearchIntent", () => {
   it("does not match a works profile on commissioning alone without the object", () => {
     const worksPlan = inferSearchIntentPlan({
       name: "Монтаж и пусконаладка электросилового оборудования",
-      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      keywords: [
+        "монтаж электрооборудования",
+        "пусконаладка электрооборудования",
+        "электрооборудование",
+      ],
       excludeKeywords: [],
     });
     const result = scoreSearchIntentFromProcedure(
@@ -443,7 +453,11 @@ describe("scoreSearchIntent", () => {
   it("scores the same card independently for a supply profile", () => {
     const worksPlan = inferSearchIntentPlan({
       name: "Монтаж и пусконаладка электросилового оборудования",
-      keywords: ["электрооборудование", "монтаж", "пусконаладка"],
+      keywords: [
+        "монтаж электрооборудования",
+        "пусконаладка электрооборудования",
+        "электрооборудование",
+      ],
       excludeKeywords: [],
     });
     const card = procedureCard(
@@ -484,7 +498,7 @@ describe("scoreSearchIntent", () => {
       worksPlan,
     );
     expect(supplyHead.decision).toBe("match");
-    expect(supplyHead.matchedDesired).toEqual(expect.arrayContaining(["монтаж"]));
+    expect(supplyHead.matchedDesired.some((item) => /монтаж/iu.test(item))).toBe(true);
 
     const split = scoreSearchIntentFromProcedure(
       procedureCard(
@@ -548,16 +562,113 @@ describe("inferSearchIntentPlan", () => {
   });
 });
 
+
+describe("works review without glued desired phrase", () => {
+  it("reviews RES/KRUN construction works when profile objects match but desired phrase does not", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "электрооборудование",
+        "КРУН",
+        "РЭС",
+        "ПС",
+        "ДГУ",
+        "электромонтажные работы",
+        "монтаж",
+        "СМР",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.desired_actions).toContain("электромонтажные работы");
+    expect(plan.desired_actions).not.toContain("монтаж");
+
+    const scored = scoreSearchIntent(
+      {
+        title:
+          "Закупка строительно-монтажных работ по объектам: модернизация РЭС с установкой ДГУ; реконструкция ПС с заменой КРУН-10 кВ",
+      },
+      plan,
+    );
+    expect(scored.decision).toBe("review");
+    expect(scored.matchedObjects.length).toBeGreaterThan(0);
+  });
+});
+
+describe("platformSearchTerms works filter", () => {
+  it("does not send bare SMR or монтаж to the site for a works plan", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж систем очистки воды",
+      keywords: [
+        "монтаж системы очистки воды",
+        "СМР",
+        "пусконаладочные работы",
+        "монтаж",
+        "строительно-монтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.desired_actions).toContain("монтаж системы очистки воды");
+    expect(plan.desired_actions).not.toContain("монтаж"); // bare verb stays out even from a phrase
+    expect(plan.desired_actions).not.toContain("СМР");
+    const terms = platformSearchTerms(plan, [
+      "монтаж системы очистки воды",
+      "СМР",
+      "пусконаладочные работы",
+      "монтаж",
+      "строительно-монтажные работы",
+    ]);
+    expect(terms).toEqual(expect.arrayContaining(["монтаж системы очистки воды"]));
+    expect(terms).toEqual(expect.arrayContaining(plan.objects));
+    expect(terms.some((item) => /^смр$/iu.test(item))).toBe(false);
+    expect(terms.some((item) => /^монтаж$/iu.test(item))).toBe(false);
+    expect(terms.some((item) => /пусконаладочн/iu.test(item))).toBe(false);
+    expect(terms.some((item) => /строительно[-\s]?монтажн/iu.test(item))).toBe(false);
+  });
+
+  it("keeps separate keywords as separate site queries — does not glue them", () => {
+    const keywords = [
+      "электрооборудование",
+      "система очистки воды",
+      "водоподготовка",
+      "монтаж",
+      "пусконаладка",
+      "СМР",
+    ];
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж систем очистки воды",
+      keywords,
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.objects).toEqual(
+      expect.arrayContaining(["электрооборудование", "система очистки воды", "водоподготовка"]),
+    );
+    expect(plan.desired_actions).toEqual([]);
+    const terms = platformSearchTerms(plan, keywords);
+    expect(terms).toEqual(["электрооборудование", "система очистки воды", "водоподготовка"]);
+    // No compound «монтаж …» invented by joining chips.
+    expect(terms.some((item) => /\s/.test(item) && /монтаж/iu.test(item))).toBe(false);
+
+    const hit = scoreSearchIntent(
+      { title: "Монтаж системы очистки воды на станции обезжелезивания" },
+      plan,
+    );
+    expect(hit.decision).toBe("match");
+  });
+});
+
 describe("extraPlatformSearchTerms", () => {
   it("keeps every saved phrase and adds distinct plan objects", () => {
     const plan = SearchIntentPlan.parse({
       objects: ["электрооборудование", "КТП"],
-      desired_actions: ["монтаж"],
+      desired_actions: ["монтаж электрооборудования"],
       intent: "works",
     });
     expect(
       platformSearchTerms(plan, ["монтаж электрооборудования", "электромонтажные работы"]),
-    ).toEqual(["монтаж электрооборудования", "электромонтажные работы"]);
+    ).toEqual(["монтаж электрооборудования", "электромонтажные работы", "электрооборудование", "КТП"]);
   });
 
   it("returns only objects the cheap listing has not already queried", () => {
@@ -574,4 +685,107 @@ describe("extraPlatformSearchTerms", () => {
     expect(extraPlatformSearchTerms(inferred.objects, fromModel, ["НКУ"])).toEqual(["шкаф управления"]);
     expect(extraPlatformSearchTerms(["НКУ", "шкаф управления"], fromModel, ["НКУ"])).toEqual([]);
   });
+
+  it("hard-drops works hits that only match generic SMR with no profile object", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "строительно-монтажные работы",
+        "СМР",
+        "пусконаладочные работы",
+        "монтаж электрооборудования",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.objects.length).toBeGreaterThan(0);
+
+    const bath = scoreSearchIntent(
+      {
+        title:
+          "Выбор подрядной организации для выполнения строительно-монтажных работ по объекту «Текущий ремонт здания бани»",
+      },
+      plan,
+    );
+    expect(bath.decision).toBe("veto");
+
+    const facade = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Выбор подрядной организации на выполнение строительно-монтажных работ",
+        "Текущий ремонт фасада и внутренних помещений здания музея",
+      ),
+      plan,
+    );
+    expect(facade.decision).toBe("veto");
+  });
+
+  it("still matches when the profile object is present, and reviews specific work phrases without the object", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "строительно-монтажные работы",
+        "СМР",
+        "пусконаладочные работы",
+        "монтаж электрооборудования",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+
+    // Only generic SMR + a foreign site name: no profile object → veto (domain-agnostic).
+    const substation = scoreSearchIntent(
+      {
+        title:
+          "Выбор субподрядной организации для выполнения строительно-монтажных работ на объекте «Реконструкция ПС-330 кВ»",
+      },
+      plan,
+    );
+    expect(substation.decision).toBe("veto");
+    expect(
+      hasProfileSubjectSignal(
+        "Выбор субподрядной организации для выполнения строительно-монтажных работ на объекте «Реконструкция ПС-330 кВ»",
+        plan,
+      ),
+    ).toBe(false);
+
+    // Specific profile work phrase without a clear object → model review, not auto-match.
+    const specific = scoreSearchIntent(
+      { title: "Электромонтажные работы на объекте реконструкции" },
+      plan,
+    );
+    expect(specific.decision).toBe("review");
+
+    const explicit = scoreSearchIntent(
+      {
+        title:
+          "Монтаж электрооборудования распределительного пункта 10 кВ, пусконаладочные работы",
+      },
+      plan,
+    );
+    expect(explicit.decision).toBe("match");
+  });
+
+  it("uses the same subject gate for a non-electrical works profile", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж вентиляции",
+      keywords: ["монтаж вентиляции", "пусконаладка вентиляции", "СМР"],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+
+    const bath = scoreSearchIntent(
+      { title: "Строительно-монтажные работы по ремонту бани" },
+      plan,
+    );
+    expect(bath.decision).toBe("veto");
+
+    const vent = scoreSearchIntent(
+      { title: "Монтаж вентиляции приточно-вытяжной в производственном корпусе" },
+      plan,
+    );
+    expect(vent.decision).toBe("match");
+  });
+
 });
+

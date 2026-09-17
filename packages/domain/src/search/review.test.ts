@@ -83,16 +83,17 @@ describe("reviewByIntentCard", () => {
     expect(outcome?.reason).toMatch(/монтаж/i);
   });
 
-  it("leaves commissioning of a grain complex open for the model instead of calling it irrelevant", () => {
-    // No electrical object anywhere on the card: not a match, but also not a
-    // proven miss — the code did not see a veto or a foreign purpose.
+  it("drops commissioning of a grain complex when only generic work words match the works profile", () => {
+    // No profile object on the card — only «пусконаладка». That is not enough
+    // for any works profile; the model is not called.
     const outcome = reviewByIntentCard(
       card("Пусконаладка зернового комплекса", [
         { title: "Пусконаладочные работы оборудования зерноочистительного комплекса" },
       ]),
       worksPlan,
     );
-    expect(outcome).toBeUndefined();
+    expect(outcome?.verdict).toBe("irrelevant");
+    expect(outcome?.decidedBy).toBe("card");
   });
 
   it("still settles a veto and a foreign purpose on the card without a model", () => {

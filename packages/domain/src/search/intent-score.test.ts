@@ -230,6 +230,44 @@ describe("scoreSearchIntent", () => {
     expect(scoreSearchIntentFromProcedure(twoLots, supplyPlan).decision).toBe("veto");
   });
 
+  it.each([
+    ["Поставка НКУ для освещения", "Поставка НКУ для насосов", "match"],
+    ["Поставка НКУ", "Поставка НКУ для насосов", "match"],
+    ["Монтаж НКУ, поставка и пусконаладка", "Поставка НКУ для насосов", "match"],
+    ["Поставка НКУ для освещения", "Поставка НКУ", "review"],
+    ["Поставка НКУ для освещения", "НКУ для насосов", "match"],
+    ["Монтаж НКУ для насосов", "Поставка кабеля", "veto"],
+  ] as const)("keeps the lot decision independent of order: %s / %s", (first, second, decision) => {
+    const card = ProcedureCard.parse({
+      ...procedureCard("Закупка оборудования", first),
+      lots: [{ number: "1", title: first }, { number: "2", title: second }],
+    });
+    const forward = scoreSearchIntentFromProcedure(card, pumpPlan);
+    const reversed = scoreSearchIntentFromProcedure({ ...card, lots: [...card.lots].reverse() }, pumpPlan);
+
+    expect(forward.decision).toBe(decision);
+    expect(reversed).toEqual(forward);
+    if (decision === "match" || decision === "review") {
+      expect(forward.reason).toContain("Лот 2:");
+    }
+  });
+
+  it("chooses the strongest explicit lot and keeps its evidence on ties", () => {
+    const card = ProcedureCard.parse({
+      ...procedureCard("Закупка оборудования", "Поставка НКУ для насосов"),
+      lots: [
+        { number: "2", title: "Поставка НКУ для насосов" },
+        { number: "1", title: "Поставка шкафа управления насосами" },
+        { number: "3", title: "Поставка НКУ для насосов с последующим монтажом" },
+      ],
+    });
+    const result = scoreSearchIntentFromProcedure(card, pumpPlan);
+    expect(result.decision).toBe("match");
+    expect(result.score).toBe(100);
+    expect(result.reason).toContain("Лот 1:");
+    expect(scoreSearchIntentFromProcedure({ ...card, lots: [...card.lots].reverse() }, pumpPlan)).toEqual(result);
+  });
+
   it("does not auto-match NCU that appears only in extra text", () => {
     const result = scoreSearchIntent(
       {

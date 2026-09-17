@@ -201,17 +201,31 @@ function scoreIntentProcedure(
   plan: SearchIntentPlan,
 ): SearchIntentScore {
   const titleScore = scoreSearchIntent({ title: card.title }, plan);
-  const lotScores = card.lots.map((lot) => scoreSearchIntent({ title: lotIntentText(lot) }, plan));
-  const clauses = [titleScore, ...lotScores];
-  const mixed = clauses.find((item) => item.excludedRole === "peer" && item.objectRole !== "none");
-  if (mixed !== undefined) return mixed;
-  const explicit = clauses.find(
+  const lotScores = [...card.lots]
+    .sort((left, right) =>
+      left.number.localeCompare(right.number, "ru", { numeric: true }) ||
+      lotIntentText(left).localeCompare(lotIntentText(right), "ru"),
+    )
+    .map((lot) => {
+      const scored = scoreSearchIntent({ title: lotIntentText(lot) }, plan);
+      return { ...scored, reason: `Лот ${lot.number}: ${scored.reason}` };
+    });
+  const priority: Record<IntentScoreDecision, number> = { match: 3, review: 2, veto: 1, discard: 0 };
+  const clauses = [titleScore, ...lotScores].sort(
+    (left, right) => priority[right.decision] - priority[left.decision] || right.score - left.score,
+  );
+  const explicit = clauses.filter(
     (item) =>
       item.matchedDesired.length > 0 &&
       item.objectRole !== "none" &&
       item.excludedRole !== "subject",
   );
-  if (explicit !== undefined) return explicit;
+  const matched = explicit.find((item) => item.decision === "match");
+  if (matched !== undefined) return matched;
+  const mixed = clauses.find((item) => item.excludedRole === "peer" && item.objectRole !== "none");
+  if (mixed !== undefined) return mixed;
+  const review = explicit.find((item) => item.decision === "review");
+  if (review !== undefined) return review;
   const workWithObject = clauses.find(
     (item) => item.excludedRole === "subject" && item.objectRole !== "none",
   );
@@ -222,7 +236,7 @@ function scoreIntentProcedure(
     (item) => item.objectRole !== "none" && item.decision !== "discard",
   );
   if (implicit !== undefined) return implicit;
-  return titleScore;
+  return explicit[0] ?? titleScore;
 }
 
 function contextRoleFor(

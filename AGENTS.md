@@ -73,6 +73,7 @@
 - [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score; завершённые без решения не хранятся
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
+- [`docs/architecture/STAGE-67.md`](docs/architecture/STAGE-67.md) — решение по лотам не зависит от их порядка (R07)
 
 ---
 

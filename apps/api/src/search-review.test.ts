@@ -219,6 +219,37 @@ describe("createProcurementSearchReview", () => {
     expect(classify).not.toHaveBeenCalled();
   });
 
+  it("accepts a matching later lot without a model call in either lot order", async () => {
+    const card = cardWithLots("auction/13", "Закупка оборудования", [
+      "Поставка НКУ для освещения",
+      "Поставка НКУ для насосов",
+    ]);
+    const classify = vi.fn(async () => ({}));
+    const intent = inferSearchIntentPlan({
+      name: "НКУ для насосов",
+      keywords: ["НКУ"],
+      excludeKeywords: [],
+    });
+    intent.excluded_context = ["освещение"];
+    for (const lots of [card.lots, [...card.lots].reverse()]) {
+      const review = createProcurementSearchReview({
+        caller: cardCaller({ "auction/13": { ...card, lots } }),
+        classifier: { classify },
+      });
+      const [outcome] = await review.review([hit("auction/13", card.title)], {
+        name: "НКУ для насосов",
+        keywords: ["НКУ"],
+        excludeKeywords: [],
+        intent,
+      });
+      expect(outcome?.verdict).toBe("relevant");
+      expect(outcome?.decidedBy).toBe("card");
+      expect(outcome?.reason).toContain("Лот 2:");
+      expect(outcome?.matchedTerms).toContain("НКУ");
+    }
+    expect(classify).not.toHaveBeenCalled();
+  });
+
   it("asks the model which side of a mixed supply-and-works lot is the subject", async () => {
     const classify = vi.fn(async (input: SearchClassifierInput) => {
       expect(input.mixedActions?.desired).toEqual(["поставка"]);

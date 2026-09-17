@@ -56,11 +56,8 @@ export interface SearchIntentScore {
   mixedActions?: { desired: readonly string[]; excluded: readonly string[] };
 }
 
-const WORK_LEAD =
-  /^(выполнение\s+работ\s+по|работы\s+по|услуги\s+по|оказание\s+услуг\s+по|текущий\s+ремонт|капитальный\s+ремонт)/iu;
-
-const SIDE_MENTION =
-  /с\s+последующ|силами\s+заказчика|включая\s+|в\s+том\s+числе/iu;
+const SIDE_CLAUSE = /включая|в\s+том\s+числе|с\s+последующ/iu;
+const CUSTOMER_WORKS = /силами\s+заказчика/iu;
 
 const HEAD_FILLER = /^(по|на|для|к|ко|о|об|с|со|от|до|из|и|или|при)$/iu;
 
@@ -259,6 +256,39 @@ function contextRoleFor(
   return { role: "missing", matched: [] };
 }
 
+interface IntentClause {
+  text: string;
+  incidental: boolean;
+  customerWorks: boolean;
+}
+
+/**
+ * «Включая» / «в том числе» / «с последующим» scope what follows them, not
+ * the verb that leads the title: in «Монтаж НКУ, включая поставку крепежа»
+ * the incidental part is the fastener supply while монтаж stays the subject.
+ * «Силами заказчика» instead downgrades the verb it trails in the same
+ * sentence («Поставка НКУ, монтаж силами заказчика»).
+ */
+function splitIntentClauses(title: string): IntentClause[] {
+  const clauses: IntentClause[] = [];
+  for (const sentence of title.split(/[\n.;:]+/u)) {
+    const marker = SIDE_CLAUSE.exec(sentence);
+    if (marker === null) {
+      clauses.push({
+        text: sentence,
+        incidental: false,
+        customerWorks: CUSTOMER_WORKS.test(sentence),
+      });
+      continue;
+    }
+    const main = sentence.slice(0, marker.index);
+    const side = sentence.slice(marker.index);
+    clauses.push({ text: main, incidental: false, customerWorks: CUSTOMER_WORKS.test(main) });
+    clauses.push({ text: side, incidental: true, customerWorks: CUSTOMER_WORKS.test(side) });
+  }
+  return clauses;
+}
+
 function excludedActionRole(
   title: string,
   plan: SearchIntentPlan,
@@ -266,20 +296,24 @@ function excludedActionRole(
 ): IntentExcludedRole {
   const found = plan.excluded_actions.filter((item) => termOccurs(title, item));
   if (found.length === 0) return "none";
-  if (SIDE_MENTION.test(title)) return "mention";
-  const desiredIndex = earliestIndex(title, matchedDesired);
-  const excludedIndex = earliestIndex(title, found);
+  const mainClauses = splitIntentClauses(title).filter((clause) => !clause.incidental);
+  const inMain = found.filter((item) =>
+    mainClauses.some((clause) => termOccurs(clause.text, item)),
+  );
+  const governed = inMain.filter((item) =>
+    mainClauses.some((clause) => !clause.customerWorks && termOccurs(clause.text, item)),
+  );
+  if (governed.length === 0) return "mention";
+  const mainText = mainClauses.map((clause) => clause.text).join("\n");
+  const mainDesired = matchedDesired.filter((item) => termOccurs(mainText, item));
+  const desiredIndex = earliestIndex(mainText, mainDesired);
+  const excludedIndex = earliestIndex(mainText, governed);
   if (desiredIndex !== -1 && excludedIndex > desiredIndex) return "mention";
-  const lead = leadingClause(title);
-  const inLead = found.some((item) => termOccurs(lead, item));
+  const lead = leadingClause(mainText);
+  const inLead = governed.some((item) => termOccurs(lead, item));
   if (!inLead) return "mention";
-  if (desiredIndex !== -1 && enumeratesTogether(title, found, matchedDesired)) return "peer";
-  if (
-    found.some((item) => startsWithTerm(lead, item)) ||
-    WORK_LEAD.test(lead.trim()) ||
-    purchaseWorkHead(lead) !== undefined
-  ) {
-    return "subject";
+  if (desiredIndex !== -1 && enumeratesTogether(mainText, governed, mainDesired)) {
+    return "peer";
   }
   return "subject";
 }
@@ -357,10 +391,6 @@ function workHeadLabel(token: string): string | undefined {
   if (/^электромонтаж/u.test(lower) || /^шефмонтаж/u.test(lower)) return "монтажные работы";
   if (/^модернизац/u.test(lower)) return "работы";
   return undefined;
-}
-
-function startsWithTerm(text: string, term: string): boolean {
-  return firstTermIndex(text, term) === 0;
 }
 
 function earliestIndex(text: string, terms: readonly string[]): number {

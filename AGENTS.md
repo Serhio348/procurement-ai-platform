@@ -74,6 +74,7 @@
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
 - [`docs/architecture/STAGE-67.md`](docs/architecture/STAGE-67.md) — решение по лотам не зависит от их порядка (R07)
+- [`docs/architecture/STAGE-68.md`](docs/architecture/STAGE-68.md) — «включая» помечает второстепенную клаузу, а не отменяет veto (R08)
 
 ---
 

@@ -99,6 +99,60 @@ describe("scoreSearchIntent", () => {
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
   });
 
+  it("vetoes works whose incidental clause supplies something else (R08)", () => {
+    // «Включая» scopes what follows it: the fastener supply is incidental,
+    // while монтаж stays the subject and must keep its veto.
+    const incidentalSupply = scoreSearchIntent(
+      { title: "Монтаж НКУ, включая поставку крепежа" },
+      nkuPlan,
+    );
+    expect(incidentalSupply.decision).toBe("veto");
+    expect(incidentalSupply.excludedRole).toBe("subject");
+    expect(incidentalSupply.reason).toMatch(/монтажн/i);
+    expect(
+      scoreSearchIntent(
+        { title: "Монтаж НКУ, в том числе поставка крепежа" },
+        nkuPlan,
+      ).decision,
+    ).toBe("veto");
+
+    // The reverse stays a match: supply is the subject, works are incidental.
+    const incidentalWorks = scoreSearchIntent(
+      { title: "Поставка НКУ, включая монтаж" },
+      nkuPlan,
+    );
+    expect(incidentalWorks.decision).toBe("match");
+    expect(incidentalWorks.excludedRole).toBe("mention");
+
+    // Works done by the customer stay a mention, not a veto.
+    const byCustomer = scoreSearchIntent(
+      { title: "Поставка НКУ, монтаж силами заказчика" },
+      nkuPlan,
+    );
+    expect(byCustomer.decision).toBe("match");
+    expect(byCustomer.excludedRole).toBe("mention");
+
+    // The same title is a legitimate match for a works profile.
+    const worksPlan = SearchIntentPlan.parse({
+      objects: ["НКУ"],
+      desired_actions: ["монтаж"],
+      excluded_actions: ["поставка"],
+      intent: "works",
+    });
+    expect(
+      scoreSearchIntent({ title: "Монтаж НКУ, включая поставку крепежа" }, worksPlan)
+        .decision,
+    ).toBe("match");
+
+    // Card level: the veto survives procedure scoring.
+    expect(
+      scoreSearchIntentFromProcedure(
+        procedureCard("Закупка работ", "Монтаж НКУ, включая поставку крепежа"),
+        nkuPlan,
+      ).decision,
+    ).toBe("veto");
+  });
+
   it("does not read a service headed title as an implicit supply of the equipment it names", () => {
     const plan = inferSearchIntentPlan({
       name: "КТП",

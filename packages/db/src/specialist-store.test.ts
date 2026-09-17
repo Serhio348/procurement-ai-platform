@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   blobStorageKey,
   caseListTimeShouldBump,
+  deletedProfileIdsFromSettings,
   jsonbSafe,
+  omitDeletedProfiles,
   postgresErrorMessage,
   toIsoDateTime,
   uniqueBySource,
+  workspaceSettingsPayload,
 } from "./specialist-store.js";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 
@@ -122,5 +125,20 @@ describe("postgresErrorMessage", () => {
       cause,
     });
     expect(postgresErrorMessage(wrapped)).toContain("22P02");
+  });
+});
+
+describe("deleted profile tombstones", () => {
+  it("keeps deleted profile ids in workspace settings across a stale save payload", () => {
+    expect(deletedProfileIdsFromSettings({ deletedProfileIds: ["a", "a", 1, ""] })).toEqual(["a"]);
+    expect(
+      workspaceSettingsPayload({ a: ["1"], b: ["2"] }, ["b"]),
+    ).toEqual({
+      searchIdsByProfile: { a: ["1"] },
+      deletedProfileIds: ["b"],
+    });
+    expect(
+      omitDeletedProfiles([{ id: "a" }, { id: "b" }], ["b"]),
+    ).toEqual([{ id: "a" }]);
   });
 });

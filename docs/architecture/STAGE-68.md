@@ -41,3 +41,16 @@
 кабинета перечитывает snapshot workspace после записи карточек, чтобы не
 воскресить удалённый профиль.
 
+## Исправление: tombstone против воскрешения после F5
+
+Удаление было быстрым, но параллельный `saveWorkspace` / `saveCabinet` из поиска
+успевал снова upsert-нуть профиль из устаревшего snapshot — после reload он
+возвращался.
+
+1. В `workspace_settings.settings.deletedProfileIds` пишется id удалённого
+   профиля (долговечный tombstone).
+2. `saveWorkspaceMeta` / `saveWorkspace` читают tombstone под advisory lock,
+   выбрасывают эти id из snapshot и снова удаляют строки.
+3. In-memory scrub в `persist.ts` не даёт и файловой копии вернуть профиль
+   до рестарта процесса.
+

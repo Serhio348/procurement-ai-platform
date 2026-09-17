@@ -27,7 +27,7 @@ import {
   workspaceSettings,
   workspaces,
 } from "./schema.js";
-import { withRlsBypass, withUser, withWorkspace } from "./workspace-scope.js";
+import { withRlsBypass, withUser, withWorkspace, withWorkspaceWrite } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
@@ -45,6 +45,38 @@ function searchIdsByProfileFromSettings(
     out[profileId] = ids.filter((item): item is string => typeof item === "string");
   }
   return out;
+}
+
+/** Profile ids removed in this workspace; stale cabinet saves must not resurrect them. */
+export function deletedProfileIdsFromSettings(
+  settings: Record<string, unknown> | null | undefined,
+): string[] {
+  if (settings === undefined || settings === null) return [];
+  const raw = settings["deletedProfileIds"];
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((item): item is string => typeof item === "string" && item.length > 0))];
+}
+
+export function workspaceSettingsPayload(
+  searchIdsByProfile: Record<string, string[]>,
+  deletedProfileIds: readonly string[],
+): Record<string, unknown> {
+  const banned = deletedProfileIdsFromSettings({ deletedProfileIds: [...deletedProfileIds] });
+  const search = Object.fromEntries(
+    Object.entries(searchIdsByProfile).filter(([profileId]) => !banned.includes(profileId)),
+  );
+  return banned.length === 0
+    ? { searchIdsByProfile: search }
+    : { searchIdsByProfile: search, deletedProfileIds: banned };
+}
+
+export function omitDeletedProfiles<T extends { id: string }>(
+  profiles: readonly T[],
+  deletedProfileIds: readonly string[],
+): T[] {
+  if (deletedProfileIds.length === 0) return [...profiles];
+  const banned = new Set(deletedProfileIds);
+  return profiles.filter((profile) => !banned.has(profile.id));
 }
 
 export interface SpecialistCaseListQuery {
@@ -272,7 +304,18 @@ export function createSpecialistStore(db: Database) {
       searchIdsByProfile: Record<string, string[]>,
     ): Promise<void> {
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        const settingRows = await tx
+          .select({ settings: workspaceSettings.settings })
+          .from(workspaceSettings)
+          .where(eq(workspaceSettings.workspaceId, workspaceId))
+          .limit(1);
+        const deletedProfileIds = [
+          ...new Set([
+            ...deletedProfileIdsFromSettings(settingRows[0]?.settings),
+            profileId,
+          ]),
+        ];
         await tx
           .delete(workspaceReviewVerdicts)
           .where(
@@ -289,7 +332,9 @@ export function createSpecialistStore(db: Database) {
               eq(workspaceProfiles.id, profileId),
             ),
           );
-        const settingsJson = jsonbSql({ searchIdsByProfile });
+        const settingsJson = jsonbSql(
+          workspaceSettingsPayload(searchIdsByProfile, deletedProfileIds),
+        );
         await tx
           .insert(workspaceSettings)
           .values({
@@ -315,15 +360,31 @@ export function createSpecialistStore(db: Database) {
     ): Promise<void> {
       const state = SpecialistWorkspaceState.parse(snapshot);
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        const settingRows = await tx
+          .select({ settings: workspaceSettings.settings })
+          .from(workspaceSettings)
+          .where(eq(workspaceSettings.workspaceId, workspaceId))
+          .limit(1);
+        const deletedProfileIds = deletedProfileIdsFromSettings(settingRows[0]?.settings);
+        const profiles = omitDeletedProfiles(state.profiles, deletedProfileIds);
+        if (profiles.length === 0) {
+          throw new Error("cannot_save_workspace_without_profiles");
+        }
+        const activeProfileId = profiles.some((item) => item.id === state.activeProfileId)
+          ? state.activeProfileId
+          : profiles[0]!.id;
         const existingProfiles = await tx
           .select({ id: workspaceProfiles.id })
           .from(workspaceProfiles)
           .where(eq(workspaceProfiles.workspaceId, workspaceId));
-        const nextIds = new Set(state.profiles.map((item) => item.id));
-        const removed = existingProfiles
-          .map((row) => row.id)
-          .filter((id) => !nextIds.has(id));
+        const nextIds = new Set(profiles.map((item) => item.id));
+        const removed = [
+          ...new Set([
+            ...existingProfiles.map((row) => row.id).filter((id) => !nextIds.has(id)),
+            ...deletedProfileIds,
+          ]),
+        ];
         if (removed.length > 0) {
           await tx
             .delete(workspaceReviewVerdicts)
@@ -335,7 +396,7 @@ export function createSpecialistStore(db: Database) {
             );
           await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
         }
-        for (const profile of state.profiles) {
+        for (const profile of profiles) {
           const columns = workspaceProfileColumns(profile, workspaceId, now);
           await tx
             .insert(workspaceProfiles)
@@ -357,19 +418,21 @@ export function createSpecialistStore(db: Database) {
               },
             });
         }
-        const settingsJson = jsonbSql({ searchIdsByProfile: state.searchIdsByProfile });
+        const settingsJson = jsonbSql(
+          workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds),
+        );
         await tx
           .insert(workspaceSettings)
           .values({
             workspaceId,
-            activeProfileId: state.activeProfileId,
+            activeProfileId,
             settings: settingsJson,
             updatedAt: now,
           })
           .onConflictDoUpdate({
             target: workspaceSettings.workspaceId,
             set: {
-              activeProfileId: state.activeProfileId,
+              activeProfileId,
               settings: settingsJson,
               updatedAt: now,
             },
@@ -383,15 +446,31 @@ export function createSpecialistStore(db: Database) {
     ): Promise<void> {
       const state = SpecialistWorkspaceState.parse(snapshot);
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        const settingRows = await tx
+          .select({ settings: workspaceSettings.settings })
+          .from(workspaceSettings)
+          .where(eq(workspaceSettings.workspaceId, workspaceId))
+          .limit(1);
+        const deletedProfileIds = deletedProfileIdsFromSettings(settingRows[0]?.settings);
+        const profiles = omitDeletedProfiles(state.profiles, deletedProfileIds);
+        if (profiles.length === 0) {
+          throw new Error("cannot_save_workspace_without_profiles");
+        }
+        const activeProfileId = profiles.some((item) => item.id === state.activeProfileId)
+          ? state.activeProfileId
+          : profiles[0]!.id;
         const existingProfiles = await tx
           .select({ id: workspaceProfiles.id })
           .from(workspaceProfiles)
           .where(eq(workspaceProfiles.workspaceId, workspaceId));
-        const nextIds = new Set(state.profiles.map((item) => item.id));
-        const removed = existingProfiles
-          .map((row) => row.id)
-          .filter((id) => !nextIds.has(id));
+        const nextIds = new Set(profiles.map((item) => item.id));
+        const removed = [
+          ...new Set([
+            ...existingProfiles.map((row) => row.id).filter((id) => !nextIds.has(id)),
+            ...deletedProfileIds,
+          ]),
+        ];
         if (removed.length > 0) {
           await tx
             .delete(workspaceReviewVerdicts)
@@ -403,7 +482,7 @@ export function createSpecialistStore(db: Database) {
             );
           await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
         }
-        for (const profile of state.profiles) {
+        for (const profile of profiles) {
           const columns = workspaceProfileColumns(profile, workspaceId, now);
           await tx
             .insert(workspaceProfiles)
@@ -425,19 +504,21 @@ export function createSpecialistStore(db: Database) {
               },
             });
         }
-        const settingsJson = jsonbSql({ searchIdsByProfile: state.searchIdsByProfile });
+        const settingsJson = jsonbSql(
+          workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds),
+        );
         await tx
           .insert(workspaceSettings)
           .values({
             workspaceId,
-            activeProfileId: state.activeProfileId,
+            activeProfileId,
             settings: settingsJson,
             updatedAt: now,
           })
           .onConflictDoUpdate({
             target: workspaceSettings.workspaceId,
             set: {
-              activeProfileId: state.activeProfileId,
+              activeProfileId,
               settings: settingsJson,
               updatedAt: now,
             },
@@ -451,7 +532,7 @@ export function createSpecialistStore(db: Database) {
           .from(workspaceReviewVerdicts)
           .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
         const nextVerdictKeys = new Set(
-          state.reviewedIrrelevant.map(
+          state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId)).map(
             (item) => `${item.profileId}\0${item.sourceProcurementId}`,
           ),
         );
@@ -473,7 +554,7 @@ export function createSpecialistStore(db: Database) {
             .map((row) => `${row.profileId}\0${row.sourceProcurementId}`)
             .filter((key) => nextVerdictKeys.has(key)),
         );
-        for (const verdict of state.reviewedIrrelevant) {
+        for (const verdict of state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId))) {
           const key = `${verdict.profileId}\0${verdict.sourceProcurementId}`;
           if (existingVerdictKeys.has(key)) continue;
           existingVerdictKeys.add(key);

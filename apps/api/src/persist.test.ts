@@ -111,4 +111,45 @@ describe("openSpecialistPersistence", () => {
     expect(catalog.storedCases()).toEqual([]);
     await persistence.close();
   });
+
+  it("runs concurrent cabinet persists one after another without losing the last write", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const workspacePath = path.join(directory, "specialist-workspace.json");
+    const persistence = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const cabinet = await persistence.cabinets.open(TEST_WORKSPACE_ID);
+    cabinet.workspace.replaceProfile({
+      name: "Первый",
+      purpose: "",
+      description: "",
+      keywords: ["нку"],
+      excludeKeywords: [],
+      statuses: ["accepting_bids"],
+      excludeSingleSource: false,
+      filters: {},
+    });
+    const first = persistence.cabinets.persist(cabinet);
+    cabinet.workspace.replaceProfile({
+      name: "Второй",
+      purpose: "",
+      description: "",
+      keywords: ["нку"],
+      excludeKeywords: [],
+      statuses: ["accepting_bids"],
+      excludeSingleSource: false,
+      filters: {},
+    });
+    const second = persistence.cabinets.persist(cabinet);
+    await Promise.all([first, second]);
+
+    const saved = JSON.parse(await readFile(workspacePath, "utf8")) as {
+      profiles: Array<{ name: string }>;
+    };
+    expect(saved.profiles[0]?.name).toBe("Второй");
+    await persistence.close();
+  });
 });

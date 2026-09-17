@@ -976,6 +976,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    * Listing rows that still need a card score. Already-match and already-review
    * cases are not opened again; a button search may put a dismissed review
    * row back in the inbox, discovery must not.
+   *
+   * Watched / participate cases must not re-enter the search queue: the tab
+   * hides them, which used to look like a silent miss next to a visible
+   * status skip. Record them in `skipped` so «Почему не взяли» stays honest.
    */
   async function collectPendingHits(
     selected: ReturnType<typeof selectRelevantSearchCards>,
@@ -987,6 +991,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     skippedRejected: number;
     discardedFromReview: number;
     restoredReview: number;
+    skipped: Array<{ hit: SearchHit; reason: string }>;
   }> {
     const rejected = workspace().rejectedSourceIds();
     const sourceIds = selected.ambiguousCards.map((item) => item.sourceProcurementId);
@@ -1000,12 +1005,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     let skippedRejected = 0;
     let discardedFromReview = 0;
     let restoredReview = 0;
+    const skipped: Array<{ hit: SearchHit; reason: string }> = [];
     const pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }> = [];
     for (const [index, card] of selected.ambiguousCards.entries()) {
       const hit = selected.ambiguousHits[index];
       if (hit === undefined) continue;
       if (rejected.has(card.sourceProcurementId)) {
         skippedRejected += 1;
+        skipped.push({ hit, reason: "уже отклонена" });
         continue;
       }
       if (
@@ -1013,9 +1020,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         workspace().isReviewedIrrelevant(profile.id, card.sourceProcurementId)
       ) {
         discardedFromReview += 1;
+        skipped.push({ hit, reason: "уже проверена и отклонена для этого профиля" });
         continue;
       }
       const already = known.get(card.sourceProcurementId);
+      if (already !== undefined && isWatchedTriage(already)) {
+        skippedRejected += 1;
+        skipped.push({
+          hit,
+          reason:
+            already.triage === "participate"
+              ? "уже в «Мои закупки» (Участвовать)"
+              : "уже в «Мои закупки» (Отслеживать)",
+        });
+        continue;
+      }
       if (already?.foundAs === "match" && options.skipKnownIrrelevant) {
         if (searchQueueHas(profile.id, already.id) || already.profileIds.includes(profile.id)) {
           continue;
@@ -1032,7 +1051,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       pending.push({ card, hit });
     }
-    return { pending, skippedRejected, discardedFromReview, restoredReview };
+    return { pending, skippedRejected, discardedFromReview, restoredReview, skipped };
   }
 
   /**
@@ -1168,12 +1187,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: 0,
       reviewCount: collected.restoredReview,
       listingDiscardedCount: listingDiscarded,
-      skipped: selected.discarded.map((item) => ({
-        sourceProcurementId: item.hit.sourceProcurementId,
-        title: item.hit.title.slice(0, 160),
-        reason: item.reason,
-        stage: "listing" as const,
-      })),
+      skipped: [
+        ...selected.discarded.map((item) => ({
+          sourceProcurementId: item.hit.sourceProcurementId,
+          title: item.hit.title.slice(0, 160),
+          reason: item.reason,
+          stage: "listing" as const,
+        })),
+        ...collected.skipped.map((item) => ({
+          sourceProcurementId: item.hit.sourceProcurementId,
+          title: item.hit.title.slice(0, 160),
+          reason: item.reason,
+          stage: "listing" as const,
+        })),
+      ],
     });
     let discardedCount = listingDiscarded;
     let ambiguousCount = collected.restoredReview;

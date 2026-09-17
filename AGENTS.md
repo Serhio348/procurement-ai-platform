@@ -73,6 +73,8 @@
 - [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score; завершённые без решения не хранятся
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
+- [`docs/architecture/STAGE-68.md`](docs/architecture/STAGE-68.md) — сохранение профиля без duplicate review verdicts
+- [`docs/architecture/STAGE-71.md`](docs/architecture/STAGE-71.md) — deadlock записи профиля и входящих
 
 ---
 
@@ -269,7 +271,13 @@ docs/architecture/ Документы этапов
   голове заголовка — вето, не найденная закупка; лот «Поставка …» может
   оставить совпадение
 - Этап 66 — поиск по профилю не затирает чужую очередь; карточки живут,
-  пока специалист не разберёт их
+ пока специалист не разберёт их
+- Этап 67 — уже «Участвовать»/«Отслеживать» не пропадает из «Почему не
+ взяли»: обе строки площадки видны (статусный отсев + уже взятая)
+- Этап 68 — сохранение профиля не падает на duplicate
+  `workspace_review_verdicts_uq` (lock + upsert + дедуп)
+- Этап 71 — запись кабинета сериализована: inbox/cases тоже под advisory
+  lock, полный persist не чередуется и не даёт 40P01 deadlock
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

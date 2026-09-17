@@ -94,6 +94,24 @@ export async function openSpecialistPersistence(options: {
 
   const memoryCabinets = createMemoryCabinetRegistry();
   const cache = new Map<string, SpecialistCabinet>();
+  /** One writer chain per cabinet so profile/inbox/cases saves do not deadlock. */
+  const workspaceWriteTail = new Map<string, Promise<unknown>>();
+
+  const enqueueWorkspaceWrite = async <T>(
+    workspaceId: string,
+    work: () => Promise<T>,
+  ): Promise<T> => {
+    const previous = workspaceWriteTail.get(workspaceId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(work);
+    workspaceWriteTail.set(
+      workspaceId,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  };
 
   const defaultWorkspaceId = TEST_WORKSPACE_ID;
 
@@ -250,20 +268,23 @@ export async function openSpecialistPersistence(options: {
       return store.listWorkspaceIds();
     },
     async persist(cabinet) {
-      cache.set(cabinet.workspaceId, cabinet);
-      await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
-      await persistCases(
-        persistableCabinetCases(cabinet),
-        cabinet.workspaceId,
-      );
-      await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
+      return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
+        cache.set(cabinet.workspaceId, cabinet);
+        await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+        await persistCases(persistableCabinetCases(cabinet), cabinet.workspaceId);
+        await persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
+      });
     },
     async persistWorkspaceOnly(cabinet) {
-      cache.set(cabinet.workspaceId, cabinet);
-      await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+      return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
+        cache.set(cabinet.workspaceId, cabinet);
+        await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+      });
     },
     async removeCases(workspaceId, ids) {
-      await removeCases(ids, workspaceId);
+      return enqueueWorkspaceWrite(workspaceId, async () => {
+        await removeCases(ids, workspaceId);
+      });
     },
     async listTrashIds(workspaceId) {
       if (store !== undefined) return store.listTrashIds(workspaceId);

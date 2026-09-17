@@ -27,7 +27,7 @@ import {
   workspaceSettings,
   workspaces,
 } from "./schema.js";
-import { withRlsBypass, withUser, withWorkspace } from "./workspace-scope.js";
+import { withRlsBypass, withUser, withWorkspace, withWorkspaceWrite } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
@@ -271,7 +271,7 @@ export function createSpecialistStore(db: Database) {
     ): Promise<void> {
       const state = SpecialistWorkspaceState.parse(snapshot);
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const existingProfiles = await tx
           .select({ id: workspaceProfiles.id })
           .from(workspaceProfiles)
@@ -326,14 +326,27 @@ export function createSpecialistStore(db: Database) {
             },
           });
 
-        for (const verdict of state.reviewedIrrelevant) {
-          await tx.insert(workspaceReviewVerdicts).values({
-            workspaceId,
-            profileId: verdict.profileId,
-            sourceProcurementId: verdict.sourceProcurementId,
-            decidedAt: verdict.decidedAt,
-            algorithmVersion: verdict.algorithmVersion,
-          });
+        for (const verdict of dedupeReviewVerdicts(state.reviewedIrrelevant)) {
+          await tx
+            .insert(workspaceReviewVerdicts)
+            .values({
+              workspaceId,
+              profileId: verdict.profileId,
+              sourceProcurementId: verdict.sourceProcurementId,
+              decidedAt: verdict.decidedAt,
+              algorithmVersion: verdict.algorithmVersion,
+            })
+            .onConflictDoUpdate({
+              target: [
+                workspaceReviewVerdicts.workspaceId,
+                workspaceReviewVerdicts.profileId,
+                workspaceReviewVerdicts.sourceProcurementId,
+              ],
+              set: {
+                decidedAt: verdict.decidedAt,
+                algorithmVersion: verdict.algorithmVersion,
+              },
+            });
         }
 
         const existingDecisions = await tx
@@ -610,7 +623,7 @@ export function createSpecialistStore(db: Database) {
       const failures: string[] = [];
       for (const card of uniqueBySource(cards)) {
         try {
-          await withWorkspace(db, workspaceId, async (tx) => {
+          await withWorkspaceWrite(db, workspaceId, async (tx) => {
             await saveWorkspaceCase(tx, workspaceId, card);
           });
         } catch (error) {
@@ -628,7 +641,7 @@ export function createSpecialistStore(db: Database) {
       // Delete children first. CASCADE + RLS on workspace_procurement_profiles
       // joins back to the parent row; once the parent is gone the policy
       // hides the child and the whole delete is rolled back.
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const matched = await tx
           .select({ id: workspaceProcurements.id })
           .from(workspaceProcurements)
@@ -692,7 +705,7 @@ export function createSpecialistStore(db: Database) {
       workspaceId: string,
     ): Promise<void> {
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const cases = await tx
           .select({
             id: workspaceProcurements.id,
@@ -1269,6 +1282,21 @@ async function upsertDocumentHash(
 function pgInt(value: number | undefined): number | undefined {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   return Math.min(Math.max(Math.trunc(value), 0), 2_147_483_647);
+}
+
+/** One row per profile+source so a duplicate batch cannot trip the unique index. */
+function dedupeReviewVerdicts<
+  T extends { profileId: string; sourceProcurementId: string; decidedAt: string },
+>(verdicts: readonly T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const verdict of verdicts) {
+    const key = `${verdict.profileId}\0${verdict.sourceProcurementId}`;
+    const previous = byKey.get(key);
+    if (previous === undefined || previous.decidedAt <= verdict.decidedAt) {
+      byKey.set(key, verdict);
+    }
+  }
+  return [...byKey.values()];
 }
 
 export function latestTriage(

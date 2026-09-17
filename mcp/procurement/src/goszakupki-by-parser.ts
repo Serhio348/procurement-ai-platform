@@ -73,7 +73,8 @@ export function parseGoszakupkiSearchPage(
       const sourceStatus = listingStatusText(cells, columns.status);
       const amount = parsePlatformAmount(text(cells.eq(columns.amount)));
       const bidsDeadline = parsePlatformInstant(text(cells.eq(columns.deadline)));
-      const kind = procedureKind(text(cells.eq(columns.kind)));
+      const kindRaw = text(cells.eq(columns.kind));
+      const kind = procedureKindFromLabelOrPath(kindRaw, procedure.family);
       return {
         hit: SearchHit.parse({
           sourceId: "goszakupki_by",
@@ -82,6 +83,7 @@ export function parseGoszakupkiSearchPage(
           title: procedure.title,
           pageFamily: pageFamilyFromSegment(procedure.family),
           kind,
+          ...(kindRaw.length === 0 ? {} : { kindLabel: kindRaw }),
           ...(sourceStatus.length === 0
             ? {}
             : { sourceStatus, status: procedureStatus(sourceStatus) }),
@@ -219,7 +221,7 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
     url: input.url,
     title,
     pageFamily,
-    kind: procedureKind(procedureLabel),
+    kind: procedureKindFromLabelOrPath(procedureLabel, pathId[1]),
     status: procedureStatus(sourceStatus),
     ...(sourceStatus === undefined ? {} : { sourceStatus }),
     ...(buyer === undefined
@@ -791,13 +793,45 @@ function isAcceptingBidsStatus(normalized: string): boolean {
 
 function procedureKind(label: string | undefined): ProcedureKind {
   const normalized = normalise(label ?? "");
-  if (normalized.includes("электронный аукцион")) return "electronic_auction";
-  if (normalized.includes("запрос ценовых предложений")) return "request_for_quotations";
+  if (normalized.includes("электронный аукцион") || normalized === "аукцион") {
+    return "electronic_auction";
+  }
+  if (normalized.includes("запрос ценовых предложений") || normalized.includes("запрос ценовых")) {
+    return "request_for_quotations";
+  }
   if (normalized.includes("открытый конкурс")) return "open_tender";
   if (normalized.includes("конкурс") && normalized.includes("ограниченн")) return "open_tender";
+  if (normalized.includes("конкурс")) return "open_tender";
   if (normalized.includes("из одного источника")) return "single_source";
   if (normalized.includes("переговор")) return "competitive_negotiation";
+  // Marketing «Заявка о ценах…» stays other; the printed label is kept separately.
   return "other";
+}
+
+/** Prefer the page label; if it is blank or unknown, use the URL family. */
+function procedureKindFromLabelOrPath(
+  label: string | undefined,
+  pathFamily: string | undefined,
+): ProcedureKind {
+  const fromLabel = procedureKind(label);
+  if (fromLabel !== "other") return fromLabel;
+  return procedureKindFromPath(pathFamily);
+}
+
+function procedureKindFromPath(pathFamily: string | undefined): ProcedureKind {
+  switch (pathFamily) {
+    case "auction":
+      return "electronic_auction";
+    case "request":
+      return "request_for_quotations";
+    case "etrade":
+    case "limited":
+      return "open_tender";
+    case "single-source":
+      return "single_source";
+    default:
+      return "other";
+  }
 }
 
 function pageFamilyFromUrl(url: string): PageFamily {

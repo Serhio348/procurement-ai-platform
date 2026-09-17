@@ -47,6 +47,65 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
   });
 
+  it("shows the full title and procedure kind on the mine card", () => {
+    const longTitle =
+      "Комплект панелей по типу ЩО-70 для комплектации объекта «Реконструкция здания главного корпуса и здания поликлиники»";
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[
+            SpecialistProcurementCard.parse({
+              ...card,
+              title: longTitle,
+              kindLabel: "закупка из одного источника",
+            }),
+          ]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: longTitle })).toBeTruthy();
+    expect(screen.getByText("Вид процедуры")).toBeTruthy();
+    expect(screen.getByText("закупка из одного источника")).toBeTruthy();
+  });
+
+  it("derives procedure kind from the platform card when kindLabel is missing", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp procurements={[card]} now={() => new Date("2026-08-01T10:00:00+03:00")} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("закупка из одного источника")).toBeTruthy();
+  });
+
+  it("does not show coarse «иная» when the URL family names a limited contest", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[
+            SpecialistProcurementCard.parse({
+              ...card,
+              url: "https://goszakupki.by/limited/view/2",
+              sourceProcurementId: "limited/2",
+              kindLabel: "иная процедура",
+              sourceCard: {
+                sourceId: "goszakupki_by",
+                sourceProcurementId: "limited/2",
+                url: "https://goszakupki.by/limited/view/2",
+                title: card.title,
+                kind: "other",
+                fetchedAt: "2026-09-01T00:00:00.000Z",
+              },
+            }),
+          ]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("конкурс с ограниченным участием")).toBeTruthy();
+    expect(screen.queryByText("иная процедура")).toBeNull();
+  });
+
   it("shows live ingest progress on a participate card", () => {
     render(
       <MemoryRouter initialEntries={["/my-procurements"]}>

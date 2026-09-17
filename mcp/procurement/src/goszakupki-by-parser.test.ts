@@ -29,6 +29,7 @@ describe("parseGoszakupkiCard", () => {
         pageFamily: "other",
         title: "Поставка автоматического выключателя",
         buyerName: "ОАО «Тестовый заказчик 4»",
+        kindLabel: "Закупка из одного источника на ЭТП",
         sourceStatus: "Подача документов/сведений",
         startingPrice: { amount: 4200, currency: "BYN" },
         bidsDeadline: {
@@ -40,7 +41,10 @@ describe("parseGoszakupkiCard", () => {
       kind: "single_source",
     });
     expect(parsed.rows[1]?.kind).toBe("request_for_quotations");
+    expect(parsed.rows[1]?.hit.kindLabel).toBe("Запрос ценовых предложений");
+    expect(parsed.rows[2]?.hit.kindLabel).toBe("Заявка о ценах (тарифах) на ТРУ");
     expect(parsed.rows[3]?.kind).toBe("electronic_auction");
+    expect(parsed.rows[3]?.hit.kindLabel).toBe("Электронный аукцион");
     expect(parsed.rows[1]?.hit.status).toBe("accepting_bids");
     expect(parsed.rows[3]?.hit.status).toBe("accepting_bids");
     expect(parsed.rows[3]?.hit.sourceStatus).toBe("Подача предложений");
@@ -360,6 +364,7 @@ describe("parseGoszakupkiCard", () => {
       url: "https://goszakupki.by/limited/view/3669746",
       pageFamily: "other",
       kind: "open_tender",
+      kindLabel: "Конкурс с ограниченным участием",
       title:
         "Выбор субподрядной организации по объекту: «Проект застройки микрорайона №21 в г.Жлобине. Генплан и инженерные сети» 1 очередь строительства.",
     });
@@ -376,6 +381,9 @@ describe("parseGoszakupkiCard", () => {
     expect(parsed.card.sourceProcurementId).toBe("limited/3669746");
     expect(parsed.card.pageFamily).toBe("other");
     expect(parsed.card.kind).toBe("open_tender");
+    expect(parsed.card.rawFields["Вид процедуры закупки"]).toBe(
+      "Конкурс с ограниченным участием",
+    );
     expect(parsed.card.title).toContain("Жлобине");
     expect(parsed.card.lots[0]?.title).toMatch(/монтаж.*электрооборудования/i);
     expect(parsed.card.lots[0]?.title).toMatch(/АСКУЭ/);

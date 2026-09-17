@@ -97,6 +97,28 @@ export async function openSpecialistPersistence(options: {
 
   const defaultWorkspaceId = TEST_WORKSPACE_ID;
 
+  const persistWorkspaceMeta = async (
+    state: SpecialistWorkspaceState,
+    workspaceId = defaultWorkspaceId,
+  ): Promise<void> => {
+    const durable = SpecialistWorkspace.parse(state);
+    await saveWorkspaceFile(
+      workspaceFilePath(options.workspacePath, workspaceId),
+      durable,
+    );
+    if (store === undefined) return;
+    try {
+      await store.saveWorkspaceMeta(durable.snapshot(), workspaceId);
+    } catch (error) {
+      options.logger.error("PostgreSQL workspace meta save failed; disk copy remains", error);
+      await recordJournal(journal, {
+        kind: "platform",
+        level: "error",
+        message: persistWorkspaceErrorMessage(error),
+      });
+    }
+  };
+
   const persistWorkspace = async (
     state: SpecialistWorkspaceState,
     workspaceId = defaultWorkspaceId,
@@ -260,7 +282,7 @@ export async function openSpecialistPersistence(options: {
     },
     async persistWorkspaceOnly(cabinet) {
       cache.set(cabinet.workspaceId, cabinet);
-      await persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+      await persistWorkspaceMeta(cabinet.workspace.snapshot(), cabinet.workspaceId);
     },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);

@@ -265,6 +265,74 @@ export function createSpecialistStore(db: Database) {
       });
     },
 
+    async saveWorkspaceMeta(
+      snapshot: SpecialistWorkspaceStateValue,
+      workspaceId: string,
+    ): Promise<void> {
+      const state = SpecialistWorkspaceState.parse(snapshot);
+      const now = new Date().toISOString();
+      await withWorkspace(db, workspaceId, async (tx) => {
+        const existingProfiles = await tx
+          .select({ id: workspaceProfiles.id })
+          .from(workspaceProfiles)
+          .where(eq(workspaceProfiles.workspaceId, workspaceId));
+        const nextIds = new Set(state.profiles.map((item) => item.id));
+        const removed = existingProfiles
+          .map((row) => row.id)
+          .filter((id) => !nextIds.has(id));
+        if (removed.length > 0) {
+          await tx
+            .delete(workspaceReviewVerdicts)
+            .where(
+              and(
+                eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+                inArray(workspaceReviewVerdicts.profileId, removed),
+              ),
+            );
+          await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
+        }
+        for (const profile of state.profiles) {
+          const columns = workspaceProfileColumns(profile, workspaceId, now);
+          await tx
+            .insert(workspaceProfiles)
+            .values(columns)
+            .onConflictDoUpdate({
+              target: workspaceProfiles.id,
+              set: {
+                name: columns.name,
+                purpose: columns.purpose,
+                description: columns.description,
+                keywords: columns.keywords,
+                excludeKeywords: columns.excludeKeywords,
+                statuses: columns.statuses,
+                excludeSingleSource: columns.excludeSingleSource,
+                filters: columns.filters,
+                watchNewProcurements: columns.watchNewProcurements,
+                lastDiscoveryAt: columns.lastDiscoveryAt,
+                updatedAt: columns.updatedAt,
+              },
+            });
+        }
+        const settingsJson = jsonbSql({ searchIdsByProfile: state.searchIdsByProfile });
+        await tx
+          .insert(workspaceSettings)
+          .values({
+            workspaceId,
+            activeProfileId: state.activeProfileId,
+            settings: settingsJson,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: workspaceSettings.workspaceId,
+            set: {
+              activeProfileId: state.activeProfileId,
+              settings: settingsJson,
+              updatedAt: now,
+            },
+          });
+      });
+    },
+
     async saveWorkspace(
       snapshot: SpecialistWorkspaceStateValue,
       workspaceId: string,
@@ -280,10 +348,15 @@ export function createSpecialistStore(db: Database) {
         const removed = existingProfiles
           .map((row) => row.id)
           .filter((id) => !nextIds.has(id));
-        await tx
-          .delete(workspaceReviewVerdicts)
-          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
         if (removed.length > 0) {
+          await tx
+            .delete(workspaceReviewVerdicts)
+            .where(
+              and(
+                eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+                inArray(workspaceReviewVerdicts.profileId, removed),
+              ),
+            );
           await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
         }
         for (const profile of state.profiles) {
@@ -326,7 +399,40 @@ export function createSpecialistStore(db: Database) {
             },
           });
 
+        const existingVerdictRows = await tx
+          .select({
+            profileId: workspaceReviewVerdicts.profileId,
+            sourceProcurementId: workspaceReviewVerdicts.sourceProcurementId,
+          })
+          .from(workspaceReviewVerdicts)
+          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+        const nextVerdictKeys = new Set(
+          state.reviewedIrrelevant.map(
+            (item) => `${item.profileId}\0${item.sourceProcurementId}`,
+          ),
+        );
+        for (const row of existingVerdictRows) {
+          const key = `${row.profileId}\0${row.sourceProcurementId}`;
+          if (nextVerdictKeys.has(key)) continue;
+          await tx
+            .delete(workspaceReviewVerdicts)
+            .where(
+              and(
+                eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+                eq(workspaceReviewVerdicts.profileId, row.profileId),
+                eq(workspaceReviewVerdicts.sourceProcurementId, row.sourceProcurementId),
+              ),
+            );
+        }
+        const existingVerdictKeys = new Set(
+          existingVerdictRows
+            .map((row) => `${row.profileId}\0${row.sourceProcurementId}`)
+            .filter((key) => nextVerdictKeys.has(key)),
+        );
         for (const verdict of state.reviewedIrrelevant) {
+          const key = `${verdict.profileId}\0${verdict.sourceProcurementId}`;
+          if (existingVerdictKeys.has(key)) continue;
+          existingVerdictKeys.add(key);
           await tx.insert(workspaceReviewVerdicts).values({
             workspaceId,
             profileId: verdict.profileId,

@@ -1564,7 +1564,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(409).send({ error: "last_profile" });
     }
     workspace().removeProfile(params.id);
-    await persistWorkspaceOnly();
+    // Direct SQL + disk — never wait behind search/cabinet persist queue.
+    await cabinets.deleteProfile(currentCabinet(), params.id);
     logger.info("Specialist working profile removed", { id: params.id });
     return profileList();
   });

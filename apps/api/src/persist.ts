@@ -284,6 +284,24 @@ export async function openSpecialistPersistence(options: {
       cache.set(cabinet.workspaceId, cabinet);
       await persistWorkspaceMeta(cabinet.workspace.snapshot(), cabinet.workspaceId);
     },
+    async deleteProfile(cabinet, profileId) {
+      cache.set(cabinet.workspaceId, cabinet);
+      const snapshot = cabinet.workspace.snapshot();
+      const durable = SpecialistWorkspace.parse(snapshot);
+      await saveWorkspaceFile(
+        workspaceFilePath(options.workspacePath, cabinet.workspaceId),
+        durable,
+      );
+      if (store === undefined) return;
+      // Do not swallow errors: a silent PG failure is why × looked successful
+      // until reload brought the profile back.
+      await store.deleteWorkspaceProfile(
+        cabinet.workspaceId,
+        profileId,
+        durable.snapshot().activeProfileId,
+        durable.snapshot().searchIdsByProfile,
+      );
+    },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);
     },

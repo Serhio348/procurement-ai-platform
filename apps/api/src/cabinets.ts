@@ -59,6 +59,8 @@ export interface CabinetRegistry {
   listIds: () => Promise<string[]>;
   persist: (cabinet: SpecialistCabinet) => Promise<void>;
   persistWorkspaceOnly: (cabinet: SpecialistCabinet) => Promise<void>;
+  /** Immediate profile row delete — must not wait on search/cabinet write queue. */
+  deleteProfile: (cabinet: SpecialistCabinet, profileId: string) => Promise<void>;
   removeCases: (workspaceId: string, ids: readonly string[]) => Promise<void>;
   listTrashIds: (workspaceId: string) => Promise<string[]>;
   listCases: (workspaceId: string, query?: SpecialistCaseListQuery) => Promise<SpecialistCaseListPage>;
@@ -147,6 +149,9 @@ export function createMemoryCabinetRegistry(options: {
       // Memory is the store.
     },
     async persistWorkspaceOnly() {
+      // Memory is the store.
+    },
+    async deleteProfile() {
       // Memory is the store.
     },
     async removeCases() {

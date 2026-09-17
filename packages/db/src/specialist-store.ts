@@ -265,6 +265,50 @@ export function createSpecialistStore(db: Database) {
       });
     },
 
+    async deleteWorkspaceProfile(
+      workspaceId: string,
+      profileId: string,
+      activeProfileId: string,
+      searchIdsByProfile: Record<string, string[]>,
+    ): Promise<void> {
+      const now = new Date().toISOString();
+      await withWorkspace(db, workspaceId, async (tx) => {
+        await tx
+          .delete(workspaceReviewVerdicts)
+          .where(
+            and(
+              eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+              eq(workspaceReviewVerdicts.profileId, profileId),
+            ),
+          );
+        await tx
+          .delete(workspaceProfiles)
+          .where(
+            and(
+              eq(workspaceProfiles.workspaceId, workspaceId),
+              eq(workspaceProfiles.id, profileId),
+            ),
+          );
+        const settingsJson = jsonbSql({ searchIdsByProfile });
+        await tx
+          .insert(workspaceSettings)
+          .values({
+            workspaceId,
+            activeProfileId,
+            settings: settingsJson,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: workspaceSettings.workspaceId,
+            set: {
+              activeProfileId,
+              settings: settingsJson,
+              updatedAt: now,
+            },
+          });
+      });
+    },
+
     async saveWorkspaceMeta(
       snapshot: SpecialistWorkspaceStateValue,
       workspaceId: string,

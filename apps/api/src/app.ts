@@ -569,9 +569,27 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   function queueFoundInbox(card: SpecialistProcurementCardValue, now: string): void {
+    // A specialist reject must stay out of the inbox even when search finds
+    // the same source again and the catalog still holds the old change id.
+    if (workspace().rejectedSourceIds().has(card.sourceProcurementId)) return;
     const recorded = catalog().record(inboxItemFromFoundCard(card, now));
-    if (recorded.duplicate) catalog().undismiss(recorded.item.change.id);
+    if (recorded.duplicate && card.foundAs !== "review") {
+      catalog().undismiss(recorded.item.change.id);
+    }
     workspace().setDismissedInboxIds(catalog().dismissedIds());
+  }
+
+  /** Inbox «Удалить» / dismiss on «На проверку» means the specialist does not want this source again. */
+  function rememberDismissedReview(item: InboxFixtureItemValue, now: string): void {
+    if (item.change.kind !== "procedure_candidate") return;
+    const sourceId = item.procurement.sourceProcurementId;
+    if (sourceId.length === 0) return;
+    if (workspace().rejectedSourceIds().has(sourceId)) return;
+    workspace().recordDecision(sourceId, "reject", now);
+    const card = catalog().procurement(item.change.procurementId);
+    if (card === undefined) return;
+    workspace().removeSearchId(card.id);
+    catalog().upsertCase(withTriage(card, workspace()));
   }
 
   function mergeSearchHits(
@@ -974,8 +992,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   /**
    * Listing rows that still need a card score. Already-match and already-review
-   * cases are not opened again; a button search may put a dismissed review
-   * row back in the inbox, discovery must not.
+   * cases are not opened again. Neither button search nor discovery may put a
+   * dismissed «На проверку» row back in the inbox — the specialist already said no.
    */
   async function collectPendingHits(
     selected: ReturnType<typeof selectRelevantSearchCards>,
@@ -1152,8 +1170,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       workspace().replaceSearchIds(profile.id, []);
     }
     const collected = await collectPendingHits(selected, profile, now, {
-      restoreReviewInbox: true,
-      skipKnownIrrelevant: false,
+      restoreReviewInbox: false,
+      skipKnownIrrelevant: true,
     });
     const listingDiscarded =
       selected.discardedCount + collected.skippedRejected + collected.discardedFromReview;
@@ -1649,9 +1667,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.delete("/api/inbox/:id", async (request, reply) => {
     const params = request.params as { id: string };
-    if (!catalog().dismiss(params.id)) {
+    const item = catalog().inboxItem(params.id);
+    if (item === undefined || !catalog().dismiss(params.id)) {
       return reply.code(404).send({ error: "not_found" });
     }
+    rememberDismissedReview(item, clock());
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
     return SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() });
@@ -1710,6 +1730,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           sourceProcurementId: card.sourceProcurementId,
         });
       }
+    }
+
+    if (action === "dismiss") {
+      rememberDismissedReview(item, clock());
     }
 
     catalog().dismiss(params.id);

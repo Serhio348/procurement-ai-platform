@@ -326,14 +326,27 @@ export function createSpecialistStore(db: Database) {
             },
           });
 
-        for (const verdict of state.reviewedIrrelevant) {
-          await tx.insert(workspaceReviewVerdicts).values({
-            workspaceId,
-            profileId: verdict.profileId,
-            sourceProcurementId: verdict.sourceProcurementId,
-            decidedAt: verdict.decidedAt,
-            algorithmVersion: verdict.algorithmVersion,
-          });
+        for (const verdict of dedupeReviewVerdicts(state.reviewedIrrelevant)) {
+          await tx
+            .insert(workspaceReviewVerdicts)
+            .values({
+              workspaceId,
+              profileId: verdict.profileId,
+              sourceProcurementId: verdict.sourceProcurementId,
+              decidedAt: verdict.decidedAt,
+              algorithmVersion: verdict.algorithmVersion,
+            })
+            .onConflictDoUpdate({
+              target: [
+                workspaceReviewVerdicts.workspaceId,
+                workspaceReviewVerdicts.profileId,
+                workspaceReviewVerdicts.sourceProcurementId,
+              ],
+              set: {
+                decidedAt: verdict.decidedAt,
+                algorithmVersion: verdict.algorithmVersion,
+              },
+            });
         }
 
         const existingDecisions = await tx
@@ -1269,6 +1282,21 @@ async function upsertDocumentHash(
 function pgInt(value: number | undefined): number | undefined {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   return Math.min(Math.max(Math.trunc(value), 0), 2_147_483_647);
+}
+
+/** One row per profile+source so a duplicate batch cannot trip the unique index. */
+export function dedupeReviewVerdicts<
+  T extends { profileId: string; sourceProcurementId: string; decidedAt: string },
+>(verdicts: readonly T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const verdict of verdicts) {
+    const key = `${verdict.profileId}\0${verdict.sourceProcurementId}`;
+    const previous = byKey.get(key);
+    if (previous === undefined || previous.decidedAt <= verdict.decidedAt) {
+      byKey.set(key, verdict);
+    }
+  }
+  return [...byKey.values()];
 }
 
 export function latestTriage(

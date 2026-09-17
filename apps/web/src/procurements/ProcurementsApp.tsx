@@ -11,6 +11,7 @@ import type {
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
 import {
+  cardProcedureKindLabel,
   ingestFileWeight,
   isListingPlaceholder,
   isRejectedTriage,
@@ -270,6 +271,8 @@ export function ProcurementsApp({
     catalogItems.filter((item) => belongsToChosenProfile(item, chosenProfileId)),
   );
   const selected = items.find((item) => item.id === params["id"]) ?? items[0];
+  const selectedKindLabel =
+    selected === undefined ? undefined : cardProcedureKindLabel(selected);
   const ingestForSelected =
     selected !== undefined &&
     progress !== undefined &&
@@ -555,10 +558,10 @@ export function ProcurementsApp({
                     </a>
                   </dd>
                 </div>
-                {selected.kindLabel === undefined ? null : (
+                {selectedKindLabel === undefined ? null : (
                   <div>
                     <dt>Вид</dt>
-                    <dd>{selected.kindLabel}</dd>
+                    <dd>{selectedKindLabel}</dd>
                   </div>
                 )}
                 {selected.buyerName === undefined ? null : (

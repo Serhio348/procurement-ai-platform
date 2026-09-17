@@ -73,6 +73,11 @@
 - [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score; завершённые без решения не хранятся
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
+- [`docs/architecture/STAGE-72.md`](docs/architecture/STAGE-72.md) — полное название и вид процедуры в «Мои закупки»
+- [`docs/architecture/STAGE-73.md`](docs/architecture/STAGE-73.md) — вид процедуры с площадки, не «иная»
+- [`docs/architecture/STAGE-74.md`](docs/architecture/STAGE-74.md) — «Мои закупки»: карточки, страницы и профили
+- [`docs/architecture/STAGE-75.md`](docs/architecture/STAGE-75.md) — upsert вердиктов поиска без 23505
+- [`docs/architecture/STAGE-76.md`](docs/architecture/STAGE-76.md) — заголовок карточки: обрезка, hover, ровная сетка
 
 ---
 
@@ -270,6 +275,12 @@ docs/architecture/ Документы этапов
   оставить совпадение
 - Этап 66 — поиск по профилю не затирает чужую очередь; карточки живут,
   пока специалист не разберёт их
+- Этап 72 — «Мои закупки»: полное название, вид процедуры, кегль по ширине
+- Этап 73 — вид процедуры: поле «Вид процедуры закупки» и путь URL, не «иная»
+- Этап 74 — «Мои закупки»: ровные карточки, пагинация, фильтр по профилю
+- Этап 75 — сохранение профиля: upsert вердиктов, без duplicate key 23505
+- Этап 76 — «Мои закупки»: обрезка длинного заголовка, hover, ровные карточки
+  плитки
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

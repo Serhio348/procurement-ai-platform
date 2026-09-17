@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SpecialistProcurementCard } from "@procurement/contracts";
+import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { MyProcurementsApp } from "./MyProcurementsApp.js";
@@ -45,6 +45,80 @@ describe("MyProcurementsApp", () => {
     expect(screen.getByText("Рассмотрение предложений")).toBeTruthy();
     expect(screen.getByText("срок подачи истёк")).toBeTruthy();
     expect(screen.getByText("после несостоявшейся")).toBeTruthy();
+  });
+
+  it("clamps a long title on the tile and keeps the full text for hover", async () => {
+    const user = userEvent.setup();
+    const longTitle =
+      "Комплект панелей по типу ЩО-70 для комплектации объекта «Реконструкция здания главного корпуса и здания поликлиники»";
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[
+            SpecialistProcurementCard.parse({
+              ...card,
+              title: longTitle,
+              kindLabel: "закупка из одного источника",
+              buyerName: "Брестэнерго",
+              sourceCard: {
+                ...card.sourceCard!,
+                buyer: {
+                  name: "Брестэнерго",
+                  contact: "Иванов Иван, +375291112233",
+                },
+              },
+            }),
+          ]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: longTitle })).toBeTruthy();
+    expect(document.querySelector(".my-procurements-card-title-clamp")).toBeTruthy();
+    expect(document.querySelector(".my-procurements-card-title-full")).toBeNull();
+    await user.hover(screen.getByRole("heading", { level: 2, name: longTitle }));
+    expect(document.querySelector(".my-procurements-card-title-full")?.textContent).toBe(longTitle);
+    expect(screen.getByText("Вид процедуры")).toBeTruthy();
+    expect(screen.getByText("закупка из одного источника")).toBeTruthy();
+    expect(screen.getByText("Брестэнерго")).toBeTruthy();
+    expect(screen.getByText("Иванов Иван, +375291112233")).toBeTruthy();
+  });
+
+  it("derives procedure kind from the platform card when kindLabel is missing", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp procurements={[card]} now={() => new Date("2026-08-01T10:00:00+03:00")} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("закупка из одного источника")).toBeTruthy();
+  });
+
+  it("does not show coarse «иная» when the URL family names a limited contest", () => {
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[
+            SpecialistProcurementCard.parse({
+              ...card,
+              url: "https://goszakupki.by/limited/view/2",
+              sourceProcurementId: "limited/2",
+              kindLabel: "иная процедура",
+              sourceCard: {
+                sourceId: "goszakupki_by",
+                sourceProcurementId: "limited/2",
+                url: "https://goszakupki.by/limited/view/2",
+                title: card.title,
+                kind: "other",
+                fetchedAt: "2026-09-01T00:00:00.000Z",
+              },
+            }),
+          ]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("конкурс с ограниченным участием")).toBeTruthy();
+    expect(screen.queryByText("иная процедура")).toBeNull();
   });
 
   it("shows live ingest progress on a participate card", () => {
@@ -451,5 +525,82 @@ describe("MyProcurementsApp", () => {
     expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
     expect(screen.queryByText("Вторая в корзине")).toBeNull();
     expect(screen.getByText("Корзина пуста.")).toBeTruthy();
+  });
+
+  it("paginates the mine list and moves between pages", async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 14 }, (_, index) =>
+      SpecialistProcurementCard.parse({
+        ...card,
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        title: `Закупка номер ${String(index + 1)}`,
+        sourceProcurementId: `single-source/${String(index + 1)}`,
+        triage: index % 2 === 0 ? "participate" : "monitor",
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={items}
+          pageSize={5}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("1–5 из 14")).toBeTruthy();
+    expect(screen.getByText("Закупка номер 1")).toBeTruthy();
+    expect(screen.queryByText("Закупка номер 6")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Вперёд" }));
+    expect(screen.getByText("6–10 из 14")).toBeTruthy();
+    expect(screen.getByText("Закупка номер 6")).toBeTruthy();
+    expect(screen.queryByText("Закупка номер 1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "2" }));
+    expect(screen.getByText("6–10 из 14")).toBeTruthy();
+  });
+
+  it("filters mine rows by profile and keeps «Все закупки»", async () => {
+    const user = userEvent.setup();
+    const equipment = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "Оборудование",
+      keywords: ["нку"],
+    });
+    const networks = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Сети",
+      keywords: ["сети"],
+    });
+    const first = SpecialistProcurementCard.parse({
+      ...card,
+      title: "НКУ для насосов",
+      profileIds: [equipment.id],
+    });
+    const second = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "Сети электроснабжения",
+      sourceProcurementId: "request/2",
+      triage: "monitor",
+      profileIds: [networks.id],
+    });
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[first, second]}
+          profiles={[equipment, networks]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("tab", { name: "Все закупки" })).toBeTruthy();
+    expect(screen.getByText("НКУ для насосов")).toBeTruthy();
+    expect(screen.getByText("Сети электроснабжения")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Оборудование" }));
+    expect(screen.getByText("НКУ для насосов")).toBeTruthy();
+    expect(screen.queryByText("Сети электроснабжения")).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Все закупки" }));
+    expect(screen.getByText("Сети электроснабжения")).toBeTruthy();
   });
 });

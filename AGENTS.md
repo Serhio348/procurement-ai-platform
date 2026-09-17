@@ -81,6 +81,8 @@
 - [`docs/architecture/STAGE-72.md`](docs/architecture/STAGE-72.md) — лимит обращений к модели соблюдается на прогон, а не на карточку (R13)
 - [`docs/architecture/STAGE-73.md`](docs/architecture/STAGE-73.md) — review-кандидат перепроверяется, а не воскрешается как есть (R05)
 - [`docs/architecture/STAGE-74.md`](docs/architecture/STAGE-74.md) — оценка card-level проверки доходит до карточки UI (R06)
+- [`docs/architecture/STAGE-75.md`](docs/architecture/STAGE-75.md) — запись кабинета: один writer, upsert вердиктов, точечный persist поиска
+- [`docs/architecture/STAGE-76.md`](docs/architecture/STAGE-76.md) — удаление профиля: крестик и быстрый persist
 
 ---
 
@@ -278,6 +280,10 @@ docs/architecture/ Документы этапов
   оставить совпадение
 - Этап 66 — поиск по профилю не затирает чужую очередь; карточки живут,
   пока специалист не разберёт их
+- Этап 67 — запись кабинета под замком: без deadlock профиля/входящих,
+  upsert вердиктов, persist поиска по затронутым карточкам
+- Этап 68 — крестик удаления профиля: `saveWorkspaceMeta` / optimistic UI;
+  без переписи вердиктов, решений и inbox; строка исчезает сразу
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

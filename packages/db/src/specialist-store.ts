@@ -27,7 +27,7 @@ import {
   workspaceSettings,
   workspaces,
 } from "./schema.js";
-import { withRlsBypass, withUser, withWorkspace } from "./workspace-scope.js";
+import { withRlsBypass, withUser, withWorkspace, withWorkspaceWrite } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
@@ -46,6 +46,40 @@ function searchIdsByProfileFromSettings(
   }
   return out;
 }
+
+/** Profile ids removed in this workspace; stale cabinet saves must not resurrect them. */
+export function deletedProfileIdsFromSettings(
+  settings: Record<string, unknown> | null | undefined,
+): string[] {
+  if (settings === undefined || settings === null) return [];
+  const raw = settings["deletedProfileIds"];
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((item): item is string => typeof item === "string" && item.length > 0))];
+}
+
+export function workspaceSettingsPayload(
+  searchIdsByProfile: Record<string, string[]>,
+  deletedProfileIds: readonly string[],
+): Record<string, unknown> {
+  const banned = deletedProfileIdsFromSettings({ deletedProfileIds: [...deletedProfileIds] });
+  const search = Object.fromEntries(
+    Object.entries(searchIdsByProfile).filter(([profileId]) => !banned.includes(profileId)),
+  );
+  return banned.length === 0
+    ? { searchIdsByProfile: search }
+    : { searchIdsByProfile: search, deletedProfileIds: banned };
+}
+
+export function omitDeletedProfiles<T extends { id: string }>(
+  profiles: readonly T[],
+  deletedProfileIds: readonly string[],
+): T[] {
+  if (deletedProfileIds.length === 0) return [...profiles];
+  const banned = new Set(deletedProfileIds);
+  return profiles.filter((profile) => !banned.has(profile.id));
+}
+
+
 
 export interface SpecialistCaseListQuery {
   tab?: SpecialistProcurementListTab;
@@ -265,28 +299,106 @@ export function createSpecialistStore(db: Database) {
       });
     },
 
-    async saveWorkspace(
+    async deleteWorkspaceProfile(
+      workspaceId: string,
+      profileId: string,
+      activeProfileId: string,
+      searchIdsByProfile: Record<string, string[]>,
+    ): Promise<void> {
+      const now = new Date().toISOString();
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        const settingRows = await tx
+          .select({ settings: workspaceSettings.settings })
+          .from(workspaceSettings)
+          .where(eq(workspaceSettings.workspaceId, workspaceId))
+          .limit(1);
+        const deletedProfileIds = [
+          ...new Set([
+            ...deletedProfileIdsFromSettings(settingRows[0]?.settings),
+            profileId,
+          ]),
+        ];
+        await tx
+          .delete(workspaceReviewVerdicts)
+          .where(
+            and(
+              eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+              eq(workspaceReviewVerdicts.profileId, profileId),
+            ),
+          );
+        await tx
+          .delete(workspaceProfiles)
+          .where(
+            and(
+              eq(workspaceProfiles.workspaceId, workspaceId),
+              eq(workspaceProfiles.id, profileId),
+            ),
+          );
+        const settingsJson = jsonbSql(
+          workspaceSettingsPayload(searchIdsByProfile, deletedProfileIds),
+        );
+        await tx
+          .insert(workspaceSettings)
+          .values({
+            workspaceId,
+            activeProfileId,
+            settings: settingsJson,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: workspaceSettings.workspaceId,
+            set: {
+              activeProfileId,
+              settings: settingsJson,
+              updatedAt: now,
+            },
+          });
+      });
+    },
+
+    async saveWorkspaceMeta(
       snapshot: SpecialistWorkspaceStateValue,
       workspaceId: string,
     ): Promise<void> {
       const state = SpecialistWorkspaceState.parse(snapshot);
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        const settingRows = await tx
+          .select({ settings: workspaceSettings.settings })
+          .from(workspaceSettings)
+          .where(eq(workspaceSettings.workspaceId, workspaceId))
+          .limit(1);
+        const deletedProfileIds = deletedProfileIdsFromSettings(settingRows[0]?.settings);
+        const profiles = omitDeletedProfiles(state.profiles, deletedProfileIds);
+        if (profiles.length === 0) {
+          throw new Error("cannot_save_workspace_without_profiles");
+        }
+        const activeProfileId = profiles.some((item) => item.id === state.activeProfileId)
+          ? state.activeProfileId
+          : profiles[0]!.id;
         const existingProfiles = await tx
           .select({ id: workspaceProfiles.id })
           .from(workspaceProfiles)
           .where(eq(workspaceProfiles.workspaceId, workspaceId));
-        const nextIds = new Set(state.profiles.map((item) => item.id));
-        const removed = existingProfiles
-          .map((row) => row.id)
-          .filter((id) => !nextIds.has(id));
-        await tx
-          .delete(workspaceReviewVerdicts)
-          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+        const nextIds = new Set(profiles.map((item) => item.id));
+        const removed = [
+          ...new Set([
+            ...existingProfiles.map((row) => row.id).filter((id) => !nextIds.has(id)),
+            ...deletedProfileIds,
+          ]),
+        ];
         if (removed.length > 0) {
+          await tx
+            .delete(workspaceReviewVerdicts)
+            .where(
+              and(
+                eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+                inArray(workspaceReviewVerdicts.profileId, removed),
+              ),
+            );
           await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
         }
-        for (const profile of state.profiles) {
+        for (const profile of profiles) {
           const columns = workspaceProfileColumns(profile, workspaceId, now);
           await tx
             .insert(workspaceProfiles)
@@ -308,91 +420,36 @@ export function createSpecialistStore(db: Database) {
               },
             });
         }
-        const settingsJson = jsonbSql({ searchIdsByProfile: state.searchIdsByProfile });
+        const settingsJson = jsonbSql(
+          workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds),
+        );
         await tx
           .insert(workspaceSettings)
           .values({
             workspaceId,
-            activeProfileId: state.activeProfileId,
+            activeProfileId,
             settings: settingsJson,
             updatedAt: now,
           })
           .onConflictDoUpdate({
             target: workspaceSettings.workspaceId,
             set: {
-              activeProfileId: state.activeProfileId,
+              activeProfileId,
               settings: settingsJson,
               updatedAt: now,
             },
           });
+      });
+    },
 
-        for (const verdict of state.reviewedIrrelevant) {
-          await tx.insert(workspaceReviewVerdicts).values({
-            workspaceId,
-            profileId: verdict.profileId,
-            sourceProcurementId: verdict.sourceProcurementId,
-            decidedAt: verdict.decidedAt,
-            algorithmVersion: verdict.algorithmVersion,
-          });
-        }
-
-        const existingDecisions = await tx
-          .select()
-          .from(workspaceDecisions)
-          .where(eq(workspaceDecisions.workspaceId, workspaceId));
-        const seen = new Set(
-          existingDecisions.map(
-            (row) => `${row.sourceProcurementId}:${row.kind}:${row.madeAt}`,
-          ),
-        );
-        for (const decision of state.decisions) {
-          const key = `${decision.sourceProcurementId}:${decision.kind}:${decision.madeAt}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          await tx.insert(workspaceDecisions).values({
-            workspaceId,
-            sourceProcurementId: decision.sourceProcurementId,
-            kind: decision.kind,
-            madeAt: decision.madeAt,
-          });
-        }
-
-        const archived = new Set(state.archivedSourceIds);
-        const caseRows = await tx
-          .select({
-            id: workspaceProcurements.id,
-            sourceProcurementId: workspaceProcurements.sourceProcurementId,
-            archived: workspaceProcurements.archived,
-          })
-          .from(workspaceProcurements)
-          .where(eq(workspaceProcurements.workspaceId, workspaceId));
-        for (const row of caseRows) {
-          const nextArchived = archived.has(row.sourceProcurementId);
-          if (row.archived === nextArchived) continue;
-          await tx
-            .update(workspaceProcurements)
-            .set({ archived: nextArchived, updatedAt: now })
-            .where(eq(workspaceProcurements.id, row.id));
-        }
-
-        const dismissed = new Set(state.dismissedInboxIds);
-        const inboxRows = await tx
-          .select({ id: workspaceInbox.id, eventKey: workspaceInbox.eventKey, item: workspaceInbox.item })
-          .from(workspaceInbox)
-          .where(eq(workspaceInbox.workspaceId, workspaceId));
-        for (const row of inboxRows) {
-          const parsed = InboxFixtureItem.safeParse(row.item);
-          const changeId = parsed.success ? parsed.data.change.id : row.eventKey;
-          const closed = dismissed.has(changeId);
-          await tx
-            .update(workspaceInbox)
-            .set({
-              state: closed ? "dismissed" : "open",
-              resolvedAt: closed ? now : null,
-              updatedAt: now,
-            })
-            .where(eq(workspaceInbox.id, row.id));
-        }
+    async saveWorkspace(
+      snapshot: SpecialistWorkspaceStateValue,
+      workspaceId: string,
+    ): Promise<void> {
+      const state = SpecialistWorkspaceState.parse(snapshot);
+      const now = new Date().toISOString();
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        await writeWorkspaceState(tx, workspaceId, state, now);
       });
     },
 
@@ -610,7 +667,7 @@ export function createSpecialistStore(db: Database) {
       const failures: string[] = [];
       for (const card of uniqueBySource(cards)) {
         try {
-          await withWorkspace(db, workspaceId, async (tx) => {
+          await withWorkspaceWrite(db, workspaceId, async (tx) => {
             await saveWorkspaceCase(tx, workspaceId, card);
           });
         } catch (error) {
@@ -628,7 +685,7 @@ export function createSpecialistStore(db: Database) {
       // Delete children first. CASCADE + RLS on workspace_procurement_profiles
       // joins back to the parent row; once the parent is gone the policy
       // hides the child and the whole delete is rolled back.
-      await withWorkspace(db, workspaceId, async (tx) => {
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
         const matched = await tx
           .select({ id: workspaceProcurements.id })
           .from(workspaceProcurements)
@@ -690,45 +747,32 @@ export function createSpecialistStore(db: Database) {
     async saveInbox(
       items: readonly InboxFixtureItemValue[],
       workspaceId: string,
+      dismissedChangeIds: readonly string[] = [],
     ): Promise<void> {
       const now = new Date().toISOString();
-      await withWorkspace(db, workspaceId, async (tx) => {
-        const cases = await tx
-          .select({
-            id: workspaceProcurements.id,
-            sourceProcurementId: workspaceProcurements.sourceProcurementId,
-          })
-          .from(workspaceProcurements)
-          .where(eq(workspaceProcurements.workspaceId, workspaceId));
-        const bySource = new Map(cases.map((row) => [row.sourceProcurementId, row.id]));
-        const byId = new Set(cases.map((row) => row.id));
-        for (const raw of items) {
-          const item = InboxFixtureItem.parse(jsonbSafe(raw));
-          const workspaceProcurementId =
-            byId.has(item.change.procurementId)
-              ? item.change.procurementId
-              : bySource.get(item.procurement.sourceProcurementId);
-          await tx
-            .insert(workspaceInbox)
-            .values({
-              id: globalThis.crypto.randomUUID(),
-              workspaceId,
-              workspaceProcurementId,
-              eventKey: item.change.id,
-              item,
-              state: "open",
-              detectedAt: item.change.detectedAt,
-              updatedAt: now,
-            })
-            .onConflictDoUpdate({
-              target: [workspaceInbox.workspaceId, workspaceInbox.eventKey],
-              set: {
-                workspaceProcurementId,
-                item,
-                updatedAt: now,
-              },
-            });
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        await writeInboxState(tx, workspaceId, items, dismissedChangeIds, now);
+      });
+    },
+
+    /**
+     * One locked transaction for workspace + cases + inbox so a search hit
+     * cannot deadlock a profile save or leave inbox rows without a case.
+     */
+    async saveCabinet(
+      snapshot: SpecialistWorkspaceStateValue,
+      cards: readonly SpecialistProcurementCardValue[],
+      items: readonly InboxFixtureItemValue[],
+      workspaceId: string,
+    ): Promise<void> {
+      const state = SpecialistWorkspaceState.parse(snapshot);
+      const now = new Date().toISOString();
+      await withWorkspaceWrite(db, workspaceId, async (tx) => {
+        await writeWorkspaceState(tx, workspaceId, state, now);
+        for (const card of uniqueBySource(cards)) {
+          await saveWorkspaceCase(tx, workspaceId, card);
         }
+        await writeInboxState(tx, workspaceId, items, state.dismissedInboxIds, now);
       });
     },
 
@@ -903,6 +947,265 @@ function workspaceProfileColumns(
  * source. The unique index on source_procurement_id allows only one row;
  * keep the decided card so a stub cannot wipe reject/monitor.
  */
+
+async function writeWorkspaceState(
+  tx: Parameters<Parameters<Database["transaction"]>[0]>[0],
+  workspaceId: string,
+  state: SpecialistWorkspaceStateValue,
+  now: string,
+): Promise<void> {
+  const settingRows = await tx
+    .select({ settings: workspaceSettings.settings })
+    .from(workspaceSettings)
+    .where(eq(workspaceSettings.workspaceId, workspaceId))
+    .limit(1);
+  const deletedProfileIds = deletedProfileIdsFromSettings(settingRows[0]?.settings);
+  const profiles = omitDeletedProfiles(state.profiles, deletedProfileIds);
+  if (profiles.length === 0) {
+    throw new Error("cannot_save_workspace_without_profiles");
+  }
+  const activeProfileId = profiles.some((item) => item.id === state.activeProfileId)
+    ? state.activeProfileId
+    : profiles[0]!.id;
+  const existingProfiles = await tx
+    .select({ id: workspaceProfiles.id })
+    .from(workspaceProfiles)
+    .where(eq(workspaceProfiles.workspaceId, workspaceId));
+  const nextIds = new Set(profiles.map((item) => item.id));
+  const removed = [
+    ...new Set([
+      ...existingProfiles.map((row) => row.id).filter((id) => !nextIds.has(id)),
+      ...deletedProfileIds,
+    ]),
+  ];
+  if (removed.length > 0) {
+    await tx
+      .delete(workspaceReviewVerdicts)
+      .where(
+        and(
+          eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+          inArray(workspaceReviewVerdicts.profileId, removed),
+        ),
+      );
+    await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
+  }
+  for (const profile of profiles) {
+    const columns = workspaceProfileColumns(profile, workspaceId, now);
+    await tx
+      .insert(workspaceProfiles)
+      .values(columns)
+      .onConflictDoUpdate({
+        target: workspaceProfiles.id,
+        set: {
+          name: columns.name,
+          purpose: columns.purpose,
+          description: columns.description,
+          keywords: columns.keywords,
+          excludeKeywords: columns.excludeKeywords,
+          statuses: columns.statuses,
+          excludeSingleSource: columns.excludeSingleSource,
+          filters: columns.filters,
+          watchNewProcurements: columns.watchNewProcurements,
+          lastDiscoveryAt: columns.lastDiscoveryAt,
+          updatedAt: columns.updatedAt,
+        },
+      });
+  }
+  const settingsJson = jsonbSql(
+    workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds),
+  );
+  await tx
+    .insert(workspaceSettings)
+    .values({
+      workspaceId,
+      activeProfileId,
+      settings: settingsJson,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: workspaceSettings.workspaceId,
+      set: {
+        activeProfileId,
+        settings: settingsJson,
+        updatedAt: now,
+      },
+    });
+
+  for (const verdict of dedupeReviewVerdicts(state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId)))) {
+    await tx
+      .insert(workspaceReviewVerdicts)
+      .values({
+        workspaceId,
+        profileId: verdict.profileId,
+        sourceProcurementId: verdict.sourceProcurementId,
+        decidedAt: verdict.decidedAt,
+        algorithmVersion: verdict.algorithmVersion,
+      })
+      .onConflictDoUpdate({
+        target: [
+          workspaceReviewVerdicts.workspaceId,
+          workspaceReviewVerdicts.profileId,
+          workspaceReviewVerdicts.sourceProcurementId,
+        ],
+        set: {
+          decidedAt: verdict.decidedAt,
+          algorithmVersion: verdict.algorithmVersion,
+        },
+      });
+  }
+  const nextVerdictKeys = new Set(
+    dedupeReviewVerdicts(state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId))).map(
+      (item) => `${item.profileId}\0${item.sourceProcurementId}`,
+    ),
+  );
+  const existingVerdicts = await tx
+    .select({
+      profileId: workspaceReviewVerdicts.profileId,
+      sourceProcurementId: workspaceReviewVerdicts.sourceProcurementId,
+    })
+    .from(workspaceReviewVerdicts)
+    .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+  const orphanVerdictIds = existingVerdicts.filter(
+    (row) => !nextVerdictKeys.has(`${row.profileId}\0${row.sourceProcurementId}`),
+  );
+  for (const orphan of orphanVerdictIds) {
+    await tx
+      .delete(workspaceReviewVerdicts)
+      .where(
+        and(
+          eq(workspaceReviewVerdicts.workspaceId, workspaceId),
+          eq(workspaceReviewVerdicts.profileId, orphan.profileId),
+          eq(workspaceReviewVerdicts.sourceProcurementId, orphan.sourceProcurementId),
+        ),
+      );
+  }
+
+  const existingDecisions = await tx
+    .select()
+    .from(workspaceDecisions)
+    .where(eq(workspaceDecisions.workspaceId, workspaceId));
+  const seen = new Set(
+    existingDecisions.map(
+      (row) => `${row.sourceProcurementId}:${row.kind}:${row.madeAt}`,
+    ),
+  );
+  for (const decision of state.decisions) {
+    const key = `${decision.sourceProcurementId}:${decision.kind}:${decision.madeAt}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await tx.insert(workspaceDecisions).values({
+      workspaceId,
+      sourceProcurementId: decision.sourceProcurementId,
+      kind: decision.kind,
+      madeAt: decision.madeAt,
+    });
+  }
+
+  const archived = new Set(state.archivedSourceIds);
+  const caseRows = await tx
+    .select({
+      id: workspaceProcurements.id,
+      sourceProcurementId: workspaceProcurements.sourceProcurementId,
+      archived: workspaceProcurements.archived,
+    })
+    .from(workspaceProcurements)
+    .where(eq(workspaceProcurements.workspaceId, workspaceId));
+  for (const row of caseRows) {
+    const nextArchived = archived.has(row.sourceProcurementId);
+    if (row.archived === nextArchived) continue;
+    await tx
+      .update(workspaceProcurements)
+      .set({ archived: nextArchived, updatedAt: now })
+      .where(eq(workspaceProcurements.id, row.id));
+  }
+}
+
+async function writeInboxState(
+  tx: Parameters<Parameters<Database["transaction"]>[0]>[0],
+  workspaceId: string,
+  items: readonly InboxFixtureItemValue[],
+  dismissedChangeIds: readonly string[],
+  now: string,
+): Promise<void> {
+  const cases = await tx
+    .select({
+      id: workspaceProcurements.id,
+      sourceProcurementId: workspaceProcurements.sourceProcurementId,
+    })
+    .from(workspaceProcurements)
+    .where(eq(workspaceProcurements.workspaceId, workspaceId));
+  const bySource = new Map(cases.map((row) => [row.sourceProcurementId, row.id]));
+  const byId = new Set(cases.map((row) => row.id));
+  const dismissed = new Set(dismissedChangeIds);
+  for (const raw of items) {
+    const item = InboxFixtureItem.parse(jsonbSafe(raw));
+    const resolvedId = byId.has(item.change.procurementId)
+      ? item.change.procurementId
+      : bySource.get(item.procurement.sourceProcurementId);
+    // Never point inbox at a missing case row (FK / race with removeCases).
+    const workspaceProcurementId = resolvedId;
+    const closed = dismissed.has(item.change.id);
+    await tx
+      .insert(workspaceInbox)
+      .values({
+        id: globalThis.crypto.randomUUID(),
+        workspaceId,
+        workspaceProcurementId,
+        eventKey: item.change.id,
+        item,
+        state: closed ? "dismissed" : "open",
+        detectedAt: item.change.detectedAt,
+        resolvedAt: closed ? now : null,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [workspaceInbox.workspaceId, workspaceInbox.eventKey],
+        set: {
+          workspaceProcurementId,
+          item,
+          state: closed ? "dismissed" : "open",
+          resolvedAt: closed ? now : null,
+          updatedAt: now,
+        },
+      });
+  }
+  // Apply dismissals to rows that are already in SQL but not in this batch.
+  if (dismissed.size > 0) {
+    const inboxRows = await tx
+      .select({ id: workspaceInbox.id, eventKey: workspaceInbox.eventKey, item: workspaceInbox.item })
+      .from(workspaceInbox)
+      .where(eq(workspaceInbox.workspaceId, workspaceId));
+    for (const row of inboxRows) {
+      const parsed = InboxFixtureItem.safeParse(row.item);
+      const changeId = parsed.success ? parsed.data.change.id : row.eventKey;
+      if (!dismissed.has(changeId)) continue;
+      await tx
+        .update(workspaceInbox)
+        .set({
+          state: "dismissed",
+          resolvedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(workspaceInbox.id, row.id));
+    }
+  }
+}
+
+/** One row per profile+source so a duplicate batch cannot trip the unique index. */
+export function dedupeReviewVerdicts<
+  T extends { profileId: string; sourceProcurementId: string; decidedAt: string },
+>(verdicts: readonly T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const verdict of verdicts) {
+    const key = `${verdict.profileId}\0${verdict.sourceProcurementId}`;
+    const previous = byKey.get(key);
+    if (previous === undefined || previous.decidedAt <= verdict.decidedAt) {
+      byKey.set(key, verdict);
+    }
+  }
+  return [...byKey.values()];
+}
+
 export function uniqueBySource(
   cards: readonly SpecialistProcurementCardValue[],
 ): SpecialistProcurementCardValue[] {

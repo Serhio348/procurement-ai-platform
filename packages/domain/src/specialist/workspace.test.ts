@@ -129,7 +129,7 @@ describe("remembered review verdicts", () => {
     expect(workspace.isReviewedIrrelevant(first, "auction/1")).toBe(false);
   });
 
-  it("expires old verdicts and drops those of removed profiles, but keeps fresh ones", () => {
+  it("drops verdicts of a removed profile immediately and expires old ones later", () => {
     const workspace = new SpecialistWorkspace();
     const kept = workspace.profile().id;
     const removed = workspace.addProfile().id;
@@ -138,9 +138,11 @@ describe("remembered review verdicts", () => {
     workspace.rememberIrrelevant(removed, "auction/gone", "2026-09-08T10:00:00.000Z");
     workspace.removeProfile(removed);
 
+    expect(workspace.isReviewedIrrelevant(removed, "auction/gone")).toBe(false);
+
     const forgotten = workspace.forgetStaleVerdicts("2026-09-09T10:00:00.000Z", REVIEW_VERDICT_MAX_AGE_MS);
 
-    expect(forgotten).toBe(2);
+    expect(forgotten).toBe(1);
     expect(workspace.isReviewedIrrelevant(kept, "auction/old")).toBe(false);
     expect(workspace.isReviewedIrrelevant(kept, "auction/new")).toBe(true);
     const restored = SpecialistWorkspace.parse(workspace.snapshot());

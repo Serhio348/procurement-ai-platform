@@ -18,6 +18,27 @@ export async function withWorkspace<T>(
   });
 }
 
+/**
+ * Same as withWorkspace, but takes a transaction-scoped advisory lock so
+ * writers for one cabinet cannot interleave and deadlock on inbox/cases rows.
+ */
+export async function withWorkspaceWrite<T>(
+  db: Database,
+  workspaceId: string,
+  fn: (tx: Transaction) => Promise<T>,
+  userId?: string,
+): Promise<T> {
+  return withWorkspace(
+    db,
+    workspaceId,
+    async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${workspaceId}))`);
+      return fn(tx);
+    },
+    userId,
+  );
+}
+
 export async function withUser<T>(
   db: Database,
   userId: string,

@@ -229,6 +229,31 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   };
 
+  const persistProgress = async (
+    caseIds: readonly string[],
+    cabinet = currentCabinet(),
+  ): Promise<void> => {
+    await cabinets.persistProgress(cabinet, caseIds);
+    if (options.persistWorkspace !== undefined) {
+      await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
+    }
+    if (options.persistCases !== undefined) {
+      const keep = new Set(
+        cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
+      );
+      const wanted = new Set(caseIds);
+      await options.persistCases(
+        cabinet.catalog
+          .storedCases()
+          .filter((card) => wanted.has(card.id) && isPersistableCabinetCase(card, keep)),
+        cabinet.workspaceId,
+      );
+    }
+    if (options.persistInbox !== undefined) {
+      await options.persistInbox(cabinet.catalog.inboxItems(), cabinet.workspaceId);
+    }
+  };
+
   async function persistWorkspaceOnly(): Promise<void> {
     const cabinet = currentCabinet();
     await cabinets.persistWorkspaceOnly(cabinet);
@@ -790,7 +815,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               await options.removeCases([item.card.id], cabinet.workspaceId);
             }
           }
-          await persist(cabinet);
+          await persistProgress(forgotten ? [] : [item.card.id], cabinet);
         }
         continue;
       }
@@ -834,7 +859,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               await options.removeCases([item.card.id], cabinet.workspaceId);
             }
           }
-          await persist(cabinet);
+          await persistProgress(forgotten ? [] : [item.card.id], cabinet);
         }
         continue;
       }
@@ -894,7 +919,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
       if (scoring.persistEach) {
         workspace().setDismissedInboxIds(catalog().dismissedIds());
-        await persist(cabinet);
+        await persistProgress([remembered.card.id], cabinet);
       }
     }
     workspace().setDismissedInboxIds(catalog().dismissedIds());
@@ -1532,7 +1557,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.post("/api/profiles", async () => {
     const created = workspace().addProfile();
-    await persist();
+    // Profile rows live in workspace state; rewriting every case card here
+    // only queues behind search and makes «Новый профиль» / × feel broken.
+    await persistWorkspaceOnly();
     logger.info("Specialist working profile created", { id: created.id });
     return SpecialistWorkingProfile.parse(created);
   });
@@ -1543,7 +1570,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     workspace().activate(params.id);
-    await persist();
+    await persistWorkspaceOnly();
     return SpecialistWorkingProfile.parse(workspace().profile());
   });
 
@@ -1557,7 +1584,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     const saved = workspace().replaceProfileById(params.id, parsed.data);
-    await persist();
+    await persistWorkspaceOnly();
     logger.info("Specialist working profile saved", {
       id: saved.id,
       name: profileDisplayName(saved),
@@ -1575,7 +1602,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(409).send({ error: "last_profile" });
     }
     workspace().removeProfile(params.id);
-    await persist();
+    await cabinets.deleteProfile(currentCabinet(), params.id);
     logger.info("Specialist working profile removed", { id: params.id });
     return profileList();
   });
@@ -1590,7 +1617,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     const saved = workspace().setWatchById(params.id, parsed.data.watchNewProcurements);
-    await persist();
+    await persistWorkspaceOnly();
     logger.info("Specialist profile watch updated", {
       id: saved.id,
       watchNewProcurements: saved.watchNewProcurements,
@@ -1606,7 +1633,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "invalid_request" });
     }
     workspace().replaceProfile(parsed.data);
-    await persist();
+    await persistWorkspaceOnly();
     const saved = workspace().profile();
     logger.info("Specialist working profile saved", {
       name: profileDisplayName(saved),
@@ -1621,7 +1648,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "invalid_request" });
     }
     workspace().setWatch(parsed.data.watchNewProcurements);
-    await persist();
+    await persistWorkspaceOnly();
     logger.info("Specialist profile watch updated", {
       watchNewProcurements: parsed.data.watchNewProcurements,
     });

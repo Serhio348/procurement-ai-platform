@@ -26,6 +26,9 @@ export function ProfileList({
   const location = useLocation();
   const incoming = profileListToast(location.state);
   const [toast, setToast] = useState(incoming);
+  const [error, setError] = useState<string | undefined>();
+  const [pendingId, setPendingId] = useState<string | undefined>();
+  const [creating, setCreating] = useState(false);
   const canRemove = profiles.length > 1;
 
   useEffect(() => {
@@ -42,6 +45,16 @@ export function ProfileList({
     };
   }, [toast]);
 
+  useEffect(() => {
+    if (error === undefined) return;
+    const timer = window.setTimeout(() => {
+      setError(undefined);
+    }, 8000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [error]);
+
   return (
     <Shell>
       <main className="profile-page">
@@ -50,46 +63,92 @@ export function ProfileList({
             {toast}
           </p>
         )}
+        {error === undefined ? null : (
+          <p className="toast toast-error" role="alert">
+            {error}
+          </p>
+        )}
         <h1>Профили</h1>
         <p className="profile-lead">
           Каждое направление — свой профиль и своё слежение. На вкладке
           «Закупки» выберите профиль и нажмите «Искать по профилю».
         </p>
+        {!canRemove ? (
+          <p className="profile-hint">
+            Единственный профиль удалить нельзя — сначала создайте другой через
+            «Новый профиль».
+          </p>
+        ) : null}
         <ul className="profile-list">
-          {profiles.map((profile) => (
-            <li key={profile.id} className="profile-list-item">
-              <Link className="profile-list-link" to={`/profiles/${profile.id}`}>
-                <span>{profileDisplayName(profile)}</span>
-                <span className="profile-list-meta">
-                  {profile.watchNewProcurements ? "слежение включено" : "без слежения"}
-                </span>
-              </Link>
-              {remove === undefined ? null : (
-                <button
-                  type="button"
-                  className="profile-list-remove"
-                  aria-label={`Удалить профиль «${profileDisplayName(profile)}»`}
-                  title={canRemove ? "Удалить профиль" : "Нельзя удалить единственный профиль"}
-                  disabled={!canRemove}
-                  onClick={() => {
-                    void remove(profile.id);
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </li>
-          ))}
+          {profiles.map((profile) => {
+            const busy = pendingId === profile.id;
+            return (
+              <li key={profile.id} className="profile-list-item">
+                <Link className="profile-list-link" to={`/profiles/${profile.id}`}>
+                  <span>{profileDisplayName(profile)}</span>
+                  <span className="profile-list-meta">
+                    {profile.watchNewProcurements ? "слежение включено" : "без слежения"}
+                  </span>
+                </Link>
+                {remove === undefined ? null : (
+                  <button
+                    type="button"
+                    className="profile-list-remove"
+                    aria-label={`Удалить профиль «${profileDisplayName(profile)}»`}
+                    title={
+                      busy
+                        ? "Удаление…"
+                        : canRemove
+                          ? "Удалить профиль"
+                          : "Нельзя удалить единственный профиль"
+                    }
+                    disabled={!canRemove || busy}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!canRemove || busy) return;
+                      setError(undefined);
+                      setPendingId(profile.id);
+                      void remove(profile.id)
+                        .catch((cause: unknown) => {
+                          setError(
+                            cause instanceof Error
+                              ? cause.message
+                              : "Не удалось удалить профиль",
+                          );
+                        })
+                        .finally(() => {
+                          setPendingId(undefined);
+                        });
+                    }}
+                  >
+                    {busy ? "…" : "×"}
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
         <div className="profile-actions">
           <button
             type="button"
             className="search-profile"
+            disabled={creating}
             onClick={() => {
-              void create();
+              setError(undefined);
+              setCreating(true);
+              void create()
+                .catch((cause: unknown) => {
+                  setError(
+                    cause instanceof Error ? cause.message : "Не удалось создать профиль",
+                  );
+                })
+                .finally(() => {
+                  setCreating(false);
+                });
             }}
           >
-            Новый профиль
+            {creating ? "Создание…" : "Новый профиль"}
           </button>
         </div>
       </main>

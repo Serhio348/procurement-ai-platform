@@ -200,6 +200,8 @@ export class SpecialistWorkspace {
     }
     this.#profiles = this.#profiles.filter((item) => item.id !== id);
     delete this.#searchIdsByProfile[id];
+    // Orphan review rows only slow the next persist; drop them with the profile.
+    this.#reviewedIrrelevant = this.#reviewedIrrelevant.filter((item) => item.profileId !== id);
     if (this.#activeProfileId === id) {
       const next = this.#profiles[0];
       if (next === undefined) {

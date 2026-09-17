@@ -73,6 +73,7 @@
 - [`docs/architecture/STAGE-64.md`](docs/architecture/STAGE-64.md) — listing = retrieval, оценка после карточки, список растёт по мере score; завершённые без решения не хранятся
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
+- [`docs/architecture/STAGE-67.md`](docs/architecture/STAGE-67.md) — отклонённые «На проверку» не возвращаются во входящие
 
 ---
 
@@ -270,6 +271,8 @@ docs/architecture/ Документы этапов
   оставить совпадение
 - Этап 66 — поиск по профилю не затирает чужую очередь; карточки живут,
   пока специалист не разберёт их
+- Этап 67 — «Удалить» у «На проверку» = reject: поиск и discovery не
+  возвращают ту же закупку во входящие
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

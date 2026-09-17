@@ -81,7 +81,7 @@ export class SpecialistCatalog {
     return true;
   }
 
-  /** A later search found the same review hit: the row belongs in the inbox again. */
+  /** Re-opens a dismissed «Новая закупка» row. Review dismissals stay closed. */
   undismiss(id: string): void {
     this.#dismissed.delete(id);
   }

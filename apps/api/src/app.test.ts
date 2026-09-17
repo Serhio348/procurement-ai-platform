@@ -960,38 +960,59 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("puts a dismissed review hit back in the inbox on the next search", async () => {
+  it("keeps a dismissed review hit out of the inbox on the next search and discovery", async () => {
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/again-1",
+        url: "https://goszakupki.by/auction/view/again-1",
+        title: "Поставка НКУ 0,4 кВ",
+      }),
+    ];
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
-      searchHits: {
-        search: async () => [
-          SearchHit.parse({
-            sourceId: "goszakupki_by",
-            sourceProcurementId: "auction/again-1",
-            url: "https://goszakupki.by/auction/view/again-1",
-            title: "Поставка НКУ 0,4 кВ",
-          }),
-        ],
-      },
+      searchHits: { search: async () => hits },
     });
     await app.inject({
       method: "PUT",
       url: "/api/profile",
-      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+      payload: {
+        name: "НКУ для управления насосами",
+        keywords: ["НКУ"],
+      },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
     });
 
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
     const firstInbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const rowId = (JSON.parse(firstInbox.body).items as Array<{ id: string }>)[0]?.id ?? "";
     expect(rowId.length).toBeGreaterThan(0);
-    await app.inject({ method: "DELETE", url: `/api/inbox/${rowId}` });
+
+    const dismissed = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${rowId}/resolve`,
+      payload: { action: "dismiss" },
+    });
+    expect(dismissed.statusCode).toBe(200);
     expect(JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items).toEqual([]);
 
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    const restored = (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{
-      title: string;
-    }>).map((item) => item.title);
-    expect(restored).toEqual(["Поставка НКУ 0,4 кВ"]);
+    expect(JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items).toEqual([]);
+
+    const discovery = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(discovery.statusCode).toBe(200);
+    expect(JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items).toEqual([]);
+
+    const trash = await app.inject({ method: "GET", url: "/api/procurements?tab=trash" });
+    expect(
+      (JSON.parse(trash.body).items as Array<{ sourceProcurementId: string; triage?: string }>).map(
+        (item) => ({ sourceProcurementId: item.sourceProcurementId, triage: item.triage }),
+      ),
+    ).toEqual([{ sourceProcurementId: "auction/again-1", triage: "reject" }]);
 
     await app.close();
   });
@@ -1473,8 +1494,14 @@ describe("specialist API", () => {
 
     const reviewedAfterFirst = review.mock.calls.length;
     const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    expect(JSON.parse(second.body).ambiguousCount).toBeGreaterThan(0);
-    await vi.waitFor(() => expect(review.mock.calls.length).toBeGreaterThan(reviewedAfterFirst));
+    // Known review / irrelevant hits stay out of pending: no second model pass.
+    expect(JSON.parse(second.body).ambiguousCount).toBe(0);
+    expect(review.mock.calls.length).toBe(reviewedAfterFirst);
+    expect(
+      (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{ title: string }>).map(
+        (item) => item.title,
+      ),
+    ).toEqual(["Поставка НКУ 0,4 кВ"]);
 
     // Changing the phrases forgets the irrelevant verdict: the next search asks again.
     await app.inject({

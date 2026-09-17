@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -627,28 +628,24 @@ describe("ProcurementsApp", () => {
       sourceProcurementId: "auction-002",
     });
 
+    function Harness() {
+      const [items, setItems] = useState([found, other]);
+      const decide = async (id: string, kind: "monitor" | "participate" | "reject") => {
+        const next = items.map((item) => (item.id === id ? { ...item, triage: kind } : item));
+        setItems(next);
+        return next;
+      };
+      return (
+        <Routes>
+          <Route path="/procurements" element={<ProcurementsApp items={items} decide={decide} />} />
+          <Route path="/procurements/:id" element={<ProcurementsApp items={items} decide={decide} />} />
+        </Routes>
+      );
+    }
+
     render(
       <MemoryRouter initialEntries={["/procurements"]}>
-        <Routes>
-          <Route
-            path="/procurements"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
-          <Route
-            path="/procurements/:id"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
-        </Routes>
+        <Harness />
       </MemoryRouter>,
     );
 

@@ -4,7 +4,7 @@ import {
   type ProcedureCard,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
-import { statusLabel } from "./case.js";
+import { statusLabel, printedProcedureKindLabel } from "./case.js";
 import { cardSnapshot } from "./watch.js";
 
 export interface NamedSourceField {
@@ -18,6 +18,7 @@ export interface NamedSourceField {
  * invent a parallel vocabulary.
  */
 export const PROCEDURE_DETAIL_FIELD_ORDER = [
+  "Вид процедуры закупки",
   "Основание выбора процедуры закупки из одного источника",
   "Основание проведения процедуры закупки из одного источника",
   "Номер процедуры государственной закупки на ЭТП, признанной несостоявшейся",
@@ -55,12 +56,14 @@ export function applySourceCard(
       : source.status !== "unknown"
         ? statusLabel(source.status)
         : card.statusLabel;
+  const kindLabel = printedProcedureKindLabel(source) ?? card.kindLabel;
   return SpecialistProcurementCard.parse({
     ...card,
     live: true,
     title: source.title,
     status: nextStatus,
     statusLabel: nextStatusLabel,
+    ...(kindLabel === undefined ? {} : { kindLabel }),
     ...(buyer === undefined ? {} : { buyerName: buyer }),
     ...(amount === undefined ? {} : { amountLabel: amount }),
     sourceCard: source,

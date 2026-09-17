@@ -503,9 +503,11 @@ describe("specialist API", () => {
       },
     });
     const persistCases = vi.fn(async () => undefined);
+    const persistWorkspace = vi.fn(async () => undefined);
     const app = await buildSpecialistApi({
       catalog,
       persistCases,
+      persistWorkspace,
     });
 
     await app.inject({
@@ -514,7 +516,9 @@ describe("specialist API", () => {
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
 
-    expect(persistCases).toHaveBeenCalledWith([], expect.any(String));
+    // Profile save must not rewrite case cards (and must not promote inbox stubs).
+    expect(persistCases).not.toHaveBeenCalled();
+    expect(persistWorkspace).toHaveBeenCalled();
     expect(catalog.procurements()).toHaveLength(1);
 
     await app.close();

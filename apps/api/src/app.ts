@@ -1519,7 +1519,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.post("/api/profiles", async () => {
     const created = workspace().addProfile();
-    await persist();
+    // Profile rows live in workspace state; rewriting every case card here
+    // only queues behind search and makes «Новый профиль» / × feel broken.
+    await persistWorkspaceOnly();
     logger.info("Specialist working profile created", { id: created.id });
     return SpecialistWorkingProfile.parse(created);
   });
@@ -1530,7 +1532,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     workspace().activate(params.id);
-    await persist();
+    await persistWorkspaceOnly();
     return SpecialistWorkingProfile.parse(workspace().profile());
   });
 
@@ -1544,7 +1546,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     const saved = workspace().replaceProfileById(params.id, parsed.data);
-    await persist();
+    await persistWorkspaceOnly();
     logger.info("Specialist working profile saved", {
       id: saved.id,
       name: profileDisplayName(saved),
@@ -1562,7 +1564,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(409).send({ error: "last_profile" });
     }
     workspace().removeProfile(params.id);
-    await persist();
+    // Direct SQL + disk — never wait behind search/cabinet persist queue.
+    await cabinets.deleteProfile(currentCabinet(), params.id);
     logger.info("Specialist working profile removed", { id: params.id });
     return profileList();
   });
@@ -1577,7 +1580,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     const saved = workspace().setWatchById(params.id, parsed.data.watchNewProcurements);
-    await persist();
+    await persistWorkspaceOnly();
     logger.info("Specialist profile watch updated", {
       id: saved.id,
       watchNewProcurements: saved.watchNewProcurements,
@@ -1593,7 +1596,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "invalid_request" });
     }
     workspace().replaceProfile(parsed.data);
-    await persist();
+    await persistWorkspaceOnly();
     const saved = workspace().profile();
     logger.info("Specialist working profile saved", {
       name: profileDisplayName(saved),
@@ -1608,7 +1611,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "invalid_request" });
     }
     workspace().setWatch(parsed.data.watchNewProcurements);
-    await persist();
+    await persistWorkspaceOnly();
     logger.info("Specialist profile watch updated", {
       watchNewProcurements: parsed.data.watchNewProcurements,
     });

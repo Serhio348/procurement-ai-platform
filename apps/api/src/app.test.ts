@@ -206,6 +206,91 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("explains a site hit that is already participate instead of hiding it from search", async () => {
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000802",
+        title: "Выбор поставщика БКТПБ №3",
+        status: "accepting_bids",
+        statusLabel: "Подача предложений",
+        url: "https://goszakupki.by/auction/view/3664806",
+        sourceProcurementId: "auction/3664806",
+        foundAs: "match",
+        triage: "participate",
+        live: true,
+        profileIds: ["00000000-0000-4000-8000-000000000803"],
+      }),
+    );
+    const app = await buildSpecialistApi({
+      catalog,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/3664806",
+            url: "https://goszakupki.by/auction/view/3664806",
+            title: "Выбор поставщика БКТПБ №3",
+            sourceStatus: "Подача предложений",
+            status: "accepting_bids",
+          }),
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "marketing/1037877",
+            url: "https://goszakupki.by/marketing/view/1037877",
+            title: "шкаф АСКУЭ",
+            sourceStatus: "Завершен",
+            status: "completed",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: {
+        name: "КТПБ",
+        keywords: ["КТПБ"],
+        statuses: ["accepting_bids"],
+      },
+    });
+
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    const body = JSON.parse(searched.body) as {
+      items: Array<{ sourceProcurementId: string }>;
+      run?: {
+        skipped: Array<{ sourceProcurementId: string; reason: string; stage: string }>;
+        listingDiscardedCount: number;
+        retrievedCount: number;
+      };
+    };
+
+    expect(searched.statusCode).toBe(200);
+    expect(body.items).toEqual([]);
+    expect(body.run?.retrievedCount).toBe(0);
+    expect(body.run?.listingDiscardedCount).toBe(2);
+    expect(body.run?.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceProcurementId: "marketing/1037877",
+          reason: "статус процедуры не входит в профиль",
+          stage: "listing",
+        }),
+        expect.objectContaining({
+          sourceProcurementId: "auction/3664806",
+          reason: "уже в «Мои закупки» (Участвовать)",
+          stage: "listing",
+        }),
+      ]),
+    );
+
+    await app.close();
+  });
+
   it("search tab is this run, not every stored case in the cabinet", async () => {
     const catalog = new SpecialistCatalog();
     catalog.upsertCase(

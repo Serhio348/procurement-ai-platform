@@ -2,12 +2,29 @@ import { describe, expect, it } from "vitest";
 import {
   blobStorageKey,
   caseListTimeShouldBump,
+  dedupeReviewVerdicts,
   jsonbSafe,
   postgresErrorMessage,
   toIsoDateTime,
   uniqueBySource,
 } from "./specialist-store.js";
 import { SpecialistProcurementCard } from "@procurement/contracts";
+
+describe("dedupeReviewVerdicts", () => {
+  it("keeps one row per profile and source, preferring the newer decision", () => {
+    const older = {
+      profileId: "00000000-0000-4000-8000-000000000901",
+      sourceProcurementId: "request/3675640",
+      decidedAt: "2026-09-16T10:00:00.000Z",
+      algorithmVersion: "search-review-v4",
+    };
+    const newer = {
+      ...older,
+      decidedAt: "2026-09-16T13:11:53.823Z",
+    };
+    expect(dedupeReviewVerdicts([older, newer, older])).toEqual([newer]);
+  });
+});
 
 describe("blobStorageKey", () => {
   it("keeps the sha256 as the object name so PostgreSQL stores the hash, not the bytes", () => {

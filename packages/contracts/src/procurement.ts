@@ -231,6 +231,8 @@ export const SearchHit = z.object({
   pageFamily: PageFamily.optional(),
   /** Procedure kind when the listing row exposed one. */
   kind: ProcedureKind.optional(),
+  /** Verbatim kind label from the listing or card («Конкурс с ограниченным участием»). */
+  kindLabel: z.string().min(1).optional(),
   /** Normalized status when the listing row exposed one. */
   status: ProcedureStatus.optional(),
   sourceStatus: z.string().optional(),

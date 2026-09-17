@@ -58,6 +58,29 @@ export interface IntentProfileSlice {
  * Deterministic plan when the model is off or returned junk. Keywords that
  * name equipment become objects; a «для …» purpose becomes required_context.
  */
+
+/**
+ * Work phrases that name the type of work only — no industry object.
+ * Used for works profiles: listing queries and desired_actions must not flood
+ * the site (or the plan) with bare СМР / монтаж / пусконаладка alone.
+ */
+export function isGenericWorkPhrase(phrase: string): boolean {
+  const normalized = phrase.toLocaleLowerCase("ru-BY").replace(/ё/gu, "е").trim();
+  if (normalized.length === 0) return true;
+  if (/^(смр|пнр)$/u.test(normalized)) return true;
+  if (/строительно[-\s]?монтажн/u.test(normalized)) return true;
+  if (/^строительн\p{L}*\s+работ/u.test(normalized)) return true;
+  if (/пуско[-\s]?наладочн/u.test(normalized)) return true;
+  if (/^пусконалад/u.test(normalized)) return true;
+  if (/^(ген)?подряд/u.test(normalized) || /^субподряд/u.test(normalized)) return true;
+  if (/подрядн\p{L}*\s+работ/u.test(normalized)) return true;
+  if (/^монтажн\p{L}*\s+работ/u.test(normalized)) return true;
+  if (/^(монтаж|работы|услуги|ремонт|реконструкция|строительство|модернизация)$/u.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
 export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntentPlanValue {
   const objects: string[] = [];
   const desired: string[] = [];
@@ -73,8 +96,14 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
       // «монтаж электрооборудования» names both the work and its object:
       // the phrase stays a desired action, the noun becomes an object so a
       // lot that says «работы по монтажу электрооборудования РП» can score.
-      pushUnique(desired, phrase);
-      for (const action of work.actions) pushUnique(desired, action);
+      // Bare keywords («монтаж», «СМР») stay out of desired. A phrase that
+      // already names the object stays as one desired action — do not also
+      // push the bare verb; scoring treats work verbs in the title as an
+      // implicit works signal when the profile object is present, so
+      // specialists can keep keywords separate without gluing.
+      if (!isGenericWorkPhrase(phrase)) {
+        pushUnique(desired, phrase);
+      }
       if (work.object !== undefined) pushUnique(objects, work.object);
       continue;
     }
@@ -125,13 +154,16 @@ export function platformSearchTerms(
   plan: SearchIntentPlanValue,
   fallbackKeywords: readonly string[],
 ): string[] {
-  const extra = planAllowsBareObject(plan) ? plan.objects : [];
+  // Works: still query plan objects (the subject), but never bare СМР/монтаж.
+  const extra =
+    planAllowsBareObject(plan) || plan.intent === "works" ? plan.objects : [];
   const terms: string[] = [];
   const seen = new Set<string>();
   for (const value of [...fallbackKeywords, ...extra]) {
     const term = value.trim();
     const key = term.toLocaleLowerCase("ru-BY");
     if (term.length === 0 || seen.has(key)) continue;
+    if (plan.intent === "works" && isGenericWorkPhrase(term)) continue;
     seen.add(key);
     terms.push(term);
   }
@@ -164,7 +196,9 @@ export function mergeSearchIntentPlans(
     required_context:
       fromModel.required_context.length > 0 ? fromModel.required_context : inferred.required_context,
     excluded_context: union(inferred.excluded_context, fromModel.excluded_context),
-    desired_actions: union(inferred.desired_actions, fromModel.desired_actions),
+    desired_actions: union(inferred.desired_actions, fromModel.desired_actions).filter(
+      (item) => intent !== "works" || !isGenericWorkPhrase(item),
+    ),
     excluded_actions: excluded,
     intent,
   });

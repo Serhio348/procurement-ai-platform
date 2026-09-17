@@ -1,5 +1,11 @@
 import type { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
-import { inferSearchIntentPlan, planAllowsBareObject } from "./intent-plan.js";
+import {
+  inferSearchIntentPlan,
+  isGenericWorkPhrase,
+  planAllowsBareObject,
+} from "./intent-plan.js";
+
+export { isGenericWorkPhrase } from "./intent-plan.js";
 import { firstTermIndex, termOccurs } from "./query-terms.js";
 
 /**
@@ -69,28 +75,6 @@ const HEAD_FILLER = /^(по|на|для|к|ко|о|об|с|со|от|до|из|�
  * a parallel number.
  */
 
-/**
- * Work phrases that name the type of work only — no industry object.
- * Used for every works profile (electrical, HVAC, …): a hit that matches
- * only these phrases and none of the profile objects is not domain evidence.
- */
-export function isGenericWorkPhrase(phrase: string): boolean {
-  const normalized = phrase.toLocaleLowerCase("ru-BY").replace(/ё/gu, "е").trim();
-  if (normalized.length === 0) return true;
-  if (/^(смр|пнр)$/u.test(normalized)) return true;
-  if (/строительно[-\s]?монтажн/u.test(normalized)) return true;
-  if (/^строительн\p{L}*\s+работ/u.test(normalized)) return true;
-  if (/пуско[-\s]?наладочн/u.test(normalized)) return true;
-  if (/^пусконалад/u.test(normalized)) return true;
-  if (/^(ген)?подряд/u.test(normalized) || /^субподряд/u.test(normalized)) return true;
-  if (/подрядн\p{L}*\s+работ/u.test(normalized)) return true;
-  if (/^монтажн\p{L}*\s+работ/u.test(normalized)) return true;
-  if (/^(монтаж|работы|услуги|ремонт|реконструкция|строительство|модернизация)$/u.test(normalized)) {
-    return true;
-  }
-  return false;
-}
-
 /** True when the text names a plan object or a required_context term. */
 export function hasProfileSubjectSignal(text: string, plan: SearchIntentPlan): boolean {
   if (plan.objects.some((item) => termOccurs(text, item))) return true;
@@ -155,8 +139,11 @@ export function scoreSearchIntent(
   const objects = objectRole === "mention" ? extraObjects : matchedObjects;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
-  const serviceHead =
+  const workHead =
     matchedDesired.length === 0 ? purchaseWorkHead(leadingClause(title)) : undefined;
+  // Purchase profiles: a work-headed title is not supply. Works profiles: the
+  // opposite — work in the title is the desired shape, never an exclusion.
+  const serviceHead = plan.intent === "works" ? undefined : workHead;
   const excludedInTitle = [
     ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
     ...(serviceHead === undefined ? [] : [serviceHead.trim()]),
@@ -166,16 +153,33 @@ export function scoreSearchIntent(
   const context = contextRoleFor(title, extra, plan);
   const matchedContext = context.matched;
 
+  // Soft A+C keeps keywords separate («электрооборудование», «монтаж») and
+  // strips bare work verbs from desired. When the plan has no desired phrases
+  // left, the object is present, and the title still names works, score that
+  // as an implicit desired action — specialists must not glue chips into one
+  // site query. If the plan still lists specific desired phrases that simply
+  // did not match this title, do not invent a works match.
+  const implicitWorks =
+    plan.intent === "works" &&
+    plan.desired_actions.length === 0 &&
+    matchedDesired.length === 0 &&
+    objectRole !== "none" &&
+    excludedRole !== "subject" &&
+    titleHasWorksSignal(title, workHead);
+  const effectiveDesired = implicitWorks
+    ? [implicitWorksDesiredLabel(title, workHead)]
+    : matchedDesired;
+
   let score = 0;
   if (objectRole === "subject") score += SEARCH_INTENT_WEIGHTS.OBJECT_MATCH_WEIGHT;
   else if (objectRole === "mention") score += SEARCH_INTENT_WEIGHTS.OBJECT_MENTION_WEIGHT;
-  if (matchedDesired.length > 0) score += SEARCH_INTENT_WEIGHTS.DESIRED_ACTION_WEIGHT;
-  if (objectRole === "subject" && matchedDesired.length > 0 && excludedRole !== "subject") {
+  if (effectiveDesired.length > 0) score += SEARCH_INTENT_WEIGHTS.DESIRED_ACTION_WEIGHT;
+  if (objectRole === "subject" && effectiveDesired.length > 0 && excludedRole !== "subject") {
     score += SEARCH_INTENT_WEIGHTS.COMBO_BONUS;
   }
   if (
     objectRole === "subject" &&
-    matchedDesired.length === 0 &&
+    effectiveDesired.length === 0 &&
     excludedRole !== "subject" &&
     planAllowsBareObject(plan)
   ) {
@@ -183,7 +187,7 @@ export function scoreSearchIntent(
   }
   if (
     objectRole === "none" &&
-    matchedDesired.length > 0 &&
+    effectiveDesired.length > 0 &&
     excludedRole !== "subject" &&
     plan.objects.length === 0
   ) {
@@ -197,13 +201,20 @@ export function scoreSearchIntent(
   }
 
   score = clampScore(score);
-  const decision = decisionFor(score, excludedRole, objectRole, context.role, matchedDesired.length, plan);
+  const decision = decisionFor(
+    score,
+    excludedRole,
+    objectRole,
+    context.role,
+    effectiveDesired.length,
+    plan,
+  );
   const scored: SearchIntentScore = {
     score,
     decision,
     reason: relevanceReason({
       objects,
-      desired: matchedDesired,
+      desired: effectiveDesired,
       excluded: excludedInTitle,
       excludedRole,
       objectRole,
@@ -212,14 +223,14 @@ export function scoreSearchIntent(
       decision,
     }),
     matchedObjects: objects,
-    matchedDesired,
+    matchedDesired: effectiveDesired,
     matchedContext,
     excludedActions: excludedInTitle,
     excludedRole,
     objectRole,
     contextRole: context.role,
     ...(excludedRole === "peer"
-      ? { mixedActions: { desired: matchedDesired, excluded: excludedInTitle } }
+      ? { mixedActions: { desired: effectiveDesired, excluded: excludedInTitle } }
       : {}),
   };
   return applyWorksSubjectGate(scored, plan, `${title}\n${extra}`);
@@ -369,6 +380,29 @@ function enumeratesTogether(
 function leadingClause(title: string): string {
   const cut = title.search(/[\n,;(]|с\s+последующ/iu);
   return cut === -1 ? title : title.slice(0, cut);
+}
+
+/**
+ * True when the title names works even if desired_actions has no glued phrase.
+ * Bare «монтаж» / СМР stay out of the plan; the title still carries the signal.
+ */
+function titleHasWorksSignal(title: string, workHead: string | undefined): boolean {
+  if (workHead !== undefined) return true;
+  if (termOccurs(title, "монтаж") || termOccurs(title, "пусконаладка")) return true;
+  if (termOccurs(title, "смр") || termOccurs(title, "пнр")) return true;
+  if (/строительно[-\s]?монтажн/iu.test(title)) return true;
+  if (/пуско[-\s]?наладочн/iu.test(title)) return true;
+  if (/электромонтажн/iu.test(title)) return true;
+  return false;
+}
+
+function implicitWorksDesiredLabel(title: string, workHead: string | undefined): string {
+  const fromHead = workHead?.trim() ?? "";
+  if (fromHead.length > 0) return fromHead;
+  if (termOccurs(title, "монтаж")) return "монтаж";
+  if (termOccurs(title, "пусконаладка")) return "пусконаладка";
+  if (termOccurs(title, "смр") || /строительно[-\s]?монтажн/iu.test(title)) return "СМР";
+  return "работы";
 }
 
 /**

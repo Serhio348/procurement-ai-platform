@@ -1,10 +1,12 @@
 import { ProcedureCard, SearchHit } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  cardProcedureKindLabel,
   compileSpecialistCase,
   isClosedProcedureStatus,
   isPersistableCabinetCase,
   isPrunableUndecidedCase,
+  procedureKindLabel,
   uuidFromHex,
 } from "./case.js";
 
@@ -295,5 +297,16 @@ describe("uuidFromHex", () => {
     const first = uuidFromHex("goszakupki_by:marketing/3541093");
     const second = uuidFromHex("goszakupki_by:request/3552348");
     expect(first).not.toBe(second);
+  });
+});
+
+describe("cardProcedureKindLabel", () => {
+  it("prefers the stored label and falls back to the platform kind", () => {
+    expect(procedureKindLabel("electronic_auction")).toBe("электронный аукцион");
+    expect(cardProcedureKindLabel({ kindLabel: "открытый конкурс" })).toBe("открытый конкурс");
+    expect(cardProcedureKindLabel({ sourceCard: { kind: "single_source" } })).toBe(
+      "закупка из одного источника",
+    );
+    expect(cardProcedureKindLabel({})).toBeUndefined();
   });
 });

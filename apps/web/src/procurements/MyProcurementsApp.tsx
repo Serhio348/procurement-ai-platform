@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { SpecialistIngestProgress, SpecialistProcurementCard } from "@procurement/contracts";
 import {
   bidsDeadlinePassed,
+  cardProcedureKindLabel,
   isIngestRunning,
   isSingleSourceAfterFailedProcedure,
 } from "@procurement/domain";
@@ -256,7 +257,9 @@ export function MyProcurementsApp({
           <p className="my-procurements-empty">{isTrash ? "Корзина пуста." : EMPTY_TEXT[filter]}</p>
         ) : (
           <ul className="my-procurements-grid">
-            {visible.map((item) => (
+            {visible.map((item) => {
+              const procedureKind = cardProcedureKindLabel(item);
+              return (
               <li key={item.id}>
                 <div className={`my-procurements-card is-${item.triage ?? "unknown"}`}>
                   <button
@@ -292,6 +295,12 @@ export function MyProcurementsApp({
                     <h2 className="my-procurements-card-title">{item.title}</h2>
                     <CardIngestCaption ingest={activeIngest[item.id]} />
                     <dl className="my-procurements-card-facts">
+                      {procedureKind === undefined ? null : (
+                        <div>
+                          <dt>Вид процедуры</dt>
+                          <dd className="my-procurements-card-kind">{procedureKind}</dd>
+                        </div>
+                      )}
                       {item.amountLabel ? (
                         <div>
                           <dt>Стоимость</dt>
@@ -378,7 +387,8 @@ export function MyProcurementsApp({
                   ) : null}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </main>

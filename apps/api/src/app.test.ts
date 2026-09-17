@@ -1494,8 +1494,14 @@ describe("specialist API", () => {
 
     const reviewedAfterFirst = review.mock.calls.length;
     const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
-    expect(JSON.parse(second.body).ambiguousCount).toBeGreaterThan(0);
-    await vi.waitFor(() => expect(review.mock.calls.length).toBeGreaterThan(reviewedAfterFirst));
+    // Known review / irrelevant hits stay out of pending: no second model pass.
+    expect(JSON.parse(second.body).ambiguousCount).toBe(0);
+    expect(review.mock.calls.length).toBe(reviewedAfterFirst);
+    expect(
+      (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{ title: string }>).map(
+        (item) => item.title,
+      ),
+    ).toEqual(["Поставка НКУ 0,4 кВ"]);
 
     // Changing the phrases forgets the irrelevant verdict: the next search asks again.
     await app.inject({

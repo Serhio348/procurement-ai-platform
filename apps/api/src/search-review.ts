@@ -20,9 +20,22 @@ import {
 import { ProcurementMcpClient, ToolPolicyGate, type McpToolCaller } from "@procurement/mcp-client";
 import { silentLogger, type Logger } from "@procurement/observability";
 
+/**
+ * Shared model-call budget for one search run. The caller owns the counter
+ * and passes it to every review call of the run, so per-hit calls cannot
+ * reset the limit. A counter that starts at maxModelCalls means "no budget".
+ */
+export interface ReviewBudget {
+  used: number;
+}
+
 /** Second look at hits the title could not settle. Absent: everything waits for a human. */
 export interface SpecialistReviewPort {
-  review: (hits: readonly SearchHit[], profile: ReviewProfile) => Promise<ReviewOutcome[]>;
+  review: (
+    hits: readonly SearchHit[],
+    profile: ReviewProfile,
+    budget?: ReviewBudget,
+  ) => Promise<ReviewOutcome[]>;
 }
 
 export interface SearchClassifierPort {
@@ -64,8 +77,8 @@ export function createProcurementSearchReview(
   const concurrency = Math.max(1, options.concurrency ?? 4);
 
   return {
-    async review(hits, profile) {
-      let modelCalls = 0;
+    async review(hits, profile, budget) {
+      const calls = budget ?? { used: 0 };
       const results: ReviewOutcome[] = new Array<ReviewOutcome>(hits.length);
       let next = 0;
       const worker = async (): Promise<void> => {
@@ -97,11 +110,11 @@ export function createProcurementSearchReview(
             finish(unavailableOutcome());
             continue;
           }
-          if (modelCalls >= maxModelCalls) {
+          if (calls.used >= maxModelCalls) {
             finish(quotaOutcome());
             continue;
           }
-          modelCalls += 1;
+          calls.used += 1;
           finish(
             await classify(
               options.classifier,

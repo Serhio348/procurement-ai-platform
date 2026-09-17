@@ -95,7 +95,7 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { createSearchProgressHub } from "./search-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
-import type { SpecialistReviewPort } from "./search-review.js";
+import type { ReviewBudget, SpecialistReviewPort } from "./search-review.js";
 import type { SearchIntentPort } from "./search-intent.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -748,11 +748,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       excludeKeywords: profile.excludeKeywords,
       intent: plan,
     };
+    // One scoring pass is one search run: the model-call budget is shared by
+    // every card, so per-hit review calls cannot reset it.
+    const reviewBudget: ReviewBudget = { used: 0 };
     for (const item of pending) {
       const outcome =
         searchReview === undefined
           ? scoreIntentCard(procedureCardFromHit(item.hit, now), plan).outcome
-          : (await searchReview.review([item.hit], reviewProfile))[0];
+          : (await searchReview.review([item.hit], reviewProfile, reviewBudget))[0];
       scoredCount += 1;
       if (outcome?.verdict === "irrelevant") {
         discarded += 1;

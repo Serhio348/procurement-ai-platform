@@ -17,13 +17,14 @@ import {
   inferSearchIntentPlan,
   type ReviewOutcome,
 } from "@procurement/domain";
-import { McpToolCallError } from "@procurement/mcp-client";
+import { McpToolCallError, type McpToolCaller } from "@procurement/mcp-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
 import { buildSpecialistApi } from "./app.js";
 import { putBlob } from "./blobs.js";
 import { createMemoryCabinetRegistry } from "./cabinets.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
+import { createProcurementSearchReview } from "./search-review.js";
 
 const tmpDirs: string[] = [];
 
@@ -632,6 +633,73 @@ describe("specialist API", () => {
     const inboxAfterPrune = await app.inject({ method: "GET", url: "/api/inbox" });
     expect(titles(searchAfterPrune.body)).toEqual([]);
     expect(titles(inboxAfterPrune.body)).toEqual([]);
+
+    await app.close();
+  });
+
+  it("spends the model budget once per search run, not once per card (R13)", async () => {
+    // Two hits stay unclear at the card stage, so both would ask the model.
+    // The run-level budget allows one call; the second waits for a human.
+    const hits = [
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/quota-1",
+        url: "https://goszakupki.by/auction/view/quota-1",
+        title: "Закупка НКУ",
+      }),
+      SearchHit.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/quota-2",
+        url: "https://goszakupki.by/auction/view/quota-2",
+        title: "Реализация НКУ",
+      }),
+    ];
+    const classify = vi.fn(async () => ({
+      verdict: "irrelevant" as const,
+      confidence: 0.9,
+      reason: "Не подходит.",
+      needDeeper: false,
+      matchedTerms: [] as string[],
+    }));
+    const caller: McpToolCaller = {
+      callTool: vi.fn(async (_name, input) => ({
+        structuredContent: ProcedureCard.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: String(
+            (input as { sourceProcurementId?: unknown }).sourceProcurementId,
+          ),
+          url: "https://goszakupki.by/auction/view/x",
+          title: "Закупка оборудования",
+          lots: [{ number: "1", title: "НКУ-0,4 кВ" }],
+          fetchedAt: "2026-09-09T00:00:00.000Z",
+        }),
+      })) as McpToolCaller["callTool"],
+    };
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => hits },
+      searchReview: createProcurementSearchReview({
+        caller,
+        classifier: { classify },
+        maxModelCalls: 1,
+        concurrency: 1,
+      }),
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+
+    await vi.waitFor(async () => {
+      const progress = await app.inject({
+        method: "GET",
+        url: "/api/procurements/search/progress",
+      });
+      expect(JSON.parse(progress.body).status).toBe("done");
+    });
+    expect(classify).toHaveBeenCalledTimes(1);
 
     await app.close();
   });

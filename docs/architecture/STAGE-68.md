@@ -54,3 +54,10 @@
 3. In-memory scrub в `persist.ts` не даёт и файловой копии вернуть профиль
    до рестарта процесса.
 
+## Важно при деплое
+
+Пакет `@procurement/db` отдаёт `dist/`, не `src/`. После правки
+`specialist-store.ts` обязательно `npm run build -w @procurement/db` и
+перезапуск API. Иначе процесс продолжает старый JS без tombstone — × снова
+«откатывается» после F5.
+

@@ -7,6 +7,7 @@ import {
 } from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState, type ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import fixture from "../../../../tests/fixtures/specialist/inbox.json";
 import {
@@ -627,27 +628,26 @@ describe("ProcurementsApp", () => {
       sourceProcurementId: "auction-002",
     });
 
+    function Harness(): ReactElement {
+      const [items, setItems] = useState([found, other]);
+      return (
+        <ProcurementsApp
+          items={items}
+          decide={async (id, kind) => {
+            const next = items.map((item) =>
+              item.id === id ? SpecialistProcurementCard.parse({ ...item, triage: kind }) : item,
+            );
+            setItems(next);
+            return next;
+          }}
+        />
+      );
+    }
+
     render(
       <MemoryRouter initialEntries={["/procurements"]}>
         <Routes>
-          <Route
-            path="/procurements"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
-          <Route
-            path="/procurements/:id"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
+          <Route path="/procurements/:id?" element={<Harness />} />
         </Routes>
       </MemoryRouter>,
     );

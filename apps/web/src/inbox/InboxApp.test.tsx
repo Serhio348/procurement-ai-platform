@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistCatalog } from "@procurement/domain";
 import { afterEach, describe, expect, it } from "vitest";
@@ -77,6 +77,36 @@ describe("InboxApp", () => {
     expect(screen.getByRole("button", { name: "Открыть карточку" })).toHaveProperty("disabled", false);
     await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
     expect(resolved[0]?.startsWith("open:")).toBe(true);
+  });
+
+  it("splits new procurements from changes on watched cards", async () => {
+    const catalog = SpecialistCatalog.parse(fixture);
+    catalog.upsertCase({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "КТПБ 630 для котельной",
+      status: "announced",
+      statusLabel: "объявлена",
+      url: "https://goszakupki.by/auction/view/402",
+      sourceProcurementId: "auction/402",
+    });
+    const { inboxItemFromFoundCard } = await import("@procurement/domain");
+    catalog.record(
+      inboxItemFromFoundCard(catalog.procurements()[0]!, "2026-09-06T12:00:00.000Z"),
+    );
+
+    render(
+      <MemoryRouter>
+        <InboxApp entries={catalog.urgentInbox()} />
+      </MemoryRouter>,
+    );
+
+    const newGroup = screen.getByRole("region", { name: /Новые закупки/ });
+    const watchedGroup = screen.getByRole("region", { name: /Изменения в моих закупках/ });
+    expect(within(newGroup).getByRole("button", { name: /КТПБ 630/ })).toBeTruthy();
+    expect(within(newGroup).queryByRole("button", { name: /Поставка КТПБ/ })).toBeNull();
+    expect(within(watchedGroup).getByRole("button", { name: /Поставка КТПБ/ })).toBeTruthy();
+    expect(within(watchedGroup).getByRole("button", { name: /НКУ и щитовое оборудование/ })).toBeTruthy();
+    expect(within(watchedGroup).queryByRole("button", { name: /КТПБ 630/ })).toBeNull();
   });
 
   it("shows a quiet empty state and keeps the tasks section disabled", () => {

@@ -562,6 +562,39 @@ describe("inferSearchIntentPlan", () => {
   });
 });
 
+
+describe("works review without glued desired phrase", () => {
+  it("reviews RES/KRUN construction works when profile objects match but desired phrase does not", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "электрооборудование",
+        "КРУН",
+        "РЭС",
+        "ПС",
+        "ДГУ",
+        "электромонтажные работы",
+        "монтаж",
+        "СМР",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.desired_actions).toContain("электромонтажные работы");
+    expect(plan.desired_actions).not.toContain("монтаж");
+
+    const scored = scoreSearchIntent(
+      {
+        title:
+          "Закупка строительно-монтажных работ по объектам: модернизация РЭС с установкой ДГУ; реконструкция ПС с заменой КРУН-10 кВ",
+      },
+      plan,
+    );
+    expect(scored.decision).toBe("review");
+    expect(scored.matchedObjects.length).toBeGreaterThan(0);
+  });
+});
+
 describe("platformSearchTerms works filter", () => {
   it("does not send bare SMR or монтаж to the site for a works plan", () => {
     const plan = inferSearchIntentPlan({

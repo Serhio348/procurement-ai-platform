@@ -233,6 +233,34 @@ export function scoreSearchIntent(
       ? { mixedActions: { desired: effectiveDesired, excluded: excludedInTitle } }
       : {}),
   };
+
+  // Works profile with a subject hit and a work signal in the title, but none
+  // of the saved desired phrases matched (e.g. profile has «электромонтажные
+  // работы» while the site says «строительно-монтажные … РЭС/КРУН»). Do not
+  // discard: send to the model instead of requiring glued keywords.
+  if (
+    plan.intent === "works" &&
+    objectRole !== "none" &&
+    effectiveDesired.length === 0 &&
+    plan.desired_actions.length > 0 &&
+    excludedRole !== "subject" &&
+    titleHasWorksSignal(title, workHead) &&
+    (decision === "discard" || decision === "review")
+  ) {
+    const label = implicitWorksDesiredLabel(title, workHead);
+    return applyWorksSubjectGate(
+      {
+        ...scored,
+        decision: "review",
+        matchedDesired: [label],
+        reason:
+          "Предмет профиля есть, в заголовке видны работы, но точная фраза из профиля не совпала — нужна проверка модели.",
+      },
+      plan,
+      `${title}\n${extra}`,
+    );
+  }
+
   return applyWorksSubjectGate(scored, plan, `${title}\n${extra}`);
 }
 

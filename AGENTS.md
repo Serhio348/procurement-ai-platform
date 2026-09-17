@@ -74,6 +74,7 @@
 - [`docs/architecture/STAGE-65.md`](docs/architecture/STAGE-65.md) — профиль поставки: работы в голове заголовка не становятся найденными
 - [`docs/architecture/STAGE-66.md`](docs/architecture/STAGE-66.md) — очередь поиска хранится по профилю, пока её не разберут
 - [`docs/architecture/STAGE-67.md`](docs/architecture/STAGE-67.md) — запись кабинета: один writer, upsert вердиктов, точечный persist поиска
+- [`docs/architecture/STAGE-68.md`](docs/architecture/STAGE-68.md) — удаление профиля: крестик и быстрый persist
 
 ---
 
@@ -273,6 +274,8 @@ docs/architecture/ Документы этапов
   пока специалист не разберёт их
 - Этап 67 — запись кабинета под замком: без deadlock профиля/входящих,
   upsert вердиктов, persist поиска по затронутым карточкам
+- Этап 68 — крестик удаления профиля: `saveWorkspaceMeta` / optimistic UI;
+  без переписи вердиктов, решений и inbox; строка исчезает сразу
 
 Не начато: hash той же ссылки на «Отслеживать», PostgreSQL outbox для inbox,
 входящий Telegram-бот.

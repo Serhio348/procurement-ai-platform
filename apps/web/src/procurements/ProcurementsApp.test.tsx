@@ -7,6 +7,7 @@ import {
 } from "@procurement/contracts";
 import { SpecialistCatalog } from "@procurement/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import fixture from "../../../../tests/fixtures/specialist/inbox.json";
 import {
@@ -627,28 +628,27 @@ describe("ProcurementsApp", () => {
       sourceProcurementId: "auction-002",
     });
 
-    render(
-      <MemoryRouter initialEntries={["/procurements"]}>
+    function Harness() {
+      const [items, setItems] = useState([found, other]);
+      async function decide(id: string, kind: "monitor" | "participate" | "reject") {
+        const next = items.map((item) => (item.id === id ? { ...item, triage: kind } : item));
+        setItems(next);
+        return next;
+      }
+      return (
         <Routes>
-          <Route
-            path="/procurements"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
-          />
+          <Route path="/procurements" element={<ProcurementsApp items={items} decide={decide} />} />
           <Route
             path="/procurements/:id"
-            element={
-              <ProcurementsApp
-                items={[found, other]}
-                decide={async (_id, kind) => [{ ...found, triage: kind }]}
-              />
-            }
+            element={<ProcurementsApp items={items} decide={decide} />}
           />
         </Routes>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Harness />
       </MemoryRouter>,
     );
 

@@ -58,9 +58,11 @@ export function ProfileApp({
 }): ReactElement {
   const [profile, setProfile] = useState(initial);
   const [name, setName] = useState(initial.name);
+  const [modelHint, setModelHint] = useState(initial.description);
   const [keywords, setKeywords] = useState(initial.keywords);
   const [addWord, setAddWord] = useState("");
   const [excluded, setExcluded] = useState(initial.excludeKeywords.join("\n"));
+  const [nameHintOpen, setNameHintOpen] = useState(false);
   const [statuses, setStatuses] = useState<readonly ProcedureStatus[]>(initial.statuses);
   const [excludeSingleSource, setExcludeSingleSource] = useState(initial.excludeSingleSource);
   const [filters, setFilters] = useState(initial.filters);
@@ -124,7 +126,8 @@ export function ProfileApp({
     return {
       name: name.trim(),
       purpose: name.trim(),
-      description: "",
+      // Model reads this as profile direction; keep specialist text, do not wipe.
+      description: modelHint.trim(),
       keywords,
       excludeKeywords: splitExcludeLines(excluded),
       statuses: [...statuses],
@@ -212,10 +215,24 @@ export function ProfileApp({
             <input
               id="profile-name"
               value={name}
+              placeholder="Например: Монтаж и пусконаладка электросилового оборудования"
+              onFocus={() => {
+                setNameHintOpen(true);
+              }}
+              onBlur={() => {
+                setNameHintOpen(false);
+              }}
               onChange={(event) => {
                 setName(event.target.value);
               }}
             />
+            {nameHintOpen || name.trim().length === 0 ? (
+              <p className="profile-hint" role="note">
+                Пишите узко: отрасль + что делаем (поставка / монтаж / пусконаладка). Плохо:
+                «Работы». Хорошо: «Поставка систем очистки воды» или «Монтаж и пусконаладка систем
+                очистки воды».
+              </p>
+            ) : null}
           </section>
 
           <div className="profile-tabs" role="tablist" aria-label="Разделы профиля">
@@ -245,9 +262,32 @@ export function ProfileApp({
 
           {tab === "profile" ? (
             <div className="profile-tab-body">
+              <section className="profile-section" aria-labelledby="profile-model-hint">
+                <h2 id="profile-model-hint">Для модели (направление)</h2>
+                <p className="profile-hint">
+                  Коротко: что ищем и что не наше. Модель читает это при спорных закупках. Не путать с
+                  полем «Исключать» — туда только слова для отсева на площадке.
+                </p>
+                <label htmlFor="profile-model-hint-text">Для модели (направление)</label>
+                <textarea
+                  id="profile-model-hint-text"
+                  rows={3}
+                  value={modelHint}
+                  placeholder={
+                    "Ищем поставку / монтаж / пусконаладку по предмету названия профиля. Не наше: чужая отрасль и общестрой без этого предмета, даже если в заголовке есть «СМР»."
+                  }
+                  onChange={(event) => {
+                    setModelHint(event.target.value);
+                  }}
+                />
+              </section>
+
               <section className="profile-section" aria-labelledby="profile-words">
                 <h2 id="profile-words">Ключевые слова и фразы для поиска</h2>
-                <p className="profile-hint">Каждое слово или фраза — отдельный запрос на goszakupki.by.</p>
+                <p className="profile-hint">
+                  Каждое слово или фраза — отдельный запрос на goszakupki.by. Берите предмет отрасли,
+                  не голые «СМР» / «строительно-монтажные работы».
+                </p>
                 <div className="profile-add-row">
                   <input
                     aria-label="Добавить слово"
@@ -624,6 +664,7 @@ function sameWrite(
   const list = (items: readonly string[]) => items.map((item) => item.trim().toLowerCase()).join("\n");
   return (
     write.name === saved.name.trim() &&
+    write.description.trim() === saved.description.trim() &&
     list(write.keywords) === list(saved.keywords) &&
     list(write.excludeKeywords) === list(saved.excludeKeywords) &&
     [...write.statuses].sort().join(",") === [...saved.statuses].sort().join(",") &&

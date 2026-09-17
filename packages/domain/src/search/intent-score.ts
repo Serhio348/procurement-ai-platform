@@ -68,6 +68,79 @@ const HEAD_FILLER = /^(по|на|для|к|ко|о|об|с|со|от|до|из|�
  * Code-owned 0–100 score. The model must not call this and must not invent
  * a parallel number.
  */
+
+/**
+ * Work phrases that name the type of work only — no industry object.
+ * Used for every works profile (electrical, HVAC, …): a hit that matches
+ * only these phrases and none of the profile objects is not domain evidence.
+ */
+export function isGenericWorkPhrase(phrase: string): boolean {
+  const normalized = phrase.toLocaleLowerCase("ru-BY").replace(/ё/gu, "е").trim();
+  if (normalized.length === 0) return true;
+  if (/^(смр|пнр)$/u.test(normalized)) return true;
+  if (/строительно[-\s]?монтажн/u.test(normalized)) return true;
+  if (/^строительн\p{L}*\s+работ/u.test(normalized)) return true;
+  if (/пуско[-\s]?наладочн/u.test(normalized)) return true;
+  if (/^пусконалад/u.test(normalized)) return true;
+  if (/^(ген)?подряд/u.test(normalized) || /^субподряд/u.test(normalized)) return true;
+  if (/подрядн\p{L}*\s+работ/u.test(normalized)) return true;
+  if (/^монтажн\p{L}*\s+работ/u.test(normalized)) return true;
+  if (/^(монтаж|работы|услуги|ремонт|реконструкция|строительство|модернизация)$/u.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+/** True when the text names a plan object or a required_context term. */
+export function hasProfileSubjectSignal(text: string, plan: SearchIntentPlan): boolean {
+  if (plan.objects.some((item) => termOccurs(text, item))) return true;
+  const required = plan.required_context ?? [];
+  return required.some((item) => termOccurs(text, item));
+}
+
+const WORKS_NO_SUBJECT_REASON =
+  "В тексте нет объектов или назначения из профиля — совпали только общие слова работ, закупка отброшена.";
+
+/**
+ * Works profiles are domain-agnostic: the profile's objects/context define the
+ * industry. Without those in the text, a bare SMR/ПНР hit is dropped (veto).
+ * If a specific profile work phrase matched but the object is still missing,
+ * the hit stays open for the model (review), never auto-match.
+ */
+function applyWorksSubjectGate(
+  scored: SearchIntentScore,
+  plan: SearchIntentPlan,
+  text: string,
+): SearchIntentScore {
+  if (plan.intent !== "works") return scored;
+  if (scored.decision === "veto") return scored;
+  if (scored.objectRole !== "none") return scored;
+  if (scored.contextRole === "match") return scored;
+  if (hasProfileSubjectSignal(text, plan)) return scored;
+
+  const desired = scored.matchedDesired;
+  const onlyGeneric =
+    desired.length === 0 || desired.every((item) => isGenericWorkPhrase(item));
+  if (onlyGeneric) {
+    return {
+      ...scored,
+      score: 0,
+      decision: "veto",
+      reason: WORKS_NO_SUBJECT_REASON,
+    };
+  }
+  // Profile-specific work phrase without its object: let the model judge by profile.
+  if (scored.decision === "match" || scored.decision === "discard") {
+    return {
+      ...scored,
+      decision: "review",
+      reason:
+        "Есть специфичная фраза работ из профиля, но объект профиля в тексте не назван — нужна проверка модели.",
+    };
+  }
+  return scored;
+}
+
 export function scoreSearchIntent(
   hit: SearchIntentHitText,
   plan: SearchIntentPlan,
@@ -125,7 +198,7 @@ export function scoreSearchIntent(
 
   score = clampScore(score);
   const decision = decisionFor(score, excludedRole, objectRole, context.role, matchedDesired.length, plan);
-  return {
+  const scored: SearchIntentScore = {
     score,
     decision,
     reason: relevanceReason({
@@ -149,6 +222,7 @@ export function scoreSearchIntent(
       ? { mixedActions: { desired: matchedDesired, excluded: excludedInTitle } }
       : {}),
   };
+  return applyWorksSubjectGate(scored, plan, `${title}\n${extra}`);
 }
 
 export function scoreSearchIntentFromProfile(
@@ -178,7 +252,7 @@ export function scoreSearchIntentFromProcedure(
   card: ProcedureCard,
   plan: SearchIntentPlan,
 ): SearchIntentScore {
-  return scoreIntentProcedure(card, plan);
+  return applyWorksSubjectGate(scoreIntentProcedure(card, plan), plan, procedureIntentText(card));
 }
 
 function lotIntentText(lot: ProcedureCard["lots"][number]): string {
@@ -218,6 +292,8 @@ function scoreIntentProcedure(
   if (workWithObject !== undefined) return workWithObject;
   const work = clauses.find((item) => item.excludedRole === "subject");
   if (work !== undefined) return work;
+  const energyVeto = clauses.find((item) => item.decision === "veto");
+  if (energyVeto !== undefined) return energyVeto;
   const implicit = clauses.find(
     (item) => item.objectRole !== "none" && item.decision !== "discard",
   );
@@ -338,7 +414,9 @@ function workHeadLabel(token: string): string | undefined {
   if (/^реконструкц/u.test(lower)) return "реконструкция";
   if (/^строительств/u.test(lower) || /^строительно/u.test(lower)) return "строительство";
   if (/^прокладк/u.test(lower)) return "прокладка";
-  if (/^подряд/u.test(lower) || /^субподряд/u.test(lower)) return "подрядные работы";
+  if (/^подряд/u.test(lower) || /^субподряд/u.test(lower) || /^генподряд/u.test(lower)) {
+    return "подрядные работы";
+  }
   if (/^демонтаж/u.test(lower)) return "демонтаж";
   if (/^электромонтаж/u.test(lower) || /^шефмонтаж/u.test(lower)) return "монтажные работы";
   if (/^модернизац/u.test(lower)) return "работы";

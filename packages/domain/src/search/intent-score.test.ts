@@ -8,6 +8,7 @@ import {
   platformSearchTerms,
 } from "./intent-plan.js";
 import {
+  hasProfileSubjectSignal,
   scoreSearchIntent,
   scoreSearchIntentFromProcedure,
   SEARCH_INTENT_WEIGHTS,
@@ -391,12 +392,12 @@ describe("scoreSearchIntent", () => {
     expect(relevant.decision).toBe("match");
 
     const grain = scoreSearchIntent({ title: "Пусконаладка зернового комплекса" }, plan);
-    expect(grain.decision).not.toBe("match");
+    expect(grain.decision).toBe("veto");
     expect(grain.matchedObjects).toEqual([]);
 
-    // Unrelated equipment is not a works match either: no object, no work verb.
+    // Unrelated equipment is not a works match either: no object, no energy signal.
     const boiler = scoreSearchIntent({ title: "Котёл твердотопливный КВр-0,5" }, plan);
-    expect(boiler.decision).toBe("discard");
+    expect(boiler.decision).toBe("veto");
 
     const repair = scoreSearchIntent(
       { title: "Текущий ремонт электрооборудования с частичной заменой проводки" },
@@ -411,7 +412,7 @@ describe("scoreSearchIntent", () => {
       },
       plan,
     );
-    expect(pump.decision).toBe("discard");
+    expect(pump.decision).toBe("veto");
 
     const mixedSupply = scoreSearchIntent(
       {
@@ -574,4 +575,107 @@ describe("extraPlatformSearchTerms", () => {
     expect(extraPlatformSearchTerms(inferred.objects, fromModel, ["НКУ"])).toEqual(["шкаф управления"]);
     expect(extraPlatformSearchTerms(["НКУ", "шкаф управления"], fromModel, ["НКУ"])).toEqual([]);
   });
+
+  it("hard-drops works hits that only match generic SMR with no profile object", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "строительно-монтажные работы",
+        "СМР",
+        "пусконаладочные работы",
+        "монтаж электрооборудования",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    expect(plan.objects.length).toBeGreaterThan(0);
+
+    const bath = scoreSearchIntent(
+      {
+        title:
+          "Выбор подрядной организации для выполнения строительно-монтажных работ по объекту «Текущий ремонт здания бани»",
+      },
+      plan,
+    );
+    expect(bath.decision).toBe("veto");
+
+    const facade = scoreSearchIntentFromProcedure(
+      procedureCard(
+        "Выбор подрядной организации на выполнение строительно-монтажных работ",
+        "Текущий ремонт фасада и внутренних помещений здания музея",
+      ),
+      plan,
+    );
+    expect(facade.decision).toBe("veto");
+  });
+
+  it("still matches when the profile object is present, and reviews specific work phrases without the object", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "строительно-монтажные работы",
+        "СМР",
+        "пусконаладочные работы",
+        "монтаж электрооборудования",
+        "электромонтажные работы",
+      ],
+      excludeKeywords: [],
+    });
+
+    // Only generic SMR + a foreign site name: no profile object → veto (domain-agnostic).
+    const substation = scoreSearchIntent(
+      {
+        title:
+          "Выбор субподрядной организации для выполнения строительно-монтажных работ на объекте «Реконструкция ПС-330 кВ»",
+      },
+      plan,
+    );
+    expect(substation.decision).toBe("veto");
+    expect(
+      hasProfileSubjectSignal(
+        "Выбор субподрядной организации для выполнения строительно-монтажных работ на объекте «Реконструкция ПС-330 кВ»",
+        plan,
+      ),
+    ).toBe(false);
+
+    // Specific profile work phrase without a clear object → model review, not auto-match.
+    const specific = scoreSearchIntent(
+      { title: "Электромонтажные работы на объекте реконструкции" },
+      plan,
+    );
+    expect(specific.decision).toBe("review");
+
+    const explicit = scoreSearchIntent(
+      {
+        title:
+          "Монтаж электрооборудования распределительного пункта 10 кВ, пусконаладочные работы",
+      },
+      plan,
+    );
+    expect(explicit.decision).toBe("match");
+  });
+
+  it("uses the same subject gate for a non-electrical works profile", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж вентиляции",
+      keywords: ["монтаж вентиляции", "пусконаладка вентиляции", "СМР"],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+
+    const bath = scoreSearchIntent(
+      { title: "Строительно-монтажные работы по ремонту бани" },
+      plan,
+    );
+    expect(bath.decision).toBe("veto");
+
+    const vent = scoreSearchIntent(
+      { title: "Монтаж вентиляции приточно-вытяжной в производственном корпусе" },
+      plan,
+    );
+    expect(vent.decision).toBe("match");
+  });
+
 });
+

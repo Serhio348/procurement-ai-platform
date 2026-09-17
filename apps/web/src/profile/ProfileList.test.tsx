@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +33,7 @@ describe("ProfileList", () => {
     expect(screen.queryByText(/КТПБ/)).toBeNull();
     expect(screen.queryByText(/электротехническ/i)).toBeNull();
     expect(screen.queryByText(/водоподготов/i)).toBeNull();
+    expect(screen.getByText(/Единственный профиль удалить нельзя/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Новый профиль" }));
     expect(create).toHaveBeenCalled();
   });
@@ -78,7 +79,7 @@ describe("ProfileList", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Удалить профиль «Водоподготовка»" }));
-    expect(remove).toHaveBeenCalledWith(water.id);
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(water.id));
 
     rerender(
       <MemoryRouter>
@@ -90,5 +91,31 @@ describe("ProfileList", () => {
       (screen.getByRole("button", { name: "Удалить профиль «Подстанции»" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+  });
+
+  it("surfaces a delete failure instead of swallowing it", async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn(async () => {
+      throw new Error("Не удалось удалить профиль");
+    });
+    const water = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Водоподготовка",
+    });
+    const substations = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "Подстанции",
+    });
+
+    render(
+      <MemoryRouter>
+        <ProfileList profiles={[substations, water]} create={async () => undefined} remove={remove} />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Удалить профиль «Водоподготовка»" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Не удалось удалить профиль",
+    );
   });
 });

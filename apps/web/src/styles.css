@@ -841,9 +841,9 @@ h3 {
 }
 
 .profile-hint {
-  margin: 0;
+  margin: 0 0 12px;
   color: #5c6778;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .profile-unsaved {
@@ -1415,6 +1415,11 @@ h3 {
   border: 1px solid #c9a25a;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgb(30 36 48 / 28%);
+}
+
+.toast-error {
+  border-color: #b85c5c;
+  background: #3a2222;
 }
 
 .confirm-toast-backdrop {

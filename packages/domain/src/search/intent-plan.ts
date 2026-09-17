@@ -66,6 +66,13 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
   for (const phrase of profile.keywords) {
     if (matchesAny(phrase, DESIRED_LEXICON)) {
       pushUnique(desired, phrase);
+      const supply = splitSupplyPhrase(phrase);
+      if (supply !== undefined) {
+        // «поставка насосов» names the action and the object, the same way a
+        // work phrase does: the verbs stay desired, the nouns form an object.
+        for (const action of supply.actions) pushUnique(desired, action);
+        if (supply.object !== undefined) pushUnique(objects, supply.object);
+      }
       continue;
     }
     const work = splitWorkPhrase(phrase);
@@ -258,14 +265,9 @@ function contextTermsFromPurpose(purpose: string): string[] {
 export function splitWorkPhrase(
   phrase: string,
 ): { actions: string[]; object?: string } | undefined {
-  const tokens = phrase
-    .normalize("NFKC")
-    .split(/\s+/u)
-    .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
-    .filter((token) => token.length > 0);
   const actions: string[] = [];
   const rest: string[] = [];
-  for (const token of tokens) {
+  for (const token of phraseTokens(phrase)) {
     const lower = normaliseToken(token);
     if (SPLIT_FILLER.has(lower)) continue;
     if (isWorkToken(lower)) {
@@ -277,7 +279,53 @@ export function splitWorkPhrase(
   }
   if (actions.length === 0 && !matchesAny(phrase, WORK_LEXICON)) return undefined;
   const object = rest.join(" ");
-  return object.length >= 4 ? { actions, object } : { actions };
+  return plausibleObject(object) ? { actions, object } : { actions };
+}
+
+/**
+ * «поставка насосов» splits like a work phrase: action verbs (supply or
+ * work) become desired actions, the remaining nouns become the object. A
+ * phrase without a supply verb is not a supply phrase.
+ */
+export function splitSupplyPhrase(
+  phrase: string,
+): { actions: string[]; object?: string } | undefined {
+  const actions: string[] = [];
+  const rest: string[] = [];
+  for (const token of phraseTokens(phrase)) {
+    const lower = normaliseToken(token);
+    if (SPLIT_FILLER.has(lower)) continue;
+    if (isSupplyToken(lower) || isWorkToken(lower)) {
+      pushUnique(actions, token);
+      continue;
+    }
+    if (WORK_CARRIER.test(lower)) continue;
+    rest.push(token);
+  }
+  if (!actions.some((token) => isSupplyToken(normaliseToken(token)))) return undefined;
+  const object = rest.join(" ");
+  return plausibleObject(object) ? { actions, object } : { actions };
+}
+
+function phraseTokens(phrase: string): string[] {
+  return phrase
+    .normalize("NFKC")
+    .split(/\s+/u)
+    .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter((token) => token.length > 0);
+}
+
+function isSupplyToken(lower: string): boolean {
+  return matchesAny(lower, DESIRED_LEXICON);
+}
+
+/**
+ * Object validity is not raw length: «КТП», «НКУ», «РП» are real objects
+ * while a lowercase two-letter scrap is not. An uppercase letter or a digit
+ * marks an abbreviation or a model designation.
+ */
+function plausibleObject(object: string): boolean {
+  return object.length >= 4 || (object.length >= 2 && /[\p{Lu}\p{N}]/u.test(object));
 }
 
 function isWorkToken(lower: string): boolean {

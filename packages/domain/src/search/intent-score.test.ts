@@ -301,6 +301,41 @@ describe("scoreSearchIntent", () => {
     expect(merged.excluded_actions).toContain("поставка");
   });
 
+  it("keeps the object of a supply phrase and short work objects (R10)", () => {
+    const supply = inferSearchIntentPlan({
+      name: "Насосы",
+      keywords: ["поставка насосов"],
+      excludeKeywords: [],
+    });
+    expect(supply.objects).toContain("насосов");
+    expect(supply.desired_actions).toEqual(
+      expect.arrayContaining(["поставка насосов", "поставка"]),
+    );
+    // A bare pump object now matches; an unrelated supply does not.
+    expect(scoreSearchIntent({ title: "Насос центробежный" }, supply).decision).toBe(
+      "match",
+    );
+    expect(
+      scoreSearchIntent({ title: "Поставка компрессоров" }, supply).decision,
+    ).not.toBe("match");
+
+    // Short abbreviations (КТП, НКУ, РП) are real objects, not scraps.
+    const works = inferSearchIntentPlan({
+      name: "Монтаж КТП",
+      keywords: ["монтаж КТП"],
+      excludeKeywords: [],
+    });
+    expect(works.objects).toContain("КТП");
+    // An unrelated work subject is discarded by the object, not reviewed on
+    // the shared work verb alone.
+    expect(scoreSearchIntent({ title: "Монтаж котла" }, works).decision).toBe(
+      "discard",
+    );
+    expect(
+      scoreSearchIntent({ title: "Монтаж КТП на объекте" }, works).decision,
+    ).toBe("match");
+  });
+
   it("leaves supply and works listed as equals for the model instead of a word-order veto", () => {
     const supplyPlan = SearchIntentPlan.parse({
       objects: ["КТП"],

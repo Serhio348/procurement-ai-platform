@@ -59,6 +59,7 @@ export interface CabinetRegistry {
   listIds: () => Promise<string[]>;
   persist: (cabinet: SpecialistCabinet) => Promise<void>;
   persistWorkspaceOnly: (cabinet: SpecialistCabinet) => Promise<void>;
+  deleteProfile: (cabinet: SpecialistCabinet, profileId: string) => Promise<void>;
   persistProgress: (
     cabinet: SpecialistCabinet,
     caseIds: readonly string[],
@@ -151,6 +152,9 @@ export function createMemoryCabinetRegistry(options: {
       // Memory is the store.
     },
     async persistWorkspaceOnly() {
+      // Memory is the store.
+    },
+    async deleteProfile() {
       // Memory is the store.
     },
     async persistProgress() {

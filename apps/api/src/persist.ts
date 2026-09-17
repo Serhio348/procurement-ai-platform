@@ -23,10 +23,10 @@ import {
   SpecialistWorkspace,
 } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
-import type {
-  InboxFixtureItem,
-  SpecialistProcurementCard as SpecialistProcurementCardValue,
+import {
   SpecialistWorkspaceState,
+  type InboxFixtureItem,
+  type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
 import { loadWorkspaceFile, saveWorkspaceFile } from "./workspace-file.js";
 import {
@@ -94,6 +94,41 @@ export async function openSpecialistPersistence(options: {
 
   const memoryCabinets = createMemoryCabinetRegistry();
   const cache = new Map<string, SpecialistCabinet>();
+  /** Profile ids removed in-process; scrub stale search snapshots so they cannot resurrect. */
+  const deletedProfileIds = new Map<string, Set<string>>();
+
+  function rememberDeletedProfile(workspaceId: string, profileId: string): void {
+    const set = deletedProfileIds.get(workspaceId) ?? new Set<string>();
+    set.add(profileId);
+    deletedProfileIds.set(workspaceId, set);
+  }
+
+  function scrubDeletedProfiles(
+    workspaceId: string,
+    snapshot: SpecialistWorkspaceState,
+  ): SpecialistWorkspaceState {
+    const banned = deletedProfileIds.get(workspaceId);
+    if (banned === undefined || banned.size === 0) return snapshot;
+    const profiles = snapshot.profiles.filter((item) => !banned.has(item.id));
+    if (profiles.length === snapshot.profiles.length) return snapshot;
+    if (profiles.length === 0) return snapshot;
+    const activeProfileId = profiles.some((item) => item.id === snapshot.activeProfileId)
+      ? snapshot.activeProfileId
+      : profiles[0]!.id;
+    const searchIdsByProfile = Object.fromEntries(
+      Object.entries(snapshot.searchIdsByProfile).filter(([id]) => !banned.has(id)),
+    );
+    const reviewedIrrelevant = snapshot.reviewedIrrelevant.filter(
+      (item) => !banned.has(item.profileId),
+    );
+    return SpecialistWorkspaceState.parse({
+      ...snapshot,
+      profiles,
+      activeProfileId,
+      searchIdsByProfile,
+      reviewedIrrelevant,
+    });
+  }
   /** One writer chain per cabinet so profile/inbox/cases saves do not deadlock. */
   const workspaceWriteTail = new Map<string, Promise<unknown>>();
 
@@ -295,11 +330,16 @@ export async function openSpecialistPersistence(options: {
     async persist(cabinet) {
       return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
         cache.set(cabinet.workspaceId, cabinet);
-        const snapshot = cabinet.workspace.snapshot();
         const cards = persistableCabinetCases(cabinet);
         const inbox = cabinet.catalog.inboxItems();
         await writeJson(casesFilePath(options.workspacePath, cabinet.workspaceId), cards);
         await writeJson(inboxFilePath(options.workspacePath, cabinet.workspaceId), inbox);
+        // Re-read workspace after the slow case write so a concurrent profile
+        // delete is not resurrected from a stale snapshot.
+        const snapshot = scrubDeletedProfiles(
+          cabinet.workspaceId,
+          cabinet.workspace.snapshot(),
+        );
         await saveWorkspaceFile(
           workspaceFilePath(options.workspacePath, cabinet.workspaceId),
           SpecialistWorkspace.parse(snapshot),
@@ -321,7 +361,6 @@ export async function openSpecialistPersistence(options: {
     async persistProgress(cabinet, caseIds) {
       return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
         cache.set(cabinet.workspaceId, cabinet);
-        const snapshot = cabinet.workspace.snapshot();
         const wanted = new Set(caseIds);
         const cards = persistableCabinetCases(cabinet).filter((card) => wanted.has(card.id));
         const inbox = cabinet.catalog.inboxItems();
@@ -330,6 +369,12 @@ export async function openSpecialistPersistence(options: {
         const allPersistable = persistableCabinetCases(cabinet);
         await writeJson(casesFilePath(options.workspacePath, cabinet.workspaceId), allPersistable);
         await writeJson(inboxFilePath(options.workspacePath, cabinet.workspaceId), inbox);
+        // Fresh workspace snapshot after the slow case write — and scrub tombstones —
+        // so a concurrent profile × cannot be resurrected.
+        const snapshot = scrubDeletedProfiles(
+          cabinet.workspaceId,
+          cabinet.workspace.snapshot(),
+        );
         await saveWorkspaceFile(
           workspaceFilePath(options.workspacePath, cabinet.workspaceId),
           SpecialistWorkspace.parse(snapshot),
@@ -351,8 +396,33 @@ export async function openSpecialistPersistence(options: {
     async persistWorkspaceOnly(cabinet) {
       return enqueueWorkspaceWrite(cabinet.workspaceId, async () => {
         cache.set(cabinet.workspaceId, cabinet);
-        await persistWorkspaceMeta(cabinet.workspace.snapshot(), cabinet.workspaceId);
+        await persistWorkspaceMeta(
+          scrubDeletedProfiles(cabinet.workspaceId, cabinet.workspace.snapshot()),
+          cabinet.workspaceId,
+        );
       });
+    },
+    async deleteProfile(cabinet, profileId) {
+      // Must not wait on the search/cabinet write queue — that is why × hung
+      // and the row came back after reload.
+      rememberDeletedProfile(cabinet.workspaceId, profileId);
+      cache.set(cabinet.workspaceId, cabinet);
+      const snapshot = scrubDeletedProfiles(
+        cabinet.workspaceId,
+        cabinet.workspace.snapshot(),
+      );
+      const durable = SpecialistWorkspace.parse(snapshot);
+      await saveWorkspaceFile(
+        workspaceFilePath(options.workspacePath, cabinet.workspaceId),
+        durable,
+      );
+      if (store === undefined) return;
+      await store.deleteWorkspaceProfile(
+        cabinet.workspaceId,
+        profileId,
+        durable.snapshot().activeProfileId,
+        durable.snapshot().searchIdsByProfile,
+      );
     },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);

@@ -102,11 +102,11 @@ export function ProfileList({
                           ? "Удалить профиль"
                           : "Нельзя удалить единственный профиль"
                     }
-                    disabled={!canRemove || pendingId !== undefined}
+                    disabled={!canRemove || busy}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      if (!canRemove || pendingId !== undefined) return;
+                      if (!canRemove || busy) return;
                       setError(undefined);
                       setPendingId(profile.id);
                       void remove(profile.id)
@@ -133,7 +133,7 @@ export function ProfileList({
           <button
             type="button"
             className="search-profile"
-            disabled={creating || pendingId !== undefined}
+            disabled={creating}
             onClick={() => {
               setError(undefined);
               setCreating(true);

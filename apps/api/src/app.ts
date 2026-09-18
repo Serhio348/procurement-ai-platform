@@ -150,6 +150,12 @@ export interface BuildApiOptions {
   searchIntent?: SearchIntentPort;
   /** Re-reads cases the specialist follows. Absent: monitoring stays off. */
   cardWatch?: SpecialistCardWatchPort;
+  /**
+   * Background re-reads for the watch pass. Same contract as cardWatch but on
+   * the background MCP lane so the hourly pass cannot slow card opens.
+   * Defaults to cardWatch (single-process tests and fixture mode).
+   */
+  monitorWatch?: SpecialistCardWatchPort;
   /** Decided cases one pass may re-read. */
   watchLimit?: number;
   documentIngest?: SpecialistDocumentIngestPort;
@@ -1086,7 +1092,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     monitoredCount: number;
     changedCount: number;
   }> {
-    if (cardWatch === undefined || watchLimit <= 0) {
+    const watchReader = options.monitorWatch ?? cardWatch;
+    if (watchReader === undefined || watchLimit <= 0) {
       return { monitoredCount: 0, changedCount: 0 };
     }
     const followed = (await cabinets.listWatchedCases(currentCabinet().workspaceId, watchLimit)).map(
@@ -1096,7 +1103,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     let changedCount = 0;
     for (const card of followed) {
       await discoveryController.beforeRequest(new Date());
-      const fresh = await cardWatch.read(card.sourceProcurementId);
+      const fresh = await watchReader.read(card.sourceProcurementId);
       if (fresh === undefined) continue;
       monitoredCount += 1;
       const previous = card.watchSnapshot;
@@ -1754,7 +1761,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
     catalog().dismiss(params.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
-    await persist();
+    await persistProgress(card === undefined ? [] : [card.id]);
     logger.info("Specialist inbox resolved", {
       changeId: params.id,
       action,
@@ -1837,7 +1844,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     catalog().upsertCase(next);
     catalog().dismissByProcurementId(next.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
-    await persist();
+    await persistProgress([next.id]);
     if (parsed.data.kind === "participate") {
       startParticipateIngest(next);
     }
@@ -1866,7 +1873,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     workspace().setArchived(card.sourceProcurementId, parsed.data.archived);
     const next = withTriage(card, workspace());
     catalog().upsertCase(next);
-    await persist();
+    await persistProgress([next.id]);
     logger.info("Specialist archive flag recorded", {
       sourceProcurementId: card.sourceProcurementId,
       archived: parsed.data.archived,
@@ -1888,7 +1895,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     workspace().setArchived(card.sourceProcurementId, false);
     const next = withTriage(card, workspace());
     catalog().upsertCase(next);
-    await persist();
+    await persistProgress([next.id]);
     logger.info("Specialist case restored from trash", {
       sourceProcurementId: card.sourceProcurementId,
       kind,
@@ -1971,7 +1978,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     try {
       catalog().upsertCase(withTriage(applySourceCard(card, live, clock()), workspace()));
-      await persist();
+      await persistProgress([card.id]);
     } catch (error) {
       // The page was read fine; only the console copy failed. Still show it.
       logger.error("Specialist source card store failed", error, {
@@ -1997,7 +2004,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       next = SpecialistProcurementCard.parse({ ...next, live: true });
     }
     catalog().upsertCase(next);
-    await persist();
+    await persistProgress([next.id]);
     if (next.triage === "participate") {
       startReindex(next);
     }

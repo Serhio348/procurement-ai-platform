@@ -2699,6 +2699,69 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("routes the watch pass to monitorWatch and interactive reads to cardWatch", async () => {
+    const live = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/778",
+      url: "https://goszakupki.by/auction/view/auction-778",
+      title: "Поставка трансформатора",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+      amount: { kind: "limit", amount: null, raw: "1 000,00 BYN" },
+    });
+    const interactiveRead = vi.fn().mockResolvedValue(live);
+    const monitorRead = vi.fn().mockResolvedValue(live);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      journal: createMemoryAdminJournal(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/778",
+            url: "https://goszakupki.by/auction/view/auction-778",
+            title: "Трансформатор",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read: interactiveRead },
+      monitorWatch: { read: monitorRead },
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Трансформаторы", keywords: ["трансформатор"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    // Decision hydrate is interactive: it must not hit the background lane.
+    expect(interactiveRead).toHaveBeenCalledTimes(1);
+    expect(monitorRead).not.toHaveBeenCalled();
+
+    const monitored = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(JSON.parse(monitored.body).monitoredCount).toBe(1);
+    expect(monitorRead).toHaveBeenCalledTimes(1);
+    expect(interactiveRead).toHaveBeenCalledTimes(1);
+
+    await app.inject({ method: "GET", url: `/api/procurements/${cardId ?? ""}/card` });
+    expect(interactiveRead).toHaveBeenCalledTimes(2);
+    expect(monitorRead).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
   it("reports a new document on a watched case and does not download on monitor", async () => {
     const ingest = vi.fn(async (card: SpecialistProcurementCard) => card);
     const withFiles = (files: Array<{ name: string; sourceUrl: string }>) =>

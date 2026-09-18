@@ -22,6 +22,8 @@ export async function connectProcurementMcp(options: {
   mode: "live" | "fixture";
   logger: Logger;
   blobDirectory?: string;
+  /** Distinguishes parallel children in logs (background vs interactive lane). */
+  lane?: string;
 }): Promise<ProcurementMcpProcess> {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const mcpMain = fileURLToPath(
@@ -57,7 +59,10 @@ export async function connectProcurementMcp(options: {
     await transport.close().catch(() => undefined);
     throw error;
   }
-  options.logger.info("Procurement MCP connected", { mode: options.mode });
+  options.logger.info("Procurement MCP connected", {
+    mode: options.mode,
+    ...(options.lane === undefined ? {} : { lane: options.lane }),
+  });
   return {
     caller: serializeMcpToolCaller(new SdkMcpToolCaller(client)),
     close: async () => {

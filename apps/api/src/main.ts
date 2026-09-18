@@ -40,7 +40,14 @@ async function main(): Promise<void> {
   });
   const mcp =
     mode === "live"
-      ? await connectProcurementMcp({ mode: "live", logger, blobDirectory })
+      ? await connectProcurementMcp({ mode: "live", logger, blobDirectory, lane: "background" })
+      : undefined;
+  // Interactive reads (card open, decision hydrate) get their own child process:
+  // one stdio pipe is strictly serial, so a card click would otherwise queue
+  // behind every background search/discovery/ingest call.
+  const mcpInteractive =
+    mode === "live"
+      ? await connectProcurementMcp({ mode: "live", logger, blobDirectory, lane: "interactive" })
       : undefined;
   const searchHits =
     mcp === undefined
@@ -51,6 +58,14 @@ async function main(): Promise<void> {
           logger,
         });
   const cardWatch =
+    mcpInteractive === undefined
+      ? undefined
+      : createProcurementCardWatch({
+          caller: mcpInteractive.caller,
+          sourceId: SourceId.parse("goszakupki_by"),
+          logger,
+        });
+  const monitorWatch =
     mcp === undefined
       ? undefined
       : createProcurementCardWatch({
@@ -124,6 +139,7 @@ async function main(): Promise<void> {
     ...(searchReview === undefined ? {} : { searchReview }),
     ...(searchIntent === undefined ? {} : { searchIntent }),
     ...(cardWatch === undefined ? {} : { cardWatch }),
+    ...(monitorWatch === undefined ? {} : { monitorWatch }),
     ...(watchLimit === undefined ? {} : { watchLimit }),
     ...(mcp === undefined
       ? {}
@@ -193,6 +209,7 @@ async function main(): Promise<void> {
     if (redisRepeat !== undefined) await redisRepeat.close();
     await app.close();
     if (mcp !== undefined) await mcp.close();
+    if (mcpInteractive !== undefined) await mcpInteractive.close();
     await persistence.close();
   };
   process.once("SIGINT", () => {

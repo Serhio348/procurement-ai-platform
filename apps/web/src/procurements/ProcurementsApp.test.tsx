@@ -508,6 +508,89 @@ describe("ProcurementsApp", () => {
     expect(screen.queryByRole("button", { name: /Поставка КТПБ/ })).toBeNull();
   });
 
+  it("opens a decided card aimed at by the inbox even though the queue hides it", () => {
+    // Opening a review hit from the inbox must show that card, not the first
+    // queue row — even when an earlier monitor/participate/reject decision
+    // keeps it out of the search queue.
+    const decided = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000431",
+      title: "Поставка КТП 0,4 кВ",
+      status: "accepting_bids",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/ktp-review",
+      sourceProcurementId: "auction/ktp-review",
+      foundAs: "match",
+      triage: "monitor",
+    });
+    const other = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000432",
+      title: "Прочая закупка",
+      status: "accepting_bids",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/other",
+      sourceProcurementId: "auction/other",
+      foundAs: "match",
+    });
+    render(
+      <MemoryRouter initialEntries={[`/procurements/${decided.id}`]}>
+        <Routes>
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp items={[other, decided]} decide={async () => []} />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { level: 2, name: "Поставка КТП 0,4 кВ" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Прочая закупка" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Отслеживать" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Участвовать" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Не нужно" })).toBeTruthy();
+  });
+
+  it("fetches the inbox-opened card by id when nothing in state carries it", async () => {
+    const review = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000433",
+      title: "На проверку: БКТПВ",
+      status: "accepting_bids",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/bktpv",
+      sourceProcurementId: "auction/bktpv",
+      foundAs: "review",
+    });
+    const fetchCase = vi.fn(async () => review);
+    const onCardLoaded = vi.fn();
+    render(
+      <MemoryRouter initialEntries={[`/procurements/${review.id}`]}>
+        <Routes>
+          <Route
+            path="/procurements/:id"
+            element={
+              <ProcurementsApp
+                items={[]}
+                decide={async () => []}
+                fetchCase={fetchCase}
+                onCardLoaded={onCardLoaded}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "На проверку: БКТПВ" })).toBeTruthy();
+    });
+    expect(fetchCase).toHaveBeenCalledWith(review.id);
+    expect(onCardLoaded).toHaveBeenCalledWith(review);
+    expect(screen.getByRole("button", { name: "Отслеживать" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Участвовать" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Не нужно" })).toBeTruthy();
+  });
+
   it("lets the specialist pick which profile to search", async () => {
     const user = userEvent.setup();
     const substations = SpecialistWorkingProfile.parse({

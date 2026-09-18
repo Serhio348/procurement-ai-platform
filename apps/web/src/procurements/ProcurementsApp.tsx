@@ -185,6 +185,8 @@ export function ProcurementsApp({
   decide,
   ingestProgress,
   searchRun,
+  fetchCase,
+  onCardLoaded,
 }: {
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
@@ -194,6 +196,8 @@ export function ProcurementsApp({
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   searchRun?: SpecialistSearchRun;
+  fetchCase?: (id: string) => Promise<SpecialistProcurementCard>;
+  onCardLoaded?: (card: SpecialistProcurementCard) => void;
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -269,7 +273,39 @@ export function ProcurementsApp({
   const items = uniqueBySource(
     catalogItems.filter((item) => belongsToChosenProfile(item, chosenProfileId)),
   );
-  const selected = items.find((item) => item.id === params["id"]) ?? items[0];
+  // An inbox open can aim at a card the search queue hides on purpose — a
+  // review candidate that already carries a triage mark, or a duplicate the
+  // queue deduped away. The detail pane still opens that exact card.
+  const requestedId = params["id"];
+  const inQueue =
+    requestedId === undefined ? undefined : items.find((item) => item.id === requestedId);
+  const inCatalog =
+    requestedId === undefined ? undefined : catalog.find((item) => item.id === requestedId);
+  const [fetched, setFetched] = useState<SpecialistProcurementCard | undefined>();
+  const fetchCaseRef = useRef(fetchCase);
+  fetchCaseRef.current = fetchCase;
+  const onCardLoadedRef = useRef(onCardLoaded);
+  onCardLoadedRef.current = onCardLoaded;
+  useEffect(() => {
+    setFetched(undefined);
+    if (requestedId === undefined || inQueue !== undefined || inCatalog !== undefined) {
+      return undefined;
+    }
+    const load = fetchCaseRef.current;
+    if (load === undefined) return undefined;
+    let cancelled = false;
+    void load(requestedId)
+      .then((card) => {
+        if (cancelled) return;
+        setFetched(card);
+        onCardLoadedRef.current?.(card);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedId, inQueue, inCatalog]);
+  const selected = inQueue ?? inCatalog ?? fetched ?? items[0];
   const ingestForSelected =
     selected !== undefined &&
     progress !== undefined &&

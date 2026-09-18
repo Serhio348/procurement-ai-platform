@@ -493,7 +493,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           path="/procurements/:id"
           element={
             <ProcurementsApp
-              items={searchPaneItems}
+              items={procurements}
               profiles={profiles}
               {...(activeProfileId.length === 0 ? {} : { activeProfileId })}
               {...(search === undefined ? {} : { search })}
@@ -507,6 +507,8 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(decide === undefined ? {} : { decide })}
               {...(searchRun === undefined ? {} : { searchRun })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
+              {...(props.loadCard === undefined ? {} : { fetchCase: props.loadCard })}
+              onCardLoaded={rememberCard}
             />
           }
         />

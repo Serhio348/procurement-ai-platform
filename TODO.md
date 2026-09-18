@@ -282,6 +282,14 @@
 - Регрессия: `workspaceDecisionKey` даёт одинаковый ключ для Date и ISO-строки (specialist-store.test.ts).
 - Остаточное: снимок workspace всё ещё несёт полный журнал решений — семантически хватает последнего решения на закупку (проработать в R12).
 
+### [x] R46 · P1 · «Открыть карточку» из входящих не открывал review-кейс
+
+**Воспроизведено на VPS.** У review-элемента inbox нажатие «Открыть карточку» снимало строку, но деталь `/procurements/:id` показывала `items[0]` вместо нужной карточки — пользователь её «не находил». Причина: `withTriage` переносит на карточку прошлое решение по `sourceProcurementId`, и `isSearchQueueCard`/`belongsToChosenProfile` отфильтровывают triaged-карточки (monitor/participate/reject) из очереди; `uniqueBySource` дополнительно мог выкинуть её как дубль по `sourceProcurementId`. `selected = items.find(id) ?? items[0]` падал на первую строку.
+
+- Где: [ProcurementsApp.tsx](apps/web/src/procurements/ProcurementsApp.tsx), [SpecialistApp.tsx](apps/web/src/SpecialistApp.tsx) маршрут `/procurements/:id`, [watch.ts:16–18](packages/domain/src/specialist/watch.ts#L16).
+- Исправлено (этап 80): detail-роут получает полный каталог `procurements`, `selected` ищет по `params.id` сначала в очереди, потом во всём каталоге, затем грузит карточку через `fetchCase` (`GET /api/procurements/:id`) и кладёт её в состояние через `onCardLoaded`. Открытая из inbox карточка всегда рендерится с кнопками «Отслеживать»/«Участвовать»/«Не нужно».
+- Регрессии: `opens a decided card aimed at by the inbox even though the queue hides it`, `fetches the inbox-opened card by id when nothing in state carries it` (ProcurementsApp.test.tsx).
+
 ## C. Продукт и UI
 
 ### [ ] R27 · P1 · Длинные списки обрезаются без доступной пагинации

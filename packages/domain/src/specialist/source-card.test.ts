@@ -73,6 +73,58 @@ describe("applySourceCard", () => {
     expect(next.live).toBe(true);
   });
 
+  it("copies «Вид процедуры закупки» onto kindLabel and replaces a coarse «иная»", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Строка из поиска",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/limited/view/3669746",
+      sourceProcurementId: "limited/3669746",
+      kindLabel: "иная процедура",
+    });
+    const next = applySourceCard(
+      card,
+      source({
+        sourceProcurementId: "limited/3669746",
+        url: "https://goszakupki.by/limited/view/3669746",
+        kind: "open_tender",
+        rawFields: {
+          "Вид процедуры закупки": "Конкурс с ограниченным участием",
+          "Дата размещения приглашения": "03.09.2026",
+        },
+      }),
+      now,
+    );
+    expect(next.kindLabel).toBe("Конкурс с ограниченным участием");
+    expect(procedureDetailFields(next.sourceCard!).find((row) => row.label === "Вид процедуры закупки")?.value).toBe(
+      "Конкурс с ограниченным участием",
+    );
+  });
+
+  it("falls back to the URL family when the page field is missing", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Строка из поиска",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/marketing/view/1",
+      sourceProcurementId: "marketing/1",
+      kindLabel: "иная процедура",
+    });
+    const next = applySourceCard(
+      card,
+      source({
+        sourceProcurementId: "marketing/1",
+        url: "https://goszakupki.by/marketing/view/1",
+        kind: "other",
+        rawFields: {},
+      }),
+      now,
+    );
+    expect(next.kindLabel).toBe("заявка о ценах (тарифах)");
+  });
+
   it("does not store a blank source status as the specialist label", () => {
     const card = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000401",

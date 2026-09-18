@@ -517,6 +517,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           element={
             <MyProcurementsApp
               procurements={procurements}
+              profiles={profiles}
               {...(archive === undefined ? {} : { onArchive: archive })}
               {...(decide === undefined
                 ? {}
@@ -532,6 +533,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             <MyProcurementsApp
               section="trash"
               procurements={procurements}
+              profiles={profiles}
               {...(restore === undefined ? {} : { onRestore: restore })}
               {...(purge === undefined ? {} : { onPurge: purge })}
               {...(emptyTrash === undefined ? {} : { onEmptyTrash: emptyTrash })}

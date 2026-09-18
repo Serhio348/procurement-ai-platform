@@ -1,10 +1,12 @@
 import { ProcedureCard, SearchHit } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  cardProcedureKindLabel,
   compileSpecialistCase,
   isClosedProcedureStatus,
   isPersistableCabinetCase,
   isPrunableUndecidedCase,
+  procedureKindLabel,
   uuidFromHex,
 } from "./case.js";
 
@@ -295,5 +297,35 @@ describe("uuidFromHex", () => {
     const first = uuidFromHex("goszakupki_by:marketing/3541093");
     const second = uuidFromHex("goszakupki_by:request/3552348");
     expect(first).not.toBe(second);
+  });
+});
+
+describe("cardProcedureKindLabel", () => {
+  it("prefers the platform field, then a stored label, then a path-aware fallback", () => {
+    expect(procedureKindLabel("electronic_auction")).toBe("электронный аукцион");
+    expect(
+      cardProcedureKindLabel({
+        kindLabel: "иная процедура",
+        sourceProcurementId: "limited/1",
+        sourceCard: {
+          kind: "other",
+          rawFields: { "Вид процедуры закупки": "Конкурс с ограниченным участием" },
+        },
+      }),
+    ).toBe("Конкурс с ограниченным участием");
+    expect(
+      cardProcedureKindLabel({
+        sourceProcurementId: "limited/3664162",
+        sourceCard: { kind: "open_tender" },
+      }),
+    ).toBe("конкурс с ограниченным участием");
+    expect(
+      cardProcedureKindLabel({
+        kindLabel: "иная процедура",
+        sourceProcurementId: "etrade/1",
+        sourceCard: { kind: "other" },
+      }),
+    ).toBe("открытый конкурс");
+    expect(cardProcedureKindLabel({})).toBeUndefined();
   });
 });

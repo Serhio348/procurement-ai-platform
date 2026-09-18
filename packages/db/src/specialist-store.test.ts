@@ -7,6 +7,7 @@ import {
   toIsoDateTime,
   uniqueBySource,
   dedupeReviewVerdicts,
+  workspaceDecisionKey,
 } from "./specialist-store.js";
 import { SpecialistProcurementCard } from "@procurement/contracts";
 
@@ -22,6 +23,22 @@ describe("toIsoDateTime", () => {
     expect(toIsoDateTime("2026-09-09 10:00:00+00")).toBe("2026-09-09T10:00:00.000Z");
     expect(toIsoDateTime("2026-09-09 10:00:00.651+00")).toBe("2026-09-09T10:00:00.651Z");
     expect(toIsoDateTime("2026-09-09T10:00:00.000Z")).toBe("2026-09-09T10:00:00.000Z");
+  });
+});
+
+describe("workspaceDecisionKey", () => {
+  it("produces the same key for a timestamptz Date and an ISO string so dedup matches", () => {
+    const fromRow = workspaceDecisionKey(
+      "auction/1",
+      "reject",
+      new Date("2026-09-18T11:25:41.807Z"),
+    );
+    const fromSnapshot = workspaceDecisionKey(
+      "auction/1",
+      "reject",
+      "2026-09-18T11:25:41.807Z",
+    );
+    expect(fromRow).toBe(fromSnapshot);
   });
 });
 

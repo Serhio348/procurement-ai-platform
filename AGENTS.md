@@ -85,6 +85,7 @@
 - [`docs/architecture/STAGE-76.md`](docs/architecture/STAGE-76.md) — удаление профиля: крестик и быстрый persist
 - [`docs/architecture/STAGE-77.md`](docs/architecture/STAGE-77.md) — интерактивная линия MCP: открытие карточки не ждёт фоновую очередь (R43, часть 1)
 - [`docs/architecture/STAGE-78.md`](docs/architecture/STAGE-78.md) — карточка, прочитанная при проверке, открывается без повторного живого чтения
+- [`docs/architecture/STAGE-79.md`](docs/architecture/STAGE-79.md) — дедуп журнала решений: квадратичный рост `workspace_decisions` остановлен (R45)
 
 ---
 

@@ -813,6 +813,20 @@ export function toIsoDateTime(value: string | Date): string {
   return parsed.toISOString();
 }
 
+/**
+ * Dedup key for workspace_decisions. Both sides go through toIsoDateTime so a
+ * timestamptz Date from the table and an ISO string from the snapshot produce
+ * the same key — comparing them raw made every row look new and each save
+ * re-inserted the whole history.
+ */
+export function workspaceDecisionKey(
+  sourceProcurementId: string,
+  kind: string,
+  madeAt: string | Date,
+): string {
+  return `${sourceProcurementId}:${kind}:${toIsoDateTime(madeAt)}`;
+}
+
 type WorkspaceCaseRow = Pick<
   typeof workspaceProcurements.$inferSelect,
   "id" | "procurementId" | "triage" | "foundAs" | "archived" | "lastSeenAt"
@@ -1085,20 +1099,32 @@ async function writeWorkspaceState(
     .from(workspaceDecisions)
     .where(eq(workspaceDecisions.workspaceId, workspaceId));
   const seen = new Set(
-    existingDecisions.map(
-      (row) => `${row.sourceProcurementId}:${row.kind}:${row.madeAt}`,
+    existingDecisions.map((row) =>
+      workspaceDecisionKey(row.sourceProcurementId, row.kind, row.madeAt),
     ),
   );
-  for (const decision of state.decisions) {
-    const key = `${decision.sourceProcurementId}:${decision.kind}:${decision.madeAt}`;
-    if (seen.has(key)) continue;
+  const fresh = state.decisions.filter((decision) => {
+    const key = workspaceDecisionKey(
+      decision.sourceProcurementId,
+      decision.kind,
+      decision.madeAt,
+    );
+    if (seen.has(key)) return false;
     seen.add(key);
-    await tx.insert(workspaceDecisions).values({
-      workspaceId,
-      sourceProcurementId: decision.sourceProcurementId,
-      kind: decision.kind,
-      madeAt: decision.madeAt,
-    });
+    return true;
+  });
+  if (fresh.length > 0) {
+    await tx
+      .insert(workspaceDecisions)
+      .values(
+        fresh.map((decision) => ({
+          workspaceId,
+          sourceProcurementId: decision.sourceProcurementId,
+          kind: decision.kind,
+          madeAt: decision.madeAt,
+        })),
+      )
+      .onConflictDoNothing();
   }
 
   const archived = new Set(state.archivedSourceIds);

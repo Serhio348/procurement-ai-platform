@@ -498,6 +498,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       done();
     });
   });
+  // Slow-request log: separates server-side stalls from network/payload
+  // time when a click "feels slow" but MCP calls show nothing.
+  app.addHook("onResponse", (request, reply, done) => {
+    const durationMs = Math.round(reply.elapsedTime);
+    if (durationMs >= 500) {
+      logger.info("Specialist API slow request", {
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        durationMs,
+      });
+    }
+    done();
+  });
 
   /**
    * `publishedFrom` narrows the site query for background discovery: the
@@ -1779,7 +1793,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return SpecialistInboxResolveResponse.parse({
       items: catalog().urgentInbox(),
       documents: action === "documents" ? inboxDocumentLinks(card) : [],
-      ...(card === undefined ? {} : { card }),
+      // The console only navigates by card.id; the detail page refetches the
+      // full case itself. Shipping the stored platform card here would double
+      // the payload of every inbox resolve.
+      ...(card === undefined ? {} : { card: slimListedCard(card) }),
     });
   });
 

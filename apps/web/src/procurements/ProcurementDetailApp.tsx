@@ -142,11 +142,11 @@ export function ProcurementDetailApp({
     };
   }, [id, stored?.triage, ingestProgress]);
 
-  async function loadPlatformCard(procurementId: string): Promise<void> {
+  async function loadPlatformCard(procurementId: string, fresh = false): Promise<void> {
     setLoading(true);
     setError(undefined);
     try {
-      const next = await fetchProcurementCard(procurementId);
+      const next = await fetchProcurementCard(procurementId, fetch, fresh);
       setLive(next);
       if (stored !== undefined && onCardLoaded !== undefined) {
         onCardLoaded({ ...stored, sourceCard: next });
@@ -178,7 +178,7 @@ export function ProcurementDetailApp({
       }
       return;
     }
-    await loadPlatformCard(id);
+    await loadPlatformCard(id, true);
   }
 
   async function runDecide(kind: SpecialistTriageKind): Promise<void> {

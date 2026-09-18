@@ -307,8 +307,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   async function hydrateSourceCard(
     card: SpecialistProcurementCardValue,
+    force = false,
   ): Promise<SpecialistProcurementCardValue> {
     if (cardWatch === undefined) return card;
+    // The review already stored the platform card it scored: re-reading it
+    // for a decision costs a live fetch the specialist did not ask for.
+    // Explicit refresh (reindex) forces the read.
+    if (!force && card.sourceCard !== undefined) return card;
     try {
       const live = await cardWatch.read(card.sourceProcurementId);
       if (live === undefined) return card;
@@ -869,7 +874,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         }
         continue;
       }
-      const reviewedCard: SpecialistProcurementCardValue =
+      const builtCard: SpecialistProcurementCardValue =
         outcome === undefined
           ? { ...item.card, status: procedureStatus, statusLabel: statusLabel(procedureStatus) }
           : {
@@ -893,6 +898,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
                 },
               ],
             };
+      // The review already paid for procurement.get: keep that card on the
+      // case so opening it later does not fetch the platform page again.
+      const reviewedCard =
+        outcome?.card === undefined ? builtCard : applySourceCard(builtCard, outcome.card, now);
       const remembered = await rememberFound(reviewedCard, profile.id, now);
       if (outcome?.verdict === "relevant") {
         matchCount += 1;
@@ -1961,13 +1970,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   });
 
   app.get("/api/procurements/:id/card", async (request, reply) => {
-    if (cardWatch === undefined) {
-      return reply.code(503).send({ error: "card_read_unavailable" });
-    }
     const params = request.params as { id: string };
     const card = await resolveCase(params.id);
     if (card === undefined) {
       return reply.code(404).send({ error: "not_found" });
+    }
+    // The review already fetched and stored this platform card: opening must
+    // not pay for a second live read. Watch passes own freshness; ?fresh=1 is
+    // the explicit "Обновить" read, and a card without a stored page falls
+    // back to a live fetch.
+    const freshRequested = (request.query as { fresh?: string }).fresh !== undefined;
+    if (!freshRequested && card.sourceCard !== undefined) {
+      return ProcedureCard.parse(card.sourceCard);
+    }
+    if (cardWatch === undefined) {
+      return reply.code(503).send({ error: "card_read_unavailable" });
     }
     const live = await cardWatch.read(card.sourceProcurementId);
     if (live === undefined) {
@@ -1999,7 +2016,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     let next = withTriage(card, workspace());
-    next = await hydrateSourceCard(next);
+    next = await hydrateSourceCard(next, true);
     if (next.live !== true) {
       next = SpecialistProcurementCard.parse({ ...next, live: true });
     }

@@ -158,7 +158,7 @@ async function fetchCard(
 
 function attachCardStatus(outcome: ReviewOutcome, card: ProcedureCard | undefined): ReviewOutcome {
   if (card === undefined) return outcome;
-  return { ...outcome, status: card.status };
+  return { ...outcome, status: card.status, card };
 }
 
 async function classify(

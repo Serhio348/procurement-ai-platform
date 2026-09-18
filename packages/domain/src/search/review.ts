@@ -45,6 +45,11 @@ export interface ReviewOutcome {
   score?: number;
   /** Procedure status from procurement.get when the card was fetched. */
   status?: ProcedureStatus;
+  /**
+   * The platform card fetched for this review. Callers may store it on the
+   * case instead of paying a second procurement.get on open.
+   */
+  card?: ProcedureCard;
 }
 
 /** Text from the platform card that a keyword may legitimately appear in. */

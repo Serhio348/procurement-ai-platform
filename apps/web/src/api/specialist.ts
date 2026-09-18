@@ -212,8 +212,12 @@ export async function setProfileWatch(
 export async function fetchProcurementCard(
   id: string,
   fetcher: typeof fetch = fetch,
+  fresh = false,
 ): Promise<ProcedureCard> {
-  const response = await fetcher(`/api/procurements/${id}/card`, withCredentials());
+  const response = await fetcher(
+    `/api/procurements/${id}/card${fresh ? "?fresh=1" : ""}`,
+    withCredentials(),
+  );
   if (!response.ok) {
     throw new Error("Не удалось открыть карточку закупки");
   }

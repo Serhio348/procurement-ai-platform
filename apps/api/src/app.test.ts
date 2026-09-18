@@ -1076,7 +1076,8 @@ describe("specialist API", () => {
         relevanceScore?: number;
         relevanceReason?: string;
       }>;
-      const card = items.find((item) => item.title === "Закупка НКУ");
+      // The stored platform card replaces the listing title with the live one.
+      const card = items.find((item) => item.title === "Поставка НКУ для насосов");
       expect(card?.relevanceScore).toBe(expected);
       expect(card?.relevanceScore).toBeGreaterThan(0);
     });
@@ -2755,9 +2756,90 @@ describe("specialist API", () => {
     expect(monitorRead).toHaveBeenCalledTimes(1);
     expect(interactiveRead).toHaveBeenCalledTimes(1);
 
-    await app.inject({ method: "GET", url: `/api/procurements/${cardId ?? ""}/card` });
+    // A stored platform card opens without another live read; ?fresh=1 is
+    // the explicit refresh and goes to the interactive lane.
+    const stored = await app.inject({ method: "GET", url: `/api/procurements/${cardId ?? ""}/card` });
+    expect(stored.statusCode).toBe(200);
+    expect(interactiveRead).toHaveBeenCalledTimes(1);
+
+    await app.inject({ method: "GET", url: `/api/procurements/${cardId ?? ""}/card?fresh=1` });
     expect(interactiveRead).toHaveBeenCalledTimes(2);
     expect(monitorRead).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
+  it("serves the platform card fetched during review on open and refetches only on fresh", async () => {
+    const reviewed = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/ktp-stored",
+      url: "https://goszakupki.by/auction/view/ktp-stored",
+      title: "Поставка КТП — карточка, прочитанная при проверке",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+    });
+    const refetched = ProcedureCard.parse({
+      ...reviewed,
+      title: "Поставка КТП — свежее чтение",
+      fetchedAt: "2026-09-10T01:00:00.000Z",
+    });
+    const read = vi.fn().mockResolvedValue(refetched);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/ktp-stored",
+            url: "https://goszakupki.by/auction/view/ktp-stored",
+            title: "Поставка КТП",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      searchReview: {
+        review: async (hits) =>
+          hits.map(
+            (): ReviewOutcome => ({
+              verdict: "relevant",
+              decidedBy: "card",
+              reason: "Профильный предмет в лоте.",
+              matchedTerms: ["КТП"],
+              confidence: 1,
+              score: 90,
+              card: reviewed,
+            }),
+          ),
+      },
+      cardWatch: { read },
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "КТП", keywords: ["КТП"] },
+    });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+
+    let cardId: string | undefined;
+    await vi.waitFor(async () => {
+      const queue = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+      const items = JSON.parse(queue.body).items as Array<{ id: string }>;
+      expect(items).toHaveLength(1);
+      cardId = items[0]?.id;
+    });
+
+    const opened = await app.inject({ method: "GET", url: `/api/procurements/${cardId ?? ""}/card` });
+    expect(opened.statusCode).toBe(200);
+    expect(JSON.parse(opened.body).title).toBe("Поставка КТП — карточка, прочитанная при проверке");
+    expect(read).not.toHaveBeenCalled();
+
+    const fresh = await app.inject({
+      method: "GET",
+      url: `/api/procurements/${cardId ?? ""}/card?fresh=1`,
+    });
+    expect(JSON.parse(fresh.body).title).toBe("Поставка КТП — свежее чтение");
+    expect(read).toHaveBeenCalledTimes(1);
 
     await app.close();
   });

@@ -84,6 +84,7 @@
 - [`docs/architecture/STAGE-75.md`](docs/architecture/STAGE-75.md) — запись кабинета: один writer, upsert вердиктов, точечный persist поиска
 - [`docs/architecture/STAGE-76.md`](docs/architecture/STAGE-76.md) — удаление профиля: крестик и быстрый persist
 - [`docs/architecture/STAGE-77.md`](docs/architecture/STAGE-77.md) — интерактивная линия MCP: открытие карточки не ждёт фоновую очередь (R43, часть 1)
+- [`docs/architecture/STAGE-78.md`](docs/architecture/STAGE-78.md) — карточка, прочитанная при проверке, открывается без повторного живого чтения
 
 ---
 

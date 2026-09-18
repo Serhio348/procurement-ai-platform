@@ -88,6 +88,7 @@
 - [`docs/architecture/STAGE-79.md`](docs/architecture/STAGE-79.md) — дедуп журнала решений: квадратичный рост `workspace_decisions` остановлен (R45)
 - [`docs/architecture/STAGE-80.md`](docs/architecture/STAGE-80.md) — «Открыть карточку» из inbox всегда открывает нужную закупку (R46)
 - [`docs/architecture/STAGE-81.md`](docs/architecture/STAGE-81.md) — порт дизайна «Мои закупки» и видов процедур из ветки Cursor
+- [`docs/architecture/STAGE-82.md`](docs/architecture/STAGE-82.md) — слежение за сроком подачи: «истекает завтра» и «истёк» во входящих и тостах (R47)
 
 ---
 

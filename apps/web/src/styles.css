@@ -1523,6 +1523,68 @@ h3 {
   }
 }
 
+.notice-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, calc(100vw - 32px));
+}
+
+.notice-toast {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  background: #1e2430;
+  color: #eef2f6;
+  border: 1px solid #c9a25a;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(30 36 48 / 35%);
+  animation: confirm-toast-in 0.18s ease-out;
+}
+
+.notice-toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.notice-toast p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.notice-toast-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.notice-toast-message {
+  font-size: 13px;
+}
+
+.notice-toast-close {
+  flex: none;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.notice-toast-close:hover {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .confirm-toast {
     animation: none;

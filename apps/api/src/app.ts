@@ -34,6 +34,9 @@ import {
   attachProfileToCard,
   caseMatchesListTab,
   slimListedCard,
+  bidsDeadlinePassed,
+  deadlineCrossedSince,
+  deadlineWithin,
   diffCardSnapshots,
   discoveryPublishedFrom,
   inboxDocumentLinks,
@@ -119,6 +122,9 @@ export const DEFAULT_DISCOVERY_LIMIT = 200;
  * crawl of the whole source.
  */
 export const DEFAULT_WATCH_LIMIT = 40;
+
+/** «За день» до дедлайна — окно предупреждения «истекает завтра». */
+const DEADLINE_SOON_MS = 36 * 60 * 60 * 1000;
 
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
@@ -1139,16 +1145,44 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         });
         continue;
       }
-      if (previous === undefined) {
-        catalog().upsertCase(next);
-        continue;
-      }
       const snapshot = next.watchSnapshot;
       if (snapshot === undefined) {
         catalog().upsertCase(next);
         continue;
       }
-      const changes = diffCardSnapshots(previous, snapshot);
+      const nowDate = new Date(now);
+      const changes = previous === undefined ? [] : diffCardSnapshots(previous, snapshot);
+      const deadlineChanged = changes.some((item) => item.kind === "deadline_changed");
+      // Time passing is a change too: the platform can keep «приём заявок» on
+      // the page for weeks after acceptance closed, so field diffs alone never
+      // announce that the window is gone.
+      if (
+        !deadlineChanged &&
+        (previous === undefined
+          ? bidsDeadlinePassed(next, nowDate)
+          : deadlineCrossedSince(next, previous.capturedAt, nowDate))
+      ) {
+        changes.push({
+          kind: "deadline_changed",
+          field: "bidsDeadline",
+          previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
+          current: "срок подачи истёк",
+        });
+      }
+      // A day-ahead warning only for cases the specialist entered: an
+      // expiring deadline on a monitor-only card would be noise.
+      if (
+        !deadlineChanged &&
+        next.triage === "participate" &&
+        deadlineWithin(next, nowDate, DEADLINE_SOON_MS)
+      ) {
+        changes.push({
+          kind: "deadline_changed",
+          field: "bidsDeadline",
+          previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
+          current: "срок подачи истекает завтра",
+        });
+      }
       if (changes.length === 0) {
         catalog().upsertCase(next);
         continue;

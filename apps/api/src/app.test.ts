@@ -2909,6 +2909,167 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("reports an expired acceptance deadline once even while the platform still accepts bids", async () => {
+    let now = "2026-09-18T08:00:00.000Z";
+    const card = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/782",
+      url: "https://goszakupki.by/auction/view/auction-782",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      // The platform keeps «приём заявок» on the page after the window closed.
+      status: "accepting_bids",
+      bidsDeadline: { precision: "date_time", at: "2026-09-18T12:00:00.000Z" },
+    });
+    const read = vi.fn().mockResolvedValue(card);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      clock: () => now,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/782",
+            url: "https://goszakupki.by/auction/view/auction-782",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    // First pass at 08:00 stores the snapshot; the deadline is still ahead.
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const before = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(before.body).items as Array<{ summary: string }>).some((item) =>
+        item.summary.includes("Срок подачи"),
+      ),
+    ).toBe(false);
+
+    now = "2026-09-18T13:00:00.000Z";
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const expired = (
+      JSON.parse(inbox.body).items as Array<{ title: string; summary: string }>
+    ).filter((item) => item.summary.includes("Срок подачи"));
+    expect(expired).toHaveLength(1);
+    expect(expired[0]?.summary).toContain("истёк");
+
+    now = "2026-09-18T14:00:00.000Z";
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const again = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(again.body).items as Array<{ summary: string }>).filter((item) =>
+        item.summary.includes("Срок подачи"),
+      ),
+    ).toHaveLength(1);
+
+    await app.close();
+  });
+
+  it("warns a participating case a day ahead but stays quiet on a monitor-only one", async () => {
+    const now = "2026-09-18T08:00:00.000Z";
+    const card = (id: string) =>
+      ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: `auction/${id}`,
+        url: `https://goszakupki.by/auction/view/auction-${id}`,
+        title: `Поставка кабеля ${id}`,
+        fetchedAt: "2026-09-10T00:00:00.000Z",
+        status: "accepting_bids",
+        bidsDeadline: { precision: "date_time", at: "2026-09-19T12:00:00.000Z" },
+      });
+    const read = vi.fn(async (id: string) => card(id.replace("auction/", "")));
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      clock: () => now,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/783",
+            url: "https://goszakupki.by/auction/view/auction-783",
+            title: "Кабель участвуем",
+            status: "accepting_bids",
+          }),
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/784",
+            url: "https://goszakupki.by/auction/view/auction-784",
+            title: "Кабель наблюдаем",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const ids = (JSON.parse(found.body).items as Array<{ id: string; title: string }>).map(
+      (item) => item,
+    );
+    const participating = ids.find((item) => item.title === "Кабель участвуем");
+    const watching = ids.find((item) => item.title === "Кабель наблюдаем");
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${participating?.id ?? ""}/decision`,
+      payload: { kind: "participate" },
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${watching?.id ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rows = JSON.parse(inbox.body).items as Array<{
+      title: string;
+      summary: string;
+    }>;
+    const soon = rows.filter((item) => item.summary.includes("Срок подачи"));
+    expect(soon).toHaveLength(1);
+    expect(soon[0]?.summary).toContain("истекает завтра");
+    expect(soon[0]?.title).toBe("Поставка кабеля 783");
+
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const again = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(again.body).items as Array<{ summary: string }>).filter((item) =>
+        item.summary.includes("Срок подачи"),
+      ),
+    ).toHaveLength(1);
+
+    await app.close();
+  });
+
   it("downloads only after a new file appears on a participated case", async () => {
     const ingest = vi.fn(async (card: SpecialistProcurementCard) => card);
     const withFiles = (files: Array<{ name: string; sourceUrl: string }>) =>

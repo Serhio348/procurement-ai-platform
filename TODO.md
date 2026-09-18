@@ -290,6 +290,14 @@
 - Исправлено (этап 80): detail-роут получает полный каталог `procurements`, `selected` ищет по `params.id` сначала в очереди, потом во всём каталоге, затем грузит карточку через `fetchCase` (`GET /api/procurements/:id`) и кладёт её в состояние через `onCardLoaded`. Открытая из inbox карточка всегда рендерится с кнопками «Отслеживать»/«Участвовать»/«Не нужно».
 - Регрессии: `opens a decided card aimed at by the inbox even though the queue hides it`, `fetches the inbox-opened card by id when nothing in state carries it` (ProcurementsApp.test.tsx).
 
+### [x] R47 · P1 · Истёкший срок подачи не давал события во входящих
+
+**Воспроизведено на VPS.** Фоновое слежение (`monitorDecidedCases`) реагировало только на diff **полей** карточки: `diffCardSnapshots` сравнивает статус, цену, текст дедлайна и документы. «Срок истёк» — прохождение времени: `bidsDeadline` на площадке не меняется, а статус «приём заявок» держится неделями после закрытия окна → diff пустой, во входящих тишина при реально истёкших дедлайнах.
+
+- Где: [deadline.ts](packages/domain/src/specialist/deadline.ts) (`deadlineCrossedSince`, `deadlineWithin`), [app.ts](apps/api/src/app.ts) `monitorDecidedCases`, [SpecialistApp.tsx](apps/web/src/SpecialistApp.tsx) `applyInboxItems`, [NoticeToast.tsx](apps/web/src/shell/NoticeToast.tsx).
+- Исправлено (этап 82): дедлайн оценивается по времени, не по diff'у. «Срок подачи истёк» — при переходе «вперёд → позади» для monitor и participate; «срок подачи истекает завтра» — только participate, когда до закрытия <36 ч (date-only считается по календарю `Europe/Minsk`). События идут через `inboxItemFromWatchChange` — стабильный ID по фазе, повторные проходы не плодят строки. В консоли новые `deadline_changed` из 30-секундного poll поднимают пассивный тост (10 с, без backdrop); первая загрузка inbox молчит.
+- Регрессии: deadline.test.ts (переход/окно/date-only/нет дедлайна); app.test.ts — «истёк» при «приём заявок», один раз, без дубля; «истекает завтра» только у participate; SpecialistApp.notice.test.tsx — молчание на старте, тост из poll, без повтора, обе фазы.
+
 ## C. Продукт и UI
 
 ### [ ] R27 · P1 · Длинные списки обрезаются без доступной пагинации

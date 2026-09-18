@@ -28,6 +28,7 @@ import { ProcurementDetailApp } from "./procurements/ProcurementDetailApp.js";
 import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
 import { ProfileList } from "./profile/ProfileList.js";
+import { NoticeStack, type InboxNotice } from "./shell/NoticeToast.js";
 
 export interface SpecialistAppProps {
   inbox: readonly SpecialistInboxEntry[];
@@ -68,6 +69,10 @@ export interface SpecialistAppProps {
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const [inbox, setInbox] = useState(props.inbox);
+  // Rows already shown are seeded as known: only entries arriving after the
+  // first render can raise a toast — the initial load must stay silent.
+  const knownInboxIds = useRef(new Set(props.inbox.map((item) => item.id)));
+  const [notices, setNotices] = useState<InboxNotice[]>([]);
   const [procurements, setProcurements] = useState(props.procurements);
   const [profiles, setProfiles] = useState(props.profiles);
   const [activeProfileId, setActiveProfileId] = useState(
@@ -88,19 +93,35 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const refreshInbox = props.refreshInbox;
   const resolveInbox = props.resolveInbox;
 
+  // Every inbox swap goes through here: new ids are remembered once, and a
+  // deadline event that just arrived also raises a passive toast.
+  const applyInboxItems = useCallback((items: readonly SpecialistInboxEntry[]) => {
+    const fresh = items.filter((item) => !knownInboxIds.current.has(item.id));
+    for (const item of fresh) knownInboxIds.current.add(item.id);
+    const deadlineNotices = fresh
+      .filter((item) => item.kind === "deadline_changed")
+      .map((item) => ({ id: `notice-${item.id}`, title: item.title, message: item.summary }));
+    if (deadlineNotices.length > 0) {
+      setNotices((current) => [...current, ...deadlineNotices]);
+    }
+    // The poll returns a fresh array every tick; swapping it for an
+    // identical list re-renders the whole console for nothing.
+    setInbox((current) => (sameInboxItems(current, items) ? current : items));
+  }, []);
+
+  const dismissNotice = useCallback((id: string) => {
+    setNotices((current) => current.filter((item) => item.id !== id));
+  }, []);
+
   useEffect(() => {
     if (refreshInbox === undefined) return undefined;
     const timer = setInterval(() => {
       void refreshInbox()
-        // The poll returns a fresh array every tick; swapping it for an
-        // identical list re-renders the whole console for nothing.
-        .then((items) =>
-          setInbox((current) => (sameInboxItems(current, items) ? current : items)),
-        )
+        .then((items) => applyInboxItems(items))
         .catch(() => undefined);
     }, 30_000);
     return () => clearInterval(timer);
-  }, [refreshInbox]);
+  }, [refreshInbox, applyInboxItems]);
 
   // Ids of the last profile search. The search pane unmounts on tab switch;
   // parent state plus GET ?tab=search keep this run, not the cabinet dump.
@@ -138,7 +159,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           });
           setSearchRun(result.run);
           if (refreshInbox !== undefined) {
-            setInbox(await refreshInbox());
+            applyInboxItems(await refreshInbox());
           }
           return result;
         };
@@ -166,7 +187,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             return mergeProcurementCards(current, [updated]);
           });
           if (refreshInbox !== undefined) {
-            setInbox(await refreshInbox());
+            applyInboxItems(await refreshInbox());
           }
           return updated === undefined ? items : [updated];
         };
@@ -316,14 +337,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       }
       if (refreshInbox !== undefined) {
         void refreshInbox()
-          .then((items) =>
-            setInbox((current) => (sameInboxItems(current, items) ? current : items)),
-          )
+          .then((items) => applyInboxItems(items))
           .catch(() => undefined);
       }
     }, 800);
     return () => window.clearInterval(timer);
-  }, [activeProfileId, refreshInbox, searchRun]);
+  }, [activeProfileId, applyInboxItems, refreshInbox, searchRun]);
 
   async function openProfileSearch(id: string): Promise<void> {
     if (activateProfile !== undefined) {
@@ -383,7 +402,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 : {
                     resolve: async (id, action) => {
                       const result = await resolveInbox(id, action);
-                      setInbox(result.items);
+                      applyInboxItems(result.items);
                       if (result.card !== undefined) showInSearchPane(result.card);
                       if (action === "documents") {
                         for (const document of result.documents) {
@@ -575,6 +594,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         />
         <Route path="/admin/:pane?/:userId?" element={<AdminApp />} />
       </Routes>
+      <NoticeStack notices={notices} onDismiss={dismissNotice} />
     </BrowserRouter>
     </InboxAlertProvider>
   );

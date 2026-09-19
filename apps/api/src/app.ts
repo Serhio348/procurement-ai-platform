@@ -190,6 +190,8 @@ export interface BuildApiOptions {
   internalApiToken?: string;
   journal?: AdminJournalPort;
   discoveryController?: DiscoveryController;
+  /** PostgreSQL is the live system of record (reported by /api/health). */
+  postgres?: boolean;
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
@@ -1525,7 +1527,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   }
 
-  app.get("/api/health", async () => ({ ok: true as const }));
+  app.get("/api/health", async () => ({
+    ok: true as const,
+    postgres: options.postgres === true,
+  }));
 
   app.get("/api/admin/discovery", async () => {
     const ids = await cabinets.listIds();
@@ -1731,6 +1736,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       duplicate: recorded.duplicate,
       changeId: recorded.item.change.id,
     });
+    // 201 means durable: the event must reach the store before the response,
+    // otherwise a restart silently loses an acknowledged change (R18).
+    await persist();
     return reply.code(recorded.duplicate ? 200 : 201).send(
       SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() }),
     );

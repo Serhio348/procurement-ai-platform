@@ -236,7 +236,9 @@ export function createSpecialistStore(db: Database) {
         const decisionRows = await tx
           .select()
           .from(workspaceDecisions)
-          .where(eq(workspaceDecisions.workspaceId, workspaceId));
+          .where(eq(workspaceDecisions.workspaceId, workspaceId))
+          // latestKind walks the journal in order — the read must guarantee it.
+          .orderBy(asc(workspaceDecisions.madeAt), asc(workspaceDecisions.id));
         const verdictRows = await tx
           .select()
           .from(workspaceReviewVerdicts)

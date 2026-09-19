@@ -125,6 +125,7 @@ async function main(): Promise<void> {
     blobStore,
     cabinets: persistence.cabinets,
     journal: persistence.journal,
+    postgres: persistence.postgres,
     ingestProgress,
     discoveryController,
     authDirectory: persistence.authDirectory,

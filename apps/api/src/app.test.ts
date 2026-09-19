@@ -105,6 +105,64 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("persists an inbox event before confirming it", async () => {
+    const persistInbox = vi.fn(async () => undefined);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      persistInbox,
+    });
+    const event = {
+      procurement: {
+        title: "Поставка КТПБ",
+        status: "cancelled",
+        url: "https://goszakupki.by/auction/view/001",
+        sourceProcurementId: "auction/001",
+      },
+      change: {
+        id: "00000000-0000-4000-8000-000000000202",
+        procurementId: "00000000-0000-4000-8000-000000000020",
+        kind: "status_changed",
+        previous: "accepting_bids",
+        current: "cancelled",
+        detectedAt: "2026-09-03T11:00:00.000Z",
+        urgent: true,
+      },
+    };
+    const created = await app.inject({ method: "POST", url: "/api/inbox/events", payload: event });
+    expect(created.statusCode).toBe(201);
+    expect(persistInbox).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("does not confirm an inbox event when the save fails", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      persistInbox: async () => {
+        throw new Error("PostgreSQL connection lost");
+      },
+    });
+    const event = {
+      procurement: {
+        title: "Поставка КТПБ",
+        status: "cancelled",
+        url: "https://goszakupki.by/auction/view/001",
+        sourceProcurementId: "auction/001",
+      },
+      change: {
+        id: "00000000-0000-4000-8000-000000000203",
+        procurementId: "00000000-0000-4000-8000-000000000020",
+        kind: "status_changed",
+        previous: "accepting_bids",
+        current: "cancelled",
+        detectedAt: "2026-09-03T11:00:00.000Z",
+        urgent: true,
+      },
+    };
+    const created = await app.inject({ method: "POST", url: "/api/inbox/events", payload: event });
+    expect(created.statusCode).toBe(500);
+    await app.close();
+  });
+
   it("refreshes a card from a status message and then drops that inbox row", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     const before = await app.inject({ method: "GET", url: "/api/inbox" });
@@ -3690,6 +3748,44 @@ describe("specialist API", () => {
     expect(purged.statusCode).toBe(204);
     expect(persistCases).not.toHaveBeenCalled();
     expect(persistInbox).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("does not report success when the cabinet save fails", async () => {
+    const cabinets = createMemoryCabinetRegistry();
+    cabinets.persistProgress = async () => {
+      throw new Error("PostgreSQL connection lost");
+    };
+    const app = await buildSpecialistApi({
+      cabinets,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/save-fail-1",
+            url: "https://goszakupki.by/auction/view/save-fail-1",
+            title: "Кабель без сохранения",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${await activeProfileId(app)}`,
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId: await activeProfileId(app) },
+    });
+    const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    const decided = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "monitor" },
+    });
+    expect(decided.statusCode).toBe(500);
     await app.close();
   });
 

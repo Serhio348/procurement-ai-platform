@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SpecialistCatalog, SpecialistWorkspace } from "@procurement/domain";
@@ -84,6 +84,74 @@ describe("openSpecialistPersistence", () => {
       "00000000-0000-4000-8000-000000000701",
     ]);
     await restarted.close();
+  });
+
+  it("refuses to start on a configured but unreachable DATABASE_URL", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const workspacePath = path.join(directory, "specialist-workspace.json");
+    // Port 1 is closed: a configured PostgreSQL is required, file fallback
+    // would silently serve a different cabinet (R20).
+    await expect(
+      openSpecialistPersistence({
+        workspacePath,
+        databaseUrl: "postgres://127.0.0.1:1/procurement",
+        logger: silentLogger,
+      }),
+    ).rejects.toThrow(/PostgreSQL недоступен/);
+  });
+
+  it("ignores a crashed temp write and still loads the last whole snapshot", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const workspacePath = path.join(directory, "specialist-workspace.json");
+    const persistence = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const workspace = new SpecialistWorkspace();
+    workspace.replaceProfile({
+      name: "Кабель",
+      purpose: "",
+      description: "кабель",
+      keywords: ["кабель"],
+      excludeKeywords: [],
+      statuses: ["accepting_bids"],
+      excludeSingleSource: false,
+      filters: {},
+    });
+    await persistence.persistWorkspace(workspace.snapshot());
+    // A write interrupted mid-way leaves a .tmp-* sibling, never a torn target.
+    await writeFile(`${workspacePath}.tmp-999`, "{corrupted json", "utf8");
+    const restarted = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const cabinet = await restarted.cabinets.open(TEST_WORKSPACE_ID);
+    expect(cabinet.workspace.profiles()[0]?.name).toBe("Кабель");
+    expect(
+      (await readdir(directory)).filter((name) => name.endsWith(".tmp-999")),
+    ).toHaveLength(1);
+    await restarted.close();
+    await persistence.close();
+  });
+
+  it("opens one cabinet for two concurrent first requests", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const persistence = await openSpecialistPersistence({
+      workspacePath: path.join(directory, "specialist-workspace.json"),
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const [first, second] = await Promise.all([
+      persistence.cabinets.open(TEST_WORKSPACE_ID),
+      persistence.cabinets.open(TEST_WORKSPACE_ID),
+    ]);
+    expect(first).toBe(second);
+    await persistence.close();
   });
 
   it("drops a purged case from the disk copy so a restart cannot restore trash", async () => {

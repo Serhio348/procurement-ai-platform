@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { SpecialistWorkspace } from "@procurement/domain";
 
@@ -19,5 +19,8 @@ export async function saveWorkspaceFile(
   workspace: SpecialistWorkspace,
 ): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(workspace.snapshot(), null, 2)}\n`, "utf8");
+  // tmp + rename keeps the last complete snapshot on crash (R21).
+  const temporary = `${filePath}.tmp-${process.pid}`;
+  await writeFile(temporary, `${JSON.stringify(workspace.snapshot(), null, 2)}\n`, "utf8");
+  await rename(temporary, filePath);
 }

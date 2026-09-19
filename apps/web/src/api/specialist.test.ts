@@ -61,7 +61,7 @@ describe("fetchProfile", () => {
 });
 
 describe("searchProcurements", () => {
-  it("posts an empty body so the server uses the domain profile, not a chat query", async () => {
+  it("posts the named profile so the search is not bound to the active one", async () => {
     const payload = SpecialistSearchResponse.parse({
       profileName: "Электротехническое оборудование",
       relevantCount: 1,
@@ -79,16 +79,22 @@ describe("searchProcurements", () => {
     });
     let method: string | undefined;
     let body: string | null | undefined;
-    const result = await searchProcurements(0, async (input, init) => {
-      method = typeof input === "string" ? init?.method : undefined;
-      body = typeof init?.body === "string" ? init.body : null;
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
+    const result = await searchProcurements(
+      "00000000-0000-4000-8000-000000000901",
+      0,
+      async (input, init) => {
+        method = typeof input === "string" ? init?.method : undefined;
+        body = typeof init?.body === "string" ? init.body : null;
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
     expect(method).toBe("POST");
-    expect(body).toBe('{"limit":400,"offset":0}');
+    expect(body).toBe(
+      '{"limit":400,"offset":0,"profileId":"00000000-0000-4000-8000-000000000901"}',
+    );
     expect(result.relevantCount).toBe(1);
     expect(result.items[0]?.title).toBe("Комплектная трансформаторная подстанция");
   });

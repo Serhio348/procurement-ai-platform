@@ -244,9 +244,12 @@ describe("specialist auth API", () => {
       payload: { email: "admin@example.com", password: "admin-password" },
     });
     const cookie = cookieHeader(adminIn);
+    const profileId = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/profile", headers: { cookie } })).body,
+    ) as { id: string };
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${profileId.id}`,
       headers: { cookie },
       payload: { name: "Кабель", keywords: ["кабель"], purpose: "", description: "", excludeKeywords: [], statuses: ["accepting_bids"], filters: {} },
     });
@@ -254,7 +257,7 @@ describe("specialist auth API", () => {
       method: "POST",
       url: "/api/procurements/search",
       headers: { cookie },
-      payload: {},
+      payload: { profileId: profileId.id },
     });
     const journal = await app.inject({
       method: "GET",
@@ -292,9 +295,12 @@ describe("specialist auth API", () => {
       payload: { email: "admin@example.com", password: "admin-password" },
     });
     const cookie = cookieHeader(adminIn);
+    const profileId = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/profile", headers: { cookie } })).body,
+    ) as { id: string };
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${profileId.id}`,
       headers: { cookie },
       payload: { name: "Кабель", keywords: ["кабель"], purpose: "", description: "", excludeKeywords: [], statuses: ["accepting_bids"], filters: {} },
     });
@@ -302,7 +308,7 @@ describe("specialist auth API", () => {
       method: "POST",
       url: "/api/procurements/search",
       headers: { cookie },
-      payload: {},
+      payload: { profileId: profileId.id },
     });
 
     const acked = await app.inject({

@@ -313,6 +313,11 @@ export type SpecialistProcurementListTab = z.infer<typeof SpecialistProcurementL
 
 export const SpecialistProcurementListQuery = z.object({
   tab: SpecialistProcurementListTab.default("listed"),
+  /**
+   * Required when tab === "search": a search queue belongs to the
+   * profile that found it, never to whichever profile is active.
+   */
+  profileId: z.string().uuid().optional(),
   limit: z.coerce.number().int().positive().max(500).default(100),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
@@ -331,6 +336,21 @@ export const SpecialistSearchRequest = z.object({
   offset: z.number().int().nonnegative().default(0),
 });
 export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
+
+/**
+ * A button-search names the profile it runs for. The active profile is
+ * shared mutable state and must not double as the request's subject.
+ */
+export const SpecialistProfileSearchRequest = SpecialistSearchRequest.extend({
+  profileId: z.string().uuid(),
+});
+export type SpecialistProfileSearchRequest = z.infer<typeof SpecialistProfileSearchRequest>;
+
+/** Search progress is polled for a named profile, not the active one. */
+export const SpecialistSearchProgressQuery = z.object({
+  profileId: z.string().uuid(),
+});
+export type SpecialistSearchProgressQuery = z.infer<typeof SpecialistSearchProgressQuery>;
 
 export const SpecialistSearchRunStatus = z.enum(["retrieving", "scoring", "done", "failed"]);
 export type SpecialistSearchRunStatus = z.infer<typeof SpecialistSearchRunStatus>;

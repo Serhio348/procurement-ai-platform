@@ -192,7 +192,7 @@ export function ProcurementsApp({
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
   activeProfileId?: string;
-  search?: (offset?: number) => Promise<SpecialistSearchResponse>;
+  search?: (profileId: string, offset?: number) => Promise<SpecialistSearchResponse>;
   selectProfile?: (id: string) => Promise<void>;
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
@@ -322,13 +322,13 @@ export function ProcurementsApp({
       (selected.triage === "participate" && selected.documents.length > 0));
 
   async function runSearch(offset = 0): Promise<void> {
-    if (search === undefined || busy) return;
+    if (search === undefined || busy || chosenProfileId.length === 0) return;
     setBusy(true);
     try {
-      if (selectProfile !== undefined && chosenProfileId.length > 0) {
+      if (selectProfile !== undefined) {
         await selectProfile(chosenProfileId);
       }
-      const result = await search(offset);
+      const result = await search(chosenProfileId, offset);
       showingSearch.current = true;
       setCatalogItems((current) => {
         const incoming = result.items.filter((item) =>

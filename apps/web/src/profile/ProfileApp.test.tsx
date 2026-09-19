@@ -26,7 +26,7 @@ function profile(extra: Record<string, unknown> = {}) {
 function renderProfile(
   current: ReturnType<typeof profile>,
   save: () => Promise<ReturnType<typeof profile>>,
-  setWatch: (watch: boolean) => Promise<ReturnType<typeof profile>> = vi.fn(
+  setWatch: (id: string, watch: boolean) => Promise<ReturnType<typeof profile>> = vi.fn(
     async () => current,
   ),
 ) {
@@ -69,7 +69,7 @@ describe("ProfileApp", () => {
   it("adds and removes keywords as chips and does not turn watch on", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => profile({ name: "Щиты", keywords: ["КТПБ", "ВРУ"] }));
-    const setWatch = vi.fn(async (watchNewProcurements: boolean) =>
+    const setWatch = vi.fn(async (_id: string, watchNewProcurements: boolean) =>
       profile({ name: "Щиты", keywords: ["КТПБ", "ВРУ"], watchNewProcurements }),
     );
 
@@ -106,7 +106,7 @@ describe("ProfileApp", () => {
   it("saves typed keywords before turning watch on, so discovery has something to search", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => profile({ name: "Щиты", keywords: ["НКУ"] }));
-    const setWatch = vi.fn(async (watchNewProcurements: boolean) =>
+    const setWatch = vi.fn(async (_id: string, watchNewProcurements: boolean) =>
       profile({ name: "Щиты", keywords: ["НКУ"], watchNewProcurements }),
     );
 
@@ -119,7 +119,7 @@ describe("ProfileApp", () => {
     await user.click(screen.getByRole("button", { name: "Следить за новыми закупками" }));
 
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: "Щиты", keywords: ["НКУ"] }));
-    expect(setWatch).toHaveBeenCalledWith(true);
+    expect(setWatch).toHaveBeenCalledWith(profileId, true);
     expect(save.mock.invocationCallOrder[0]).toBeLessThan(setWatch.mock.invocationCallOrder[0] ?? 0);
     expect(await screen.findByRole("button", { name: "Слежение включено" })).toBeTruthy();
     expect(screen.queryByText(/несохранённые изменения/)).toBeNull();
@@ -128,13 +128,13 @@ describe("ProfileApp", () => {
   it("does not resave an untouched form when only watch is toggled", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => profile());
-    const setWatch = vi.fn(async (watchNewProcurements: boolean) => profile({ watchNewProcurements }));
+    const setWatch = vi.fn(async (_id: string, watchNewProcurements: boolean) => profile({ watchNewProcurements }));
 
     renderProfile(profile(), save, setWatch);
     await user.click(screen.getByRole("button", { name: "Следить за новыми закупками" }));
 
     expect(save).not.toHaveBeenCalled();
-    expect(setWatch).toHaveBeenCalledWith(true);
+    expect(setWatch).toHaveBeenCalledWith(profileId, true);
   });
 
   it("after creating a named profile shows a toast and returns to the list", async () => {

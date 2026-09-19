@@ -35,12 +35,15 @@ export interface SpecialistAppProps {
   procurements: readonly SpecialistProcurementCard[];
   profiles: readonly SpecialistWorkingProfile[];
   activeProfileId?: string;
-  search?: (offset?: number) => Promise<SpecialistSearchResponse>;
+  search?: (profileId: string, offset?: number) => Promise<SpecialistSearchResponse>;
   createProfile?: () => Promise<SpecialistWorkingProfile>;
   deleteProfile?: (id: string) => Promise<SpecialistProfileListResponse>;
   activateProfile?: (id: string) => Promise<SpecialistWorkingProfile>;
   saveProfile?: (id: string, next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
-  setProfileWatch?: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
+  setProfileWatch?: (
+    id: string,
+    watchNewProcurements: boolean,
+  ) => Promise<SpecialistWorkingProfile>;
   decide?: (
     id: string,
     kind: SpecialistTriageKind,
@@ -61,10 +64,11 @@ export interface SpecialistAppProps {
   ) => Promise<SpecialistInboxResolveResponse>;
   listMine?: (query?: {
     tab?: string;
+    profileId?: string;
     limit?: number;
   }) => Promise<readonly SpecialistProcurementCard[]>;
   loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
-  searchProgress?: () => Promise<SpecialistSearchRun>;
+  searchProgress?: (profileId: string) => Promise<SpecialistSearchRun>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -142,16 +146,16 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const search =
     searchProfile === undefined
       ? undefined
-      : async (offset?: number) => {
+      : async (profileId: string, offset?: number) => {
           setSearchRun(undefined);
-          const result = await searchProfile(offset);
+          const result = await searchProfile(profileId, offset);
           setProcurements((current) => {
             if (offset === undefined || offset === 0) {
               const kept = current.filter(
                 (item) =>
                   isWatchedTriage(item) ||
                   isRejectedTriage(item.triage) ||
-                  (activeProfileId.length > 0 && !item.profileIds.includes(activeProfileId)),
+                  (profileId.length > 0 && !item.profileIds.includes(profileId)),
               );
               return mergeProcurementCards(kept, result.items);
             }
@@ -313,15 +317,16 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   useEffect(() => {
     const list = listMineRef.current;
     const pull = searchProgressRef.current;
-    if (list !== undefined) {
-      void list({ tab: "search", limit: 400 })
+    const profileId = activeProfileId;
+    if (list !== undefined && profileId.length > 0) {
+      void list({ tab: "search", profileId, limit: 400 })
         .then((items) => {
-          setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
+          setProcurements((current) => mergeSearchPane(current, items, profileId));
         })
         .catch(() => undefined);
     }
-    if (pull !== undefined) {
-      void pull()
+    if (pull !== undefined && profileId.length > 0) {
+      void pull(profileId)
         .then((next) => setSearchRun(next))
         .catch(() => undefined);
     }
@@ -332,26 +337,29 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     if (searchRun === undefined) return undefined;
     if (searchRun.status === "done" || searchRun.status === "failed") return undefined;
     const timer = window.setInterval(() => {
+      // The run names its own profile: polling follows the search, not
+      // whichever profile happens to be active in this tab right now.
+      const runProfileId = searchRun.profileId;
       const pull = searchProgressRef.current;
       const list = listMineRef.current;
       if (pull !== undefined) {
-        void pull()
+        void pull(runProfileId)
           .then((next) => {
             setSearchRun(next);
             if (list === undefined) return;
             if (next.status !== "done" && next.status !== "failed") return;
-            void list({ tab: "search", limit: 400 })
+            void list({ tab: "search", profileId: runProfileId, limit: 400 })
               .then((items) => {
-                setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
+                setProcurements((current) => mergeSearchPane(current, items, runProfileId));
               })
               .catch(() => undefined);
           })
           .catch(() => undefined);
       }
       if (list !== undefined) {
-        void list({ tab: "search", limit: 400 })
+        void list({ tab: "search", profileId: runProfileId, limit: 400 })
           .then((items) => {
-            setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
+            setProcurements((current) => mergeSearchPane(current, items, runProfileId));
           })
           .catch(() => undefined);
       }
@@ -362,7 +370,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       }
     }, 800);
     return () => window.clearInterval(timer);
-  }, [activeProfileId, applyInboxItems, refreshInbox, searchRun]);
+  }, [applyInboxItems, refreshInbox, searchRun]);
 
   async function openProfileSearch(id: string): Promise<void> {
     if (activateProfile !== undefined) {
@@ -374,7 +382,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     const pull = searchProgressRef.current;
     if (list !== undefined) {
       try {
-        const items = await list({ tab: "search", limit: 400 });
+        const items = await list({ tab: "search", profileId: id, limit: 400 });
         setProcurements((current) => mergeSearchPane(current, items, id));
       } catch {
         // Keep the cards already on screen for this profile.
@@ -382,7 +390,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     }
     if (pull !== undefined) {
       try {
-        setSearchRun(await pull());
+        setSearchRun(await pull(id));
       } catch {
         setSearchRun(undefined);
       }
@@ -493,15 +501,16 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 }
                 return remember(await saveProfile(id, next));
               }}
-              setWatch={async (watchNewProcurements) => {
+              setWatch={async (id, watchNewProcurements) => {
                 if (setProfileWatch === undefined) {
-                  const current = profiles[0];
+                  const current =
+                    profiles.find((item) => item.id === id) ?? profiles[0];
                   if (current === undefined) {
                     throw new Error("no_profile");
                   }
                   return remember({ ...current, watchNewProcurements });
                 }
-                return remember(await setProfileWatch(watchNewProcurements));
+                return remember(await setProfileWatch(id, watchNewProcurements));
               }}
             />
           }
@@ -678,7 +687,10 @@ function ProfileEditorRoute({
   profiles: readonly SpecialistWorkingProfile[];
   activate?: (id: string) => Promise<SpecialistWorkingProfile>;
   save: (id: string, next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
-  setWatch: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
+  setWatch: (
+    id: string,
+    watchNewProcurements: boolean,
+  ) => Promise<SpecialistWorkingProfile>;
 }): ReactElement {
   const { id } = useParams();
   const profile = profiles.find((item) => item.id === id) ?? profiles[0];

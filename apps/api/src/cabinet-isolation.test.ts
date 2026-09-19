@@ -61,9 +61,18 @@ describe("personal cabinets", () => {
     const [userA, userB] = users;
     if (userA === undefined || userB === undefined) throw new Error("users missing");
 
+    const profileA = JSON.parse(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/profile",
+          headers: { cookie: userA.cookie },
+        })
+      ).body,
+    ) as { id: string };
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${profileA.id}`,
       headers: { cookie: userA.cookie },
       payload: {
         name: "Профиль A",
@@ -80,7 +89,7 @@ describe("personal cabinets", () => {
       method: "POST",
       url: "/api/procurements/search",
       headers: { cookie: userA.cookie },
-      payload: { limit: 10, offset: 0 },
+      payload: { limit: 10, offset: 0, profileId: profileA.id },
     });
     const found = JSON.parse(searched.body) as {
       items: Array<{ id: string; title: string }>;
@@ -205,9 +214,18 @@ describe("personal cabinets", () => {
       payload: { role: "specialist" },
     });
     const specCookie = cookieHeader(signed);
+    const specProfile = JSON.parse(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/profile",
+          headers: { cookie: specCookie },
+        })
+      ).body,
+    ) as { id: string };
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${specProfile.id}`,
       headers: { cookie: specCookie },
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
@@ -215,7 +233,7 @@ describe("personal cabinets", () => {
       method: "POST",
       url: "/api/procurements/search",
       headers: { cookie: specCookie },
-      payload: {},
+      payload: { profileId: specProfile.id },
     });
     const foundId = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
     await app.inject({

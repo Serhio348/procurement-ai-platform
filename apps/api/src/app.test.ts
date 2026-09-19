@@ -46,6 +46,16 @@ async function waitForCase(
   });
 }
 
+/** Id of the currently active profile — profile-scoped requests name it. */
+async function activeProfileId(
+  app: Awaited<ReturnType<typeof buildSpecialistApi>>,
+): Promise<string> {
+  const body = JSON.parse(
+    (await app.inject({ method: "GET", url: "/api/profile" })).body,
+  ) as { id: string };
+  return body.id;
+}
+
 describe("specialist API", () => {
   it("lists seeded urgent inbox items without the non-urgent household panel", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
@@ -178,13 +188,13 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТПБ", keywords: ["КТПБ"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     const listed = await app.inject({ method: "GET", url: "/api/procurements" });
     const mine = await app.inject({ method: "GET", url: "/api/procurements?tab=all" });
@@ -237,15 +247,15 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТПБ", keywords: ["КТПБ"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
-    const queue = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    const queue = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
     const queueTitles = (JSON.parse(queue.body).items as Array<{ title: string }>).map(
       (item) => item.title,
     );
@@ -288,10 +298,10 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
-    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const firstId = (
       JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
     ).id;
@@ -304,15 +314,15 @@ describe("specialist API", () => {
       payload: { name: "КТПБ", keywords: ["КТПБ"] },
     });
     await app.inject({ method: "POST", url: `/api/profiles/${second.id}/activate` });
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const secondQueue = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(secondQueue.items.map((item) => item.title)).toEqual(["Поставка КТПБ"]);
 
     await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
     const firstQueue = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(JSON.parse(first.body).items.map((item: { title: string }) => item.title)).toEqual([
       "Поставка кабеля",
@@ -374,21 +384,21 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТП", keywords: ["КТП"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
-    const before = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    const before = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
     expect(JSON.parse(searched.body).items).toEqual([]);
     expect(JSON.parse(before.body).items).toEqual([]);
 
     releaseReview();
     await vi.waitFor(async () => {
-      const queue = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+      const queue = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
       const items = JSON.parse(queue.body).items as Array<{
         title: string;
         relevanceReason?: string;
@@ -454,7 +464,7 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТПБ", keywords: ["2БКТПБ"] },
     });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
@@ -462,7 +472,7 @@ describe("specialist API", () => {
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: { limit: 5 },
+      payload: { profileId: await activeProfileId(app), limit: 5 },
     });
     const items = JSON.parse(searched.body).items as Array<{
       title: string;
@@ -514,7 +524,7 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
 
@@ -545,13 +555,13 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: { limit: 5 },
+      payload: { profileId: await activeProfileId(app), limit: 5 },
     });
 
     expect(searched.statusCode).toBe(200);
@@ -596,10 +606,10 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const listedAfterFirst = await app.inject({ method: "GET", url: "/api/procurements" });
     const inboxAfterFirst = await app.inject({ method: "GET", url: "/api/inbox" });
     const titles = (body: string) =>
@@ -627,7 +637,7 @@ describe("specialist API", () => {
     expect(titles(listedAfterOpen.body)).toEqual(["Поставка НКУ для насосов"]);
     const searchAfterOpen = await app.inject({
       method: "GET",
-      url: "/api/procurements?tab=search",
+      url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}`,
     });
     expect(titles(searchAfterOpen.body).sort()).toEqual(
       ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
@@ -637,10 +647,10 @@ describe("specialist API", () => {
     // incubator was never stored.
     now = "2026-09-09T10:00:00.000Z";
     hits = [];
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const searchAfterPrune = await app.inject({
       method: "GET",
-      url: "/api/procurements?tab=search",
+      url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}`,
     });
     const inboxAfterPrune = await app.inject({ method: "GET", url: "/api/inbox" });
     expect(titles(searchAfterPrune.body)).toEqual([]);
@@ -665,13 +675,13 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
     const originId = (
       JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
     ).id;
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const row = (JSON.parse(inbox.body).items as Array<{ id: string; title: string }>).find(
       (item) => item.title.includes("0,4"),
@@ -700,7 +710,7 @@ describe("specialist API", () => {
     expect(card.profileIds).toEqual([originId]);
     const foreignQueue = await app.inject({
       method: "GET",
-      url: "/api/procurements?tab=search",
+      url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}`,
     });
     expect((JSON.parse(foreignQueue.body).items as Array<{ title: string }>)).toEqual([]);
 
@@ -708,11 +718,130 @@ describe("specialist API", () => {
     await app.inject({ method: "POST", url: `/api/profiles/${originId}/activate` });
     const originQueue = await app.inject({
       method: "GET",
-      url: "/api/procurements?tab=search",
+      url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}`,
     });
     expect(
       (JSON.parse(originQueue.body).items as Array<{ title: string }>).map((item) => item.title),
     ).toEqual(["Поставка НКУ 0,4 кВ"]);
+
+    await app.close();
+  });
+
+  it("runs search, queue and progress for the named profile, not the active one", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/nku-1",
+            url: "https://goszakupki.by/auction/view/nku-1",
+            title: "Поставка НКУ для управления насосами",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${await activeProfileId(app)}`,
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+    const profileA = await activeProfileId(app);
+    // Creating a profile activates it — B is the active profile now.
+    const other = JSON.parse(
+      (await app.inject({ method: "POST", url: "/api/profiles" })).body,
+    ) as { id: string };
+
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId: profileA },
+    });
+    expect(searched.statusCode).toBe(200);
+    expect(JSON.parse(searched.body).run.profileId).toBe(profileA);
+
+    const queueA = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${profileA}`,
+    });
+    expect(
+      (JSON.parse(queueA.body).items as Array<{ title: string }>).map((item) => item.title),
+    ).toEqual(["Поставка НКУ для управления насосами"]);
+    const queueB = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${other.id}`,
+    });
+    expect(JSON.parse(queueB.body).items).toEqual([]);
+
+    const runA = await app.inject({
+      method: "GET",
+      url: `/api/procurements/search/progress?profileId=${profileA}`,
+    });
+    expect(JSON.parse(runA.body).profileId).toBe(profileA);
+    const runB = await app.inject({
+      method: "GET",
+      url: `/api/procurements/search/progress?profileId=${other.id}`,
+    });
+    const idleRunB = JSON.parse(runB.body) as { status: string; retrievedCount: number };
+    expect(idleRunB.status).toBe("done");
+    expect(idleRunB.retrievedCount).toBe(0);
+
+    await app.close();
+  });
+
+  it("rejects profile-scoped calls that do not name the profile", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+    const missing = "00000000-0000-4000-8000-000000000000";
+
+    const noIdSearch = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: {},
+    });
+    expect(noIdSearch.statusCode).toBe(400);
+    const unknownSearch = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId: missing },
+    });
+    expect(unknownSearch.statusCode).toBe(404);
+
+    const noIdQueue = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=search",
+    });
+    expect(noIdQueue.statusCode).toBe(400);
+    const unknownQueue = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${missing}`,
+    });
+    expect(unknownQueue.statusCode).toBe(404);
+
+    const noIdProgress = await app.inject({
+      method: "GET",
+      url: "/api/procurements/search/progress",
+    });
+    expect(noIdProgress.statusCode).toBe(400);
+    const unknownProgress = await app.inject({
+      method: "GET",
+      url: `/api/procurements/search/progress?profileId=${missing}`,
+    });
+    expect(unknownProgress.statusCode).toBe(404);
+
+    // Legacy writes to whichever profile is active are gone.
+    const legacyPut = await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Безымянный", keywords: ["x"] },
+    });
+    expect(legacyPut.statusCode).toBe(404);
+    const legacyWatch = await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    expect(legacyWatch.statusCode).toBe(404);
 
     await app.close();
   });
@@ -767,15 +896,15 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
 
     await vi.waitFor(async () => {
       const progress = await app.inject({
         method: "GET",
-        url: "/api/procurements/search/progress",
+        url: `/api/procurements/search/progress?profileId=${await activeProfileId(app)}`,
       });
       expect(JSON.parse(progress.body).status).toBe("done");
     });
@@ -850,14 +979,14 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     const body = JSON.parse(searched.body) as {
       relevantCount: number;
@@ -877,7 +1006,7 @@ describe("specialist API", () => {
       discardedCount: 0,
       listingDiscardedCount: 1,
     });
-    const progress = await app.inject({ method: "GET", url: "/api/procurements/search/progress" });
+    const progress = await app.inject({ method: "GET", url: `/api/procurements/search/progress?profileId=${await activeProfileId(app)}` });
     expect(JSON.parse(progress.body)).toMatchObject({
       status: "retrieving",
       retrievedCount: 3,
@@ -955,11 +1084,11 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТПБ", keywords: ["КТПБ"] },
     });
 
-    const pending = app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const pending = app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(() => expect(listingStarted).toBe(true));
     expect(search).toHaveBeenCalledTimes(1);
     releasePlan();
@@ -991,7 +1120,7 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "КТПБ",
         keywords: ["КТПБ"],
@@ -1014,7 +1143,7 @@ describe("specialist API", () => {
         },
       },
     });
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
 
     expect(search.mock.calls[0]?.[0]).toMatchObject({
       statuses: ["accepting_bids"],
@@ -1040,7 +1169,7 @@ describe("specialist API", () => {
     const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
     const saved = await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "КТПБ",
         keywords: ["КТПБ"],
@@ -1093,11 +1222,11 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
-    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const titles = (JSON.parse(searched.body).items as Array<{ title: string }>).map((item) => item.title);
 
     expect(search).toHaveBeenCalledTimes(2);
@@ -1133,7 +1262,7 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
     const plan = inferSearchIntentPlan({
@@ -1143,7 +1272,7 @@ describe("specialist API", () => {
     });
     const expected = scoreSearchIntentFromProcedure(fetchedCard, plan).score;
 
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(async () => {
       const listed = await app.inject({ method: "GET", url: "/api/procurements" });
       const items = JSON.parse(listed.body).items as Array<{
@@ -1198,11 +1327,11 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(async () => {
       const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
       expect(
@@ -1211,7 +1340,7 @@ describe("specialist API", () => {
     });
     expect(review).toHaveBeenCalledTimes(1);
 
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
     await vi.waitFor(async () => {
       const listed = await app.inject({ method: "GET", url: "/api/procurements" });
@@ -1239,18 +1368,18 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const firstInbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const rowId = (JSON.parse(firstInbox.body).items as Array<{ id: string }>)[0]?.id ?? "";
     expect(rowId.length).toBeGreaterThan(0);
     await app.inject({ method: "DELETE", url: `/api/inbox/${rowId}` });
     expect(JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items).toEqual([]);
 
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const restored = (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{
       title: string;
     }>).map((item) => item.title);
@@ -1300,12 +1429,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
 
@@ -1360,12 +1489,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
 
@@ -1411,15 +1540,15 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(async () => {
       const listed = await app.inject({ method: "GET", url: "/api/procurements" });
       expect(
@@ -1466,15 +1595,15 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ", keywords: ["НКУ"] },
     });
     const firstId = (
       JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
     ).id;
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const firstQueue = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(firstQueue.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
@@ -1496,13 +1625,13 @@ describe("specialist API", () => {
     const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     expect(JSON.parse(ran.body).ran).toBe(true);
     const secondQueue = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(secondQueue.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
     await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
     const firstAgain = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(firstAgain.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
@@ -1547,15 +1676,15 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ", keywords: ["НКУ"] },
     });
     const firstId = (
       JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
     ).id;
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(async () => {
-      const listed = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+      const listed = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
       expect(
         (JSON.parse(listed.body).items as Array<{ title: string }>).map((item) => item.title),
       ).toEqual(["Поставка НКУ 0,4 кВ"]);
@@ -1580,14 +1709,14 @@ describe("specialist API", () => {
     expect(JSON.parse(ran.body).ran).toBe(true);
     expect(review.mock.calls.some((call) => call[1]?.name === "Насосы")).toBe(true);
     const secondQueue = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(secondQueue.items).toEqual([]);
     expect(removeCases).not.toHaveBeenCalled();
 
     await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
     const firstAgain = JSON.parse(
-      (await app.inject({ method: "GET", url: "/api/procurements?tab=search" })).body,
+      (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
     expect(firstAgain.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
@@ -1602,19 +1731,19 @@ describe("specialist API", () => {
       searchHits: { search },
       clock: () => now,
     });
-    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "КТПБ", keywords: ["КТПБ"] } });
-    await app.inject({ method: "POST", url: "/api/profile/watch", payload: { watchNewProcurements: true } });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
 
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     now = "2026-09-09T11:00:00.000Z";
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     // A save that keeps the phrases keeps the watermark; new phrases drop it.
-    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "КТПБ и НКУ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ и НКУ", keywords: ["КТПБ"] } });
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
-    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "КТПБ и НКУ", keywords: ["КТПБ", "НКУ"] } });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ и НКУ", keywords: ["КТПБ", "НКУ"] } });
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     // Manual search never narrows by the watermark: the specialist asked for everything.
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
 
     const froms = search.mock.calls.map((call) => call[0].publishedFrom);
     expect(froms).toEqual([
@@ -1654,8 +1783,8 @@ describe("specialist API", () => {
       journal,
       persistCases,
     });
-    await app.inject({ method: "PUT", url: "/api/profile", payload: { name: "Кабель", keywords: ["кабель"] } });
-    await app.inject({ method: "POST", url: "/api/profile/watch", payload: { watchNewProcurements: true } });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "Кабель", keywords: ["кабель"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
     const second = JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as { id: string };
     await app.inject({ method: "PUT", url: `/api/profiles/${second.id}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
     await app.inject({ method: "POST", url: `/api/profiles/${second.id}/watch`, payload: { watchNewProcurements: true } });
@@ -1716,11 +1845,11 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
-    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     expect(JSON.parse(first.body)).toMatchObject({ discardedCount: 1, ambiguousCount: 2 });
     await vi.waitFor(() =>
       expect(
@@ -1735,17 +1864,17 @@ describe("specialist API", () => {
     });
 
     const reviewedAfterFirst = review.mock.calls.length;
-    const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const second = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     expect(JSON.parse(second.body).ambiguousCount).toBeGreaterThan(0);
     await vi.waitFor(() => expect(review.mock.calls.length).toBeGreaterThan(reviewedAfterFirst));
 
     // Changing the phrases forgets the irrelevant verdict: the next search asks again.
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ", "ЩО"] },
     });
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(() => expect(review.mock.calls.length).toBeGreaterThan(reviewedAfterFirst));
 
     await app.close();
@@ -1774,10 +1903,10 @@ describe("specialist API", () => {
     });
     await first.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(first)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-    await first.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await first.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(first) } });
     const workspaceState = JSON.parse(
       (await first.inject({ method: "GET", url: "/api/profile" })).body,
     ) as { id: string };
@@ -1827,10 +1956,10 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТПБ", keywords: ["КТПБ"] },
     });
-    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const first = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const id = (JSON.parse(first.body).items as Array<{ id: string }>)[0]?.id ?? "";
     await app.inject({
       method: "POST",
@@ -1840,7 +1969,7 @@ describe("specialist API", () => {
 
     now = "2026-10-01T10:00:00.000Z";
     hits = [];
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const listed = await app.inject({ method: "GET", url: "/api/procurements" });
     const items = JSON.parse(listed.body).items as Array<{ title: string; triage?: string }>;
     expect(items).toEqual([expect.objectContaining({ title: "Поставка КТПБ-250", triage: "monitor" })]);
@@ -1920,7 +2049,7 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "НКУ для управления насосами",
         keywords: ["НКУ"],
@@ -1928,14 +2057,14 @@ describe("specialist API", () => {
       },
     });
     persistCases.mockClear();
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(async () => {
       const progress = JSON.parse(
-        (await app.inject({ method: "GET", url: "/api/procurements/search/progress" })).body,
+        (await app.inject({ method: "GET", url: `/api/procurements/search/progress?profileId=${await activeProfileId(app)}` })).body,
       ) as { status: string };
       expect(progress.status).toBe("done");
     });
-    const searched = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+    const searched = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
     const stored = (persistCases.mock.calls as unknown[][]).flatMap((call) => {
       const cards = call[0];
       return Array.isArray(cards) ? (cards as Array<{ sourceProcurementId?: string }>) : [];
@@ -1976,7 +2105,7 @@ describe("specialist API", () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "Электротехническое оборудование",
         keywords: electricalEquipmentSeedV1.keywords,
@@ -1986,7 +2115,7 @@ describe("specialist API", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: { keywords: ["кабель"], limit: 20 },
+      payload: { profileId: await activeProfileId(app), keywords: ["кабель"], limit: 20 },
     });
     const body = JSON.parse(response.body) as {
       profileName: string;
@@ -2023,7 +2152,7 @@ describe("specialist API", () => {
     const invalid = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: { limit: 0 },
+      payload: { profileId: await activeProfileId(app), limit: 0 },
     });
     expect(invalid.statusCode).toBe(400);
 
@@ -2035,14 +2164,14 @@ describe("specialist API", () => {
 
     const saved = await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"], excludeKeywords: [] },
     });
     const watchOff = await app.inject({ method: "GET", url: "/api/profile" });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: { limit: 20 },
+      payload: { profileId: await activeProfileId(app), limit: 20 },
     });
     const found = JSON.parse(searched.body).items as Array<{
       id: string;
@@ -2058,7 +2187,7 @@ describe("specialist API", () => {
     const afterReject = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: { limit: 20 },
+      payload: { profileId: await activeProfileId(app), limit: 20 },
     });
     const remaining = JSON.parse(afterReject.body).items as Array<{ title: string }>;
 
@@ -2573,7 +2702,7 @@ describe("specialist API", () => {
     const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "Подстанции",
         keywords: electricalEquipmentSeedV1.keywords,
@@ -2582,7 +2711,7 @@ describe("specialist API", () => {
     const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
       id: string;
     };
-    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     const items = JSON.parse(searched.body).items as Array<{
       title: string;
       profileIds: string[];
@@ -2599,7 +2728,7 @@ describe("specialist API", () => {
 
     const edited = await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "Кабель",
         description: "кабель силовой",
@@ -2609,7 +2738,7 @@ describe("specialist API", () => {
     });
     const derived = await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "Кабель",
         description: "кабель",
@@ -2632,7 +2761,7 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: {
         name: "Электротехническое оборудование",
         keywords: electricalEquipmentSeedV1.keywords,
@@ -2641,7 +2770,7 @@ describe("specialist API", () => {
     const idle = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     const enabled = await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const first = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -2733,12 +2862,12 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -2807,12 +2936,12 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Трансформаторы", keywords: ["трансформатор"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -2891,14 +3020,14 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "КТП", keywords: ["КТП"] },
     });
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
 
     let cardId: string | undefined;
     await vi.waitFor(async () => {
-      const queue = await app.inject({ method: "GET", url: "/api/procurements?tab=search" });
+      const queue = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
       const items = JSON.parse(queue.body).items as Array<{ id: string }>;
       expect(items).toHaveLength(1);
       cardId = items[0]?.id;
@@ -2955,12 +3084,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -3015,12 +3144,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -3093,12 +3222,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -3167,12 +3296,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -3250,12 +3379,12 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -3302,12 +3431,12 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     await app.inject({
       method: "POST",
-      url: "/api/profile/watch",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
       payload: { watchNewProcurements: true },
     });
     const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
@@ -3364,13 +3493,13 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
     await app.inject({
@@ -3418,7 +3547,7 @@ describe("specialist API", () => {
     const again = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     expect(JSON.parse(again.body).items).toEqual([]);
 
@@ -3446,13 +3575,13 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     const ids = (JSON.parse(searched.body).items as Array<{ id: string }>).map((item) => item.id);
     expect(ids).toHaveLength(2);
@@ -3471,7 +3600,7 @@ describe("specialist API", () => {
     const again = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     expect(emptied.statusCode).toBe(204);
     expect(JSON.parse(trashAfter.body).items).toEqual([]);
@@ -3535,13 +3664,13 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
     await app.inject({
@@ -3585,13 +3714,13 @@ describe("specialist API", () => {
     });
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const searched = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
     const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
     await app.inject({
@@ -3621,13 +3750,13 @@ describe("specialist API", () => {
 
     await app.inject({
       method: "PUT",
-      url: "/api/profile",
+      url: `/api/profiles/${await activeProfileId(app)}`,
       payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const response = await app.inject({
       method: "POST",
       url: "/api/procurements/search",
-      payload: {},
+      payload: { profileId: await activeProfileId(app) },
     });
 
     expect(response.statusCode).toBe(503);

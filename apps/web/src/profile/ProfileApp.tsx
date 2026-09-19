@@ -54,7 +54,7 @@ export function ProfileApp({
   profile: SpecialistWorkingProfile;
   activate?: (id: string) => Promise<SpecialistWorkingProfile>;
   save: (next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
-  setWatch: (watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
+  setWatch: (id: string, watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
 }): ReactElement {
   const [profile, setProfile] = useState(initial);
   const [name, setName] = useState(initial.name);
@@ -170,7 +170,7 @@ export function ProfileApp({
       // Watch without saved keywords runs a search that finds nothing, so the
       // form is written first and only then the switch is flipped.
       const saved = dirty ? await save(currentWrite()) : profile;
-      const next = await setWatch(!saved.watchNewProcurements);
+      const next = await setWatch(saved.id, !saved.watchNewProcurements);
       setProfile(next);
       setNotice(
         next.watchNewProcurements

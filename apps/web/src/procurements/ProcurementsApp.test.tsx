@@ -23,6 +23,12 @@ afterEach(() => {
   cleanup();
 });
 
+const searchProfile = SpecialistWorkingProfile.parse({
+  id: "00000000-0000-4000-8000-000000000901",
+  name: "КТП",
+  keywords: ["КТП"],
+});
+
 describe("ProcurementsApp", () => {
   it("labels a skipped project album without implying OCR", () => {
     const label = documentStatusLabel({
@@ -256,6 +262,7 @@ describe("ProcurementsApp", () => {
       statusLabel: "Прием предложений",
       url: "https://example.test/auction/001",
       sourceProcurementId: "auction-001",
+      profileIds: [searchProfile.id],
       amountLabel: "125 000,00 BYN",
       actions: [
         {
@@ -276,6 +283,8 @@ describe("ProcurementsApp", () => {
             element={
               <ProcurementsApp
                 items={[]}
+                profiles={[searchProfile]}
+                activeProfileId={searchProfile.id}
                 search={async () => ({
                   profileName: "Электротехническое оборудование",
                   relevantCount: 1,
@@ -290,6 +299,8 @@ describe("ProcurementsApp", () => {
             element={
               <ProcurementsApp
                 items={[]}
+                profiles={[searchProfile]}
+                activeProfileId={searchProfile.id}
                 search={async () => ({
                   profileName: "Электротехническое оборудование",
                   relevantCount: 1,
@@ -409,6 +420,8 @@ describe("ProcurementsApp", () => {
             element={
               <ProcurementsApp
                 items={[]}
+                profiles={[searchProfile]}
+                activeProfileId={searchProfile.id}
                 search={async () => {
                   await gate;
                   return {

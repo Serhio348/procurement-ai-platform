@@ -62,11 +62,12 @@ export async function deleteInbox(
 }
 
 export async function fetchProcurements(
-  query: { tab?: string; limit?: number; offset?: number } = {},
+  query: { tab?: string; profileId?: string; limit?: number; offset?: number } = {},
   fetcher: typeof fetch = fetch,
 ): Promise<readonly SpecialistProcurementCardValue[]> {
   const params = new URLSearchParams();
   if (query.tab !== undefined) params.set("tab", query.tab);
+  if (query.profileId !== undefined) params.set("profileId", query.profileId);
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   if (query.offset !== undefined) params.set("offset", String(query.offset));
   const suffix = params.size === 0 ? "" : `?${params.toString()}`;
@@ -89,6 +90,7 @@ export async function fetchProcurement(
 }
 
 export async function searchProcurements(
+  profileId: string,
   offset = 0,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistSearchResponseValue> {
@@ -97,7 +99,7 @@ export async function searchProcurements(
     withCredentials({
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 400, offset }),
+      body: JSON.stringify({ limit: 400, offset, profileId }),
     }),
   );
   if (!response.ok) {
@@ -107,9 +109,13 @@ export async function searchProcurements(
 }
 
 export async function fetchSearchProgress(
+  profileId: string,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistSearchRunValue> {
-  const response = await fetcher("/api/procurements/search/progress", withCredentials());
+  const response = await fetcher(
+    `/api/procurements/search/progress?profileId=${encodeURIComponent(profileId)}`,
+    withCredentials(),
+  );
   if (!response.ok) {
     throw new Error("Не удалось получить прогресс поиска");
   }
@@ -192,11 +198,12 @@ export async function saveProfile(
 }
 
 export async function setProfileWatch(
+  id: string,
   watchNewProcurements: boolean,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistWorkingProfileValue> {
   const response = await fetcher(
-    "/api/profile/watch",
+    `/api/profiles/${id}/watch`,
     withCredentials({
       method: "POST",
       headers: { "Content-Type": "application/json" },

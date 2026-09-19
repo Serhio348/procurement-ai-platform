@@ -91,6 +91,7 @@
 - [`docs/architecture/STAGE-82.md`](docs/architecture/STAGE-82.md) — слежение за сроком подачи: «истекает завтра» и «истёк» во входящих и тостах (R47)
 - [`docs/architecture/STAGE-83.md`](docs/architecture/STAGE-83.md) — очередь поиска и живой прогресс восстанавливаются после reload (R01)
 - [`docs/architecture/STAGE-84.md`](docs/architecture/STAGE-84.md) — «Открыть карточку» из inbox: просмотр отделён от решения, профиль происхождения сохраняется (R02)
+- [`docs/architecture/STAGE-85.md`](docs/architecture/STAGE-85.md) — профильные операции требуют `profileId`, активный профиль не подменяет субъект запроса (R03)
 
 ---
 

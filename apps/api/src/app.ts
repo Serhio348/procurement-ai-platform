@@ -15,7 +15,9 @@ import {
   SpecialistProcurementListQuery,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
+  SpecialistProfileSearchRequest,
   SpecialistProfileWrite,
+  SpecialistSearchProgressQuery,
   SpecialistSearchRequest,
   SpecialistSearchResponse,
   SpecialistSearchRun,
@@ -25,6 +27,7 @@ import {
   type SearchHit,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
   type SpecialistWorkspaceState,
   type SearchIntentPlan,
 } from "@procurement/contracts";
@@ -396,6 +399,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const listPage = async (
     query: {
       tab?: "listed" | "search" | "all" | "monitor" | "participate" | "archive" | "trash";
+      profileId?: string | undefined;
       limit?: number;
       offset?: number;
     } = {},
@@ -409,7 +413,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (tab === "search") {
       const items: SpecialistProcurementCardValue[] = [];
       const seen = new Set<string>();
-      for (const id of workspace().searchIds(workspace().profile().id)) {
+      // The caller (GET /api/procurements) requires profileId for this tab.
+      for (const id of workspace().searchIds(query.profileId ?? "")) {
         const card = (catalog().procurement(id) ?? (await resolveCase(id)));
         if (card === undefined) continue;
         if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
@@ -1240,10 +1245,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    * the title stands in for the card so the HTTP call still returns a list.
    */
   async function runManualSearch(
+    profile: SpecialistWorkingProfileValue,
     limit: number,
     offset: number,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
-    const profile = workspace().profile();
     const { plan, hits, hasMore } = await fetchProfileHits(profile, limit, offset);
     const selected = selectRelevantSearchCards(
       hits,
@@ -1699,34 +1704,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.get("/api/profile", async () => SpecialistWorkingProfile.parse(workspace().profile()));
 
-  app.put("/api/profile", async (request, reply) => {
-    const parsed = SpecialistProfileWrite.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
-    workspace().replaceProfile(parsed.data);
-    await persistWorkspaceOnly();
-    const saved = workspace().profile();
-    logger.info("Specialist working profile saved", {
-      name: profileDisplayName(saved),
-      keywordCount: saved.keywords.length,
-    });
-    return SpecialistWorkingProfile.parse(saved);
-  });
-
-  app.post("/api/profile/watch", async (request, reply) => {
-    const parsed = SpecialistWatchWrite.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
-    workspace().setWatch(parsed.data.watchNewProcurements);
-    await persistWorkspaceOnly();
-    logger.info("Specialist profile watch updated", {
-      watchNewProcurements: parsed.data.watchNewProcurements,
-    });
-    return SpecialistWorkingProfile.parse(workspace().profile());
-  });
-
   app.post("/api/profile/discovery", async (request, reply) => {
     const parsed = SpecialistSearchRequest.safeParse(request.body ?? {});
     if (!parsed.success) {
@@ -1852,19 +1829,33 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
+    if (parsed.data.tab === "search") {
+      // A search queue belongs to the profile that found it. The request
+      // must name that profile — the active one is shared mutable state.
+      if (parsed.data.profileId === undefined) {
+        return reply.code(400).send({ error: "missing_profile" });
+      }
+      if (workspace().findProfile(parsed.data.profileId) === undefined) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+    }
     return listPage(parsed.data);
   });
 
   app.post("/api/procurements/search", async (request, reply) => {
-    const parsed = SpecialistSearchRequest.safeParse(request.body ?? {});
+    const parsed = SpecialistProfileSearchRequest.safeParse(request.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    if (workspace().profile().keywords.length === 0) {
+    const profile = workspace().findProfile(parsed.data.profileId);
+    if (profile === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    if (profile.keywords.length === 0) {
       return reply.code(400).send({ error: "no_keywords" });
     }
     try {
-      return await runManualSearch(parsed.data.limit, parsed.data.offset);
+      return await runManualSearch(profile, parsed.data.limit, parsed.data.offset);
     } catch (error) {
       logger.error("Specialist profile search failed", error);
       await noteSearchFailure(journal, error);
@@ -1872,8 +1863,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   });
 
-  app.get("/api/procurements/search/progress", async () => {
-    const profile = workspace().profile();
+  app.get("/api/procurements/search/progress", async (request, reply) => {
+    const parsed = SpecialistSearchProgressQuery.safeParse(request.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const profile = workspace().findProfile(parsed.data.profileId);
+    if (profile === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
     const run = searchProgress.snapshot(profile.id);
     if (run !== undefined) return run;
     return SpecialistSearchRun.parse({

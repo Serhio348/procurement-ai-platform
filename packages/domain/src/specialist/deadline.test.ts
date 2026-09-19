@@ -1,6 +1,6 @@
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { bidsDeadlinePassed, deadlineCrossedSince, deadlineWithin } from "./deadline.js";
+import { bidsDeadlinePassed, deadlineWithin } from "./deadline.js";
 
 const base = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -44,65 +44,6 @@ describe("bidsDeadlinePassed", () => {
 
   it("is false without any deadline: missing data is not an expiry", () => {
     expect(bidsDeadlinePassed(SpecialistProcurementCard.parse(base), new Date())).toBe(false);
-  });
-});
-
-describe("deadlineCrossedSince", () => {
-  const card = (deadline: string) =>
-    SpecialistProcurementCard.parse({
-      ...base,
-      sourceCard: {
-        sourceId: "goszakupki_by",
-        sourceProcurementId: "auction/1",
-        url: base.url,
-        title: base.title,
-        fetchedAt: "2026-09-10T00:00:00.000Z",
-        status: "accepting_bids",
-        bidsDeadline: { precision: "date_time", at: deadline },
-      },
-    });
-
-  it("fires when the deadline was still ahead at the last snapshot and is behind now", () => {
-    expect(
-      deadlineCrossedSince(
-        card("2026-09-18T12:00:00.000Z"),
-        "2026-09-18T08:00:00.000Z",
-        new Date("2026-09-18T13:00:00.000Z"),
-      ),
-    ).toBe(true);
-  });
-
-  it("does not refire when the deadline was already past at the last snapshot", () => {
-    expect(
-      deadlineCrossedSince(
-        card("2026-09-18T12:00:00.000Z"),
-        "2026-09-18T13:00:00.000Z",
-        new Date("2026-09-18T14:00:00.000Z"),
-      ),
-    ).toBe(false);
-  });
-
-  it("does not fire while the deadline is still ahead", () => {
-    expect(
-      deadlineCrossedSince(
-        card("2026-09-20T12:00:00.000Z"),
-        "2026-09-18T08:00:00.000Z",
-        new Date("2026-09-18T13:00:00.000Z"),
-      ),
-    ).toBe(false);
-  });
-
-  it("is false without a previous capture or a deadline", () => {
-    expect(
-      deadlineCrossedSince(card("2026-09-18T12:00:00.000Z"), undefined, new Date()),
-    ).toBe(false);
-    expect(
-      deadlineCrossedSince(
-        SpecialistProcurementCard.parse(base),
-        "2026-09-18T08:00:00.000Z",
-        new Date(),
-      ),
-    ).toBe(false);
   });
 });
 

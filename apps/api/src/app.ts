@@ -35,7 +35,6 @@ import {
   caseMatchesListTab,
   slimListedCard,
   bidsDeadlinePassed,
-  deadlineCrossedSince,
   deadlineWithin,
   diffCardSnapshots,
   discoveryPublishedFrom,
@@ -58,6 +57,7 @@ import {
   scoreIntentCard,
   selectRelevantSearchCards,
   shouldRunDiscovery,
+  type WatchChange,
   statusLabel,
   SpecialistCatalog,
   SpecialistWorkspace,
@@ -1128,6 +1128,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const followed = (await cabinets.listWatchedCases(currentCabinet().workspaceId, watchLimit)).map(
       (item) => withTriage(item, workspace()),
     );
+    // A deadline event is reported once ever: the row id is stable across
+    // restarts, and an already recorded (even dismissed) row must not return.
+    const notifiedChanges = new Set(
+      catalog().inboxItems().map((item) => item.change.id),
+    );
+    const unreported = (card: SpecialistProcurementCardValue, change: WatchChange): boolean =>
+      !notifiedChanges.has(inboxItemFromWatchChange(card, change, now).change.id);
     let monitoredCount = 0;
     let changedCount = 0;
     for (const card of followed) {
@@ -1155,19 +1162,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const deadlineChanged = changes.some((item) => item.kind === "deadline_changed");
       // Time passing is a change too: the platform can keep «приём заявок» on
       // the page for weeks after acceptance closed, so field diffs alone never
-      // announce that the window is gone.
-      if (
-        !deadlineChanged &&
-        (previous === undefined
-          ? bidsDeadlinePassed(next, nowDate)
-          : deadlineCrossedSince(next, previous.capturedAt, nowDate))
-      ) {
-        changes.push({
+      // announce that the window is gone. Reported by state, not only at the
+      // crossing: a deadline that expired before this code ran is still worth
+      // one row — the stable change id keeps it a one-time event.
+      if (!deadlineChanged && bidsDeadlinePassed(next, nowDate)) {
+        const change: WatchChange = {
           kind: "deadline_changed",
           field: "bidsDeadline",
           previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
           current: "срок подачи истёк",
-        });
+        };
+        if (unreported(next, change)) changes.push(change);
       }
       // A day-ahead warning only for cases the specialist entered: an
       // expiring deadline on a monitor-only card would be noise.
@@ -1176,12 +1181,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         next.triage === "participate" &&
         deadlineWithin(next, nowDate, DEADLINE_SOON_MS)
       ) {
-        changes.push({
+        const change: WatchChange = {
           kind: "deadline_changed",
           field: "bidsDeadline",
           previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
           current: "срок подачи истекает завтра",
-        });
+        };
+        if (unreported(next, change)) changes.push(change);
       }
       if (changes.length === 0) {
         catalog().upsertCase(next);

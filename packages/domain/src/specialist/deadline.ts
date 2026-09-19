@@ -30,24 +30,6 @@ function deadlineInstant(card: SpecialistProcurementCard): PlatformInstant | und
 }
 
 /**
- * True when the window closed between the last stored snapshot and now:
- * the deadline was still ahead at `capturedAt` and is behind `now`. Field
- * diffs cannot see this — the platform keeps «приём заявок» on the page for
- * weeks after acceptance closed, so the crossing is computed from time.
- */
-export function deadlineCrossedSince(
-  card: SpecialistProcurementCard,
-  capturedAt: string | undefined,
-  now: Date,
-): boolean {
-  if (capturedAt === undefined) return false;
-  const captured = new Date(capturedAt);
-  if (!Number.isFinite(captured.getTime())) return false;
-  const instant = deadlineInstant(card);
-  return instant !== undefined && !instantPassed(instant, captured) && instantPassed(instant, now);
-}
-
-/**
  * True when acceptance closes within `windowMs` from `now` and has not
  * closed yet. A date-only deadline counts by local calendar distance:
  * «today or tomorrow» in the source time zone ≈ less than 36 hours,

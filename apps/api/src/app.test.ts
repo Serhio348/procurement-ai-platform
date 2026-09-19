@@ -2985,6 +2985,75 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("still reports a deadline that expired before the stored snapshot was taken", async () => {
+    // The case was decided after its window had already closed: the snapshot
+    // timestamp is past the deadline, so a transition-only check would never
+    // see the crossing. The state check still owes the specialist one row.
+    let now = "2026-09-18T13:00:00.000Z";
+    const card = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/785",
+      url: "https://goszakupki.by/auction/view/auction-785",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+      bidsDeadline: { precision: "date_time", at: "2026-09-18T12:00:00.000Z" },
+    });
+    const read = vi.fn().mockResolvedValue(card);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      clock: () => now,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/785",
+            url: "https://goszakupki.by/auction/view/auction-785",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/profile/watch",
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const expired = (
+      JSON.parse(inbox.body).items as Array<{ summary: string }>
+    ).filter((item) => item.summary.includes("Срок подачи"));
+    expect(expired).toHaveLength(1);
+    expect(expired[0]?.summary).toContain("истёк");
+
+    now = "2026-09-18T15:00:00.000Z";
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const again = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(again.body).items as Array<{ summary: string }>).filter((item) =>
+        item.summary.includes("Срок подачи"),
+      ),
+    ).toHaveLength(1);
+
+    await app.close();
+  });
+
   it("warns a participating case a day ahead but stays quiet on a monitor-only one", async () => {
     const now = "2026-09-18T08:00:00.000Z";
     const card = (id: string) =>

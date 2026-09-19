@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
 import { inboxItemFromFoundCard, SpecialistCatalog } from "@procurement/domain";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpecialistApp } from "./SpecialistApp.js";
 
 const profile = SpecialistWorkingProfile.parse({
@@ -120,5 +120,68 @@ describe("SpecialistApp search list", () => {
     expect(await screen.findByRole("button", { name: "Отслеживать" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "КТПБ из входящих" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
+  });
+
+  it("restores the stored search queue on mount without running a search", async () => {
+    const queued = SpecialistProcurementCard.parse({
+      ...found,
+      id: "00000000-0000-4000-8000-000000000777",
+      title: "Из сохранённой очереди",
+      sourceProcurementId: "request/777",
+    });
+    const search = vi.fn();
+    render(
+      <SpecialistApp
+        inbox={[]}
+        procurements={[]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        search={search}
+        listMine={async () => [queued]}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /Из сохранённой очереди/ })).toBeTruthy();
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("resumes polling a still-running search after a page reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const run = {
+        profileId: profile.id,
+        profileName: profile.name,
+        status: "scoring" as const,
+        retrievedCount: 5,
+        scoredCount: 2,
+        matchCount: 1,
+        discardedCount: 0,
+        reviewCount: 0,
+        listingDiscardedCount: 0,
+        skipped: [],
+      };
+      const searchProgress = vi.fn().mockResolvedValue(run);
+      render(
+        <SpecialistApp
+          inbox={[]}
+          procurements={[]}
+          profiles={[profile]}
+          activeProfileId={profile.id}
+          listMine={async () => []}
+          searchProgress={searchProgress}
+        />,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(searchProgress).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(900);
+      });
+      expect(searchProgress.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

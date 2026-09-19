@@ -308,6 +308,26 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     return () => window.clearInterval(timer);
   }, []);
 
+  // First open: the stored search queue and a still-running search must
+  // survive a page reload — the same load the profile switch performs.
+  useEffect(() => {
+    const list = listMineRef.current;
+    const pull = searchProgressRef.current;
+    if (list !== undefined) {
+      void list({ tab: "search", limit: 400 })
+        .then((items) => {
+          setProcurements((current) => mergeSearchPane(current, items, activeProfileId));
+        })
+        .catch(() => undefined);
+    }
+    if (pull !== undefined) {
+      void pull()
+        .then((next) => setSearchRun(next))
+        .catch(() => undefined);
+    }
+    // Mount-only restore; the running-search poll below keeps it fresh.
+  }, []);
+
   useEffect(() => {
     if (searchRun === undefined) return undefined;
     if (searchRun.status === "done" || searchRun.status === "failed") return undefined;

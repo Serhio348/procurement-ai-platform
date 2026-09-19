@@ -36,7 +36,7 @@
 - Исправлено (этап 83): mount-эффект `SpecialistApp` при первом рендере подгружает `listMine({tab:"search"})` → `mergeSearchPane` и `searchProgress()` → `searchRun`. Живой поиск подхватывается: установленный `searchRun` со статусом `retrieving`/`scoring` автоматически запускает существующий 800-мс polling прогресса и очереди.
 - Регрессии: `restores the stored search queue on mount without running a search`, `resumes polling a still-running search after a page reload` (SpecialistApp.storage.test.tsx).
 
-### [ ] R02 · P1 · «Открыть карточку» само подтверждает релевантность и добавляет чужой профиль
+### [x] R02 · P1 · «Открыть карточку» само подтверждает релевантность и добавляет чужой профиль
 
 **Воспроизведено.** `resolve` с `action: open` устанавливает `foundAs: match`, присоединяет текущий активный профиль и добавляет карточку в его очередь. Это навигация, не явное решение «подходит». Кандидат из профиля A, открытый при активном B, получил оба `profileIds` и `match` без проверки B.
 

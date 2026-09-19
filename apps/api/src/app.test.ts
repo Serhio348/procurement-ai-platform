@@ -611,7 +611,9 @@ describe("specialist API", () => {
     expect(titles(listedAfterFirst.body)).toEqual(["Поставка НКУ для насосов"]);
     expect(titles(inboxAfterFirst.body)).toEqual(["Поставка НКУ 0,4 кВ"]);
 
-    // Opening the review case from the inbox takes it on: it joins the list.
+    // Opening the review case from the inbox is navigation, not a
+    // decision: it stays a review candidate and waits in the search
+    // queue of the profile that found it, out of the general list.
     const reviewRow = (JSON.parse(inboxAfterFirst.body).items as Array<{ id: string; title: string }>)
       .find((item) => item.title.includes("0,4"));
     const opened = await app.inject({
@@ -620,9 +622,14 @@ describe("specialist API", () => {
       payload: { action: "open" },
     });
     expect(opened.statusCode).toBe(200);
-    expect(JSON.parse(opened.body).card?.foundAs).toBe("match");
+    expect(JSON.parse(opened.body).card?.foundAs).toBe("review");
     const listedAfterOpen = await app.inject({ method: "GET", url: "/api/procurements" });
-    expect(titles(listedAfterOpen.body).sort()).toEqual(
+    expect(titles(listedAfterOpen.body)).toEqual(["Поставка НКУ для насосов"]);
+    const searchAfterOpen = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=search",
+    });
+    expect(titles(searchAfterOpen.body).sort()).toEqual(
       ["Поставка НКУ 0,4 кВ", "Поставка НКУ для насосов"].sort(),
     );
 
@@ -638,6 +645,74 @@ describe("specialist API", () => {
     const inboxAfterPrune = await app.inject({ method: "GET", url: "/api/inbox" });
     expect(titles(searchAfterPrune.body)).toEqual([]);
     expect(titles(inboxAfterPrune.body)).toEqual([]);
+
+    await app.close();
+  });
+
+  it("opening a review row under another active profile keeps the origin profile", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "etrade/review-2",
+            url: "https://goszakupki.by/etrade/view/review-2",
+            title: "Поставка НКУ 0,4 кВ",
+          }),
+        ],
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/profile",
+      payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
+    });
+    const originId = (
+      JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
+    ).id;
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const row = (JSON.parse(inbox.body).items as Array<{ id: string; title: string }>).find(
+      (item) => item.title.includes("0,4"),
+    );
+
+    // A second profile is active when the specialist opens the row.
+    const other = JSON.parse(
+      (await app.inject({ method: "POST", url: "/api/profiles" })).body,
+    ) as { id: string };
+    await app.inject({ method: "POST", url: `/api/profiles/${other.id}/activate` });
+    const opened = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${row?.id ?? ""}/resolve`,
+      payload: { action: "open" },
+    });
+
+    expect(opened.statusCode).toBe(200);
+    const card = JSON.parse(opened.body).card as {
+      foundAs?: string;
+      profileIds: string[];
+      triage?: string;
+    };
+    // Viewing did not decide anything and did not claim the candidate.
+    expect(card.foundAs).toBe("review");
+    expect(card.triage).toBeUndefined();
+    expect(card.profileIds).toEqual([originId]);
+    const foreignQueue = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=search",
+    });
+    expect((JSON.parse(foreignQueue.body).items as Array<{ title: string }>)).toEqual([]);
+
+    // Back on the origin profile the opened card waits in its queue.
+    await app.inject({ method: "POST", url: `/api/profiles/${originId}/activate` });
+    const originQueue = await app.inject({
+      method: "GET",
+      url: "/api/procurements?tab=search",
+    });
+    expect(
+      (JSON.parse(originQueue.body).items as Array<{ title: string }>).map((item) => item.title),
+    ).toEqual(["Поставка НКУ 0,4 кВ"]);
 
     await app.close();
   });

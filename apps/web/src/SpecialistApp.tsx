@@ -390,11 +390,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   }
 
   function showInSearchPane(card: SpecialistProcurementCard): void {
-    const next =
-      activeProfileId.length > 0 && !card.profileIds.includes(activeProfileId)
-        ? { ...card, profileIds: [...card.profileIds, activeProfileId] }
-        : card;
-    rememberCard(next);
+    // Opening an inbox row is navigation: the card keeps the profile(s)
+    // that found it. Attaching the active profile here would silently
+    // claim another profile's candidate.
+    rememberCard(card);
   }
 
   function remember(next: SpecialistWorkingProfile, activate = false): SpecialistWorkingProfile {

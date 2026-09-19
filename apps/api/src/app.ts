@@ -413,7 +413,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         const card = (catalog().procurement(id) ?? (await resolveCase(id)));
         if (card === undefined) continue;
         if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
-        if (!isScoredSearchMatch(card)) continue;
+        // A review candidate the specialist opened from the inbox waits
+        // in the queue for an explicit decision — it is not a "match".
+        if (!isScoredSearchMatch(card) && card.foundAs !== "review") continue;
         if (seen.has(card.sourceProcurementId)) continue;
         seen.add(card.sourceProcurementId);
         items.push(slimListedCard(card));
@@ -1787,16 +1789,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
 
     let card = await resolveCase(item.change.procurementId);
-    // Opening from the inbox takes the case onto the procurements list,
-    // including a review hit that had been waiting only in the inbox.
+    // Resolving a row is navigation, not a decision: the verdict, triage
+    // and profile links stay untouched. The card joins the search queue
+    // of the profile(s) that found it — never whichever profile happens
+    // to be active — so it stays reachable for the explicit triage
+    // buttons without silently becoming "relevant".
     if (action !== "dismiss" && card !== undefined) {
-      const listed =
-        action === "open" || card.foundAs === "review"
-          ? { ...card, foundAs: "match" as const }
-          : card;
-      card = withTriage(attachProfileToCard(listed, workspace().profile().id), workspace());
+      const linked =
+        card.profileIds.length > 0
+          ? card
+          : attachProfileToCard(card, workspace().profile().id);
+      card = withTriage(linked, workspace());
       catalog().upsertCase(card);
-      workspace().appendSearchId(workspace().profile().id, card.id);
+      for (const profileId of card.profileIds) {
+        workspace().appendSearchId(profileId, card.id);
+      }
     }
     if (action === "refresh" && card !== undefined) {
       card = withTriage(applyInboxChangeToCard(card, item.change), workspace());

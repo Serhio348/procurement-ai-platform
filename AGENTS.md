@@ -90,6 +90,7 @@
 - [`docs/architecture/STAGE-81.md`](docs/architecture/STAGE-81.md) — порт дизайна «Мои закупки» и видов процедур из ветки Cursor
 - [`docs/architecture/STAGE-82.md`](docs/architecture/STAGE-82.md) — слежение за сроком подачи: «истекает завтра» и «истёк» во входящих и тостах (R47)
 - [`docs/architecture/STAGE-83.md`](docs/architecture/STAGE-83.md) — очередь поиска и живой прогресс восстанавливаются после reload (R01)
+- [`docs/architecture/STAGE-84.md`](docs/architecture/STAGE-84.md) — «Открыть карточку» из inbox: просмотр отделён от решения, профиль происхождения сохраняется (R02)
 
 ---
 

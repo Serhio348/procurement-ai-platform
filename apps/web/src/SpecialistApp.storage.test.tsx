@@ -122,6 +122,50 @@ describe("SpecialistApp search list", () => {
     expect(screen.getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
   });
 
+  it("opening a foreign profile's inbox case does not claim it for the active profile", async () => {
+    window.history.pushState({}, "", "/");
+    const user = userEvent.setup();
+    const other = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Кабели",
+    });
+    const opened = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Чужая закупка из входящих",
+      status: "announced",
+      statusLabel: "объявлена",
+      url: "https://goszakupki.by/auction/view/402",
+      sourceProcurementId: "auction/402",
+      foundAs: "review",
+      profileIds: [other.id],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(opened);
+    catalog.record(inboxItemFromFoundCard(opened, "2026-09-06T12:00:00.000Z"));
+
+    render(
+      <SpecialistApp
+        inbox={catalog.urgentInbox()}
+        procurements={[found]}
+        profiles={[profile, other]}
+        activeProfileId={profile.id}
+        resolveInbox={async () => ({ items: [], card: opened, documents: [] })}
+        decide={async () => [opened]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Чужая закупка из входящих" }),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("link", { name: "Закупки" }));
+    // The active profile's queue shows only its own cards; the foreign
+    // candidate keeps its origin profile instead of being claimed.
+    expect(screen.queryByRole("button", { name: /Чужая закупка из входящих/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Найденная поиском/ })).toBeTruthy();
+  });
+
   it("restores the stored search queue on mount without running a search", async () => {
     const queued = SpecialistProcurementCard.parse({
       ...found,

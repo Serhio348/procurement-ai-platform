@@ -93,6 +93,7 @@
 - [`docs/architecture/STAGE-84.md`](docs/architecture/STAGE-84.md) — «Открыть карточку» из inbox: просмотр отделён от решения, профиль происхождения сохраняется (R02)
 - [`docs/architecture/STAGE-85.md`](docs/architecture/STAGE-85.md) — профильные операции требуют `profileId`, активный профиль не подменяет субъект запроса (R03)
 - [`docs/architecture/STAGE-86.md`](docs/architecture/STAGE-86.md) — целостность записи кабинета: fail-closed БД, честные ошибки persist, single-flight, tmp+rename, durable inbox (R18–R21, R26)
+- [`docs/architecture/STAGE-87.md`](docs/architecture/STAGE-87.md) — события мониторинга: единый diff при любом чтении живой карточки, identity перехода через `dedupeKey`, inbox-строка закрывается только после успешного действия (R22, R23, R25)
 
 ---
 

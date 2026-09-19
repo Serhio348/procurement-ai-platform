@@ -14,6 +14,8 @@ import {
   LISTING_PENDING_REASON,
   SpecialistCatalog,
   SpecialistWorkspace,
+  cardSnapshot,
+  inboxItemFromWatchChange,
   inferSearchIntentPlan,
   scoreSearchIntentFromProcedure,
   type ReviewOutcome,
@@ -3167,6 +3169,197 @@ describe("specialist API", () => {
       true,
     );
     expect(ingest).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it("reports a platform change when the card was opened before the watch pass", async () => {
+    const withFiles = (files: Array<{ name: string; sourceUrl: string }>) =>
+      ProcedureCard.parse({
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/781",
+        url: "https://goszakupki.by/auction/view/auction-781",
+        title: "Поставка кабеля",
+        fetchedAt: "2026-09-10T00:00:00.000Z",
+        status: "accepting_bids",
+        listedDocuments: files,
+      });
+    const first = withFiles([{ name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" }]);
+    const second = withFiles([
+      { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" },
+      { name: "Изменения.pdf", sourceUrl: "https://goszakupki.by/files/2" },
+    ]);
+    // Decision hydrate stores the baseline; the explicit fresh open sees the
+    // new file — the change must be reported by that read, not swallowed by
+    // a silent snapshot replace (R22).
+    const read = vi.fn().mockResolvedValueOnce(first).mockResolvedValue(second);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/781",
+            url: "https://goszakupki.by/auction/view/auction-781",
+            title: "Кабель ВВГнг 4х50",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read },
+    });
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${await activeProfileId(app)}`,
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const found = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId: await activeProfileId(app) },
+    });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    const opened = await app.inject({
+      method: "GET",
+      url: `/api/procurements/${cardId ?? ""}/card?fresh=1`,
+    });
+    expect(opened.statusCode).toBe(200);
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rows = JSON.parse(inbox.body).items as Array<{ topic: string }>;
+    expect(rows.filter((item) => item.topic === "documents")).toHaveLength(1);
+    // The next watch pass sees the same platform state: no second row.
+    const pass = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(JSON.parse(pass.body).changedCount).toBe(0);
+    const inboxAfter = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(inboxAfter.body).items as Array<{ topic: string }>).filter(
+        (item) => item.topic === "documents",
+      ),
+    ).toHaveLength(1);
+    await app.close();
+  });
+
+  it("refresh re-reads the live card, consumes its own row and reports further moves", async () => {
+    const baseline = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/900",
+      url: "https://goszakupki.by/auction/view/auction-900",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+      amount: { kind: "indicative", amount: 100, currency: "BYN", raw: "100 BYN" },
+    });
+    const catalog = new SpecialistCatalog();
+    const watched = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000900",
+      title: "Поставка кабеля",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/auction/view/auction-900",
+      sourceProcurementId: "auction/900",
+      amountLabel: "100 BYN",
+      triage: "monitor",
+      watchSnapshot: cardSnapshot(baseline, "2026-09-10T00:00:00.000Z"),
+    });
+    catalog.upsertCase(watched);
+    // The row the specialist resolves: the platform cancelled the procedure.
+    const row = catalog.record(
+      inboxItemFromWatchChange(
+        watched,
+        {
+          kind: "status_changed",
+          field: "status",
+          previous: "приём предложений",
+          current: "отменена",
+        },
+        "2026-09-11T00:00:00.000Z",
+      ),
+    ).item;
+    // The live card moved further since the row was reported: the price
+    // dropped too. Refresh must see that, not replay the stored event (R25).
+    const live = ProcedureCard.parse({
+      ...baseline,
+      status: "cancelled",
+      amount: { kind: "indicative", amount: 90, currency: "BYN", raw: "90 BYN" },
+      fetchedAt: "2026-09-11T00:00:00.000Z",
+    });
+    const app = await buildSpecialistApi({ catalog, cardWatch: { read: async () => live } });
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${row.change.id}/resolve`,
+      payload: { action: "refresh" },
+    });
+    expect(resolved.statusCode).toBe(200);
+    const card = JSON.parse(resolved.body).card as { status: string; amountLabel?: string };
+    expect(card.status).toBe("cancelled");
+    expect(card.amountLabel).toBe("90 BYN");
+    // The resolved status change is consumed — only the newly seen price
+    // move becomes a fresh row.
+    const items = JSON.parse(resolved.body).items as Array<{ kind: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("price_changed");
+
+    await app.close();
+  });
+
+  it("keeps the inbox row when the live re-read for refresh fails", async () => {
+    const app = await buildSpecialistApi({
+      catalog: await loadFixtureCatalog(),
+      cardWatch: {
+        read: async () => {
+          throw new Error("source down");
+        },
+      },
+    });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const row = (JSON.parse(inbox.body).items as Array<{ id: string; topic: string }>).find(
+      (item) => item.topic === "card_update",
+    );
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${row?.id ?? ""}/resolve`,
+      payload: { action: "refresh" },
+    });
+    expect(resolved.statusCode).toBe(502);
+    const after = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(after.body).items as Array<{ id: string }>).some((item) => item.id === row?.id),
+    ).toBe(true);
+
+    await app.close();
+  });
+
+  it("keeps the inbox row when the document download fails", async () => {
+    const app = await buildSpecialistApi({
+      catalog: await loadFixtureCatalog(),
+      documentIngest: {
+        ingest: async () => {
+          throw new Error("storage down");
+        },
+      },
+    });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const row = (JSON.parse(inbox.body).items as Array<{ id: string; topic: string }>).find(
+      (item) => item.topic === "documents",
+    );
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${row?.id ?? ""}/resolve`,
+      payload: { action: "documents" },
+    });
+    expect(resolved.statusCode).toBe(502);
+    const after = await app.inject({ method: "GET", url: "/api/inbox" });
+    expect(
+      (JSON.parse(after.body).items as Array<{ id: string }>).some((item) => item.id === row?.id),
+    ).toBe(true);
 
     await app.close();
   });

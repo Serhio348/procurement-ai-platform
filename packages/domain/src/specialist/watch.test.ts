@@ -92,6 +92,7 @@ describe("diffCardSnapshots", () => {
       field: "price",
       previous: "1 000,00 BYN",
       current: "1 050,00 BYN",
+      dedupeKey: "2026-09-11T00:00:00.000Z",
     });
   });
 
@@ -175,6 +176,56 @@ describe("watch inbox item and card snapshot", () => {
     expect(item.change.kind).toBe("status_changed");
     expect(item.change.urgent).toBe(true);
     expect(item.procurement.sourceProcurementId).toBe("auction/100");
+  });
+
+  it("gives a repeated change to an earlier value a new event id", () => {
+    const card = consoleCard("monitor");
+    const at = (iso: string, raw: string) =>
+      cardSnapshot(sourceCard({ raw }), iso);
+    // 100 → 90 → 100 → 90: each occurrence is a different apply, so each is
+    // its own event; replaying one apply stays a duplicate (R23).
+    const first = inboxItemFromWatchChange(
+      card,
+      diffCardSnapshots(at("2026-09-10T00:00:00.000Z", "1 000,00 BYN"), at("2026-09-11T00:00:00.000Z", "900,00 BYN"))[0]!,
+      "2026-09-11T00:00:00.000Z",
+    );
+    const back = inboxItemFromWatchChange(
+      card,
+      diffCardSnapshots(at("2026-09-11T00:00:00.000Z", "900,00 BYN"), at("2026-09-12T00:00:00.000Z", "1 000,00 BYN"))[0]!,
+      "2026-09-12T00:00:00.000Z",
+    );
+    const repeated = inboxItemFromWatchChange(
+      card,
+      diffCardSnapshots(at("2026-09-12T00:00:00.000Z", "1 000,00 BYN"), at("2026-09-13T00:00:00.000Z", "900,00 BYN"))[0]!,
+      "2026-09-13T00:00:00.000Z",
+    );
+    expect(first.change.id).not.toBe(repeated.change.id);
+    expect(back.change.id).not.toBe(first.change.id);
+    const replay = inboxItemFromWatchChange(
+      card,
+      diffCardSnapshots(at("2026-09-10T00:00:00.000Z", "1 000,00 BYN"), at("2026-09-11T00:00:00.000Z", "900,00 BYN"))[0]!,
+      "2026-09-11T00:00:00.000Z",
+    );
+    expect(replay.change.id).toBe(first.change.id);
+  });
+
+  it("does not merge two added files that only share a name", () => {
+    const card = consoleCard("monitor");
+    const previous = cardSnapshot(sourceCard({}), "2026-09-10T00:00:00.000Z");
+    const current = cardSnapshot(
+      sourceCard({
+        listedDocuments: [
+          { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/1" },
+          { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/2" },
+        ],
+      }),
+      "2026-09-11T00:00:00.000Z",
+    );
+    const ids = diffCardSnapshots(previous, current).map(
+      (change) => inboxItemFromWatchChange(card, change, "2026-09-11T00:00:00.000Z").change.id,
+    );
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
   });
 
   it("only monitor and participate keep being read", () => {

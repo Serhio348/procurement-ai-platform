@@ -45,6 +45,7 @@ import {
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inboxTopic,
+  watchTransitionKey,
   extraPlatformSearchTerms,
   inferSearchIntentPlan,
   mergeSearchIntentPlans,
@@ -328,7 +329,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     try {
       const live = await cardWatch.read(card.sourceProcurementId);
       if (live === undefined) return card;
-      return withTriage(applySourceCard(card, live, clock()), workspace());
+      return applyFreshSourceCard(card, live, clock()).next;
     } catch (error) {
       logger.error("Specialist source card hydrate failed", error, {
         sourceProcurementId: card.sourceProcurementId,
@@ -930,7 +931,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       // The review already paid for procurement.get: keep that card on the
       // case so opening it later does not fetch the platform page again.
       const reviewedCard =
-        outcome?.card === undefined ? builtCard : applySourceCard(builtCard, outcome.card, now);
+        outcome?.card === undefined
+          ? builtCard
+          : applyFreshSourceCard(builtCard, outcome.card, now).next;
       const remembered = await rememberFound(reviewedCard, profile.id, now);
       if (outcome?.verdict === "relevant") {
         matchCount += 1;
@@ -1120,6 +1123,81 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }
 
   /**
+   * Applies a fresh platform card and reports what moved — no matter who
+   * read it: the watch pass, an explicit refresh or a card open. A silent
+   * apply would replace the watch baseline and the next monitoring pass
+   * would see nothing, so the diff and the inbox events belong to the
+   * apply itself (R22). Events only fire for cases the specialist follows.
+   */
+  function applyFreshSourceCard(
+    card: SpecialistProcurementCardValue,
+    fresh: ProcedureCard,
+    now: string,
+    options?: { suppressTransitions?: ReadonlySet<string> },
+  ): { next: SpecialistProcurementCardValue; changes: WatchChange[] } {
+    const previous = card.watchSnapshot;
+    let next = withTriage(applySourceCard(card, fresh, now), workspace());
+    const snapshot = next.watchSnapshot;
+    if (snapshot === undefined || !isWatchedTriage(next)) {
+      return { next, changes: [] };
+    }
+    const nowDate = new Date(now);
+    const changes = previous === undefined ? [] : diffCardSnapshots(previous, snapshot);
+    const deadlineChanged = changes.some((item) => item.kind === "deadline_changed");
+    const notifiedChanges = new Set(
+      catalog().inboxItems().map((item) => item.change.id),
+    );
+    const unreported = (change: WatchChange): boolean =>
+      !notifiedChanges.has(inboxItemFromWatchChange(next, change, now).change.id);
+    // Time passing is a change too: the platform can keep «приём заявок» on
+    // the page for weeks after acceptance closed, so field diffs alone never
+    // announce that the window is gone. Reported by state, not only at the
+    // crossing: a deadline that expired before this code ran is still worth
+    // one row — the stable change id keeps it a one-time event.
+    if (!deadlineChanged && bidsDeadlinePassed(next, nowDate)) {
+      const change: WatchChange = {
+        kind: "deadline_changed",
+        field: "bidsDeadline",
+        previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
+        current: "срок подачи истёк",
+      };
+      if (unreported(change)) changes.push(change);
+    }
+    // A day-ahead warning only for cases the specialist entered: an
+    // expiring deadline on a monitor-only card would be noise.
+    if (
+      !deadlineChanged &&
+      next.triage === "participate" &&
+      deadlineWithin(next, nowDate, DEADLINE_SOON_MS)
+    ) {
+      const change: WatchChange = {
+        kind: "deadline_changed",
+        field: "bidsDeadline",
+        previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
+        current: "срок подачи истекает завтра",
+      };
+      if (unreported(change)) changes.push(change);
+    }
+    for (const change of changes) {
+      const built = inboxItemFromWatchChange(next, change, now);
+      // A transition the specialist just resolved is consumed, not
+      // re-reported; its values still reach the card (R25).
+      const item = options?.suppressTransitions?.has(watchTransitionKey(built.change))
+        ? built
+        : catalog().record(built).item;
+      next = withTriage(applyInboxChangeToCard(next, item.change), workspace());
+      next = applySourceCard(next, fresh, now);
+    }
+    if (
+      next.triage === "participate" &&
+      changes.some((item) => item.kind === "document_added")
+    ) {
+      startParticipateIngest(next);
+    }
+    return { next, changes };
+  }
+
+  /**
    * Re-reads the cases the specialist chose to follow and reports what moved.
    * The first reading of a case only stores a snapshot: without a previous one
    * there is no change, and announcing "found" again would be noise. Cases are
@@ -1137,13 +1215,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const followed = (await cabinets.listWatchedCases(currentCabinet().workspaceId, watchLimit)).map(
       (item) => withTriage(item, workspace()),
     );
-    // A deadline event is reported once ever: the row id is stable across
-    // restarts, and an already recorded (even dismissed) row must not return.
-    const notifiedChanges = new Set(
-      catalog().inboxItems().map((item) => item.change.id),
-    );
-    const unreported = (card: SpecialistProcurementCardValue, change: WatchChange): boolean =>
-      !notifiedChanges.has(inboxItemFromWatchChange(card, change, now).change.id);
     let monitoredCount = 0;
     let changedCount = 0;
     for (const card of followed) {
@@ -1151,74 +1222,22 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const fresh = await watchReader.read(card.sourceProcurementId);
       if (fresh === undefined) continue;
       monitoredCount += 1;
-      const previous = card.watchSnapshot;
-      let next: SpecialistProcurementCardValue;
+      let applied: { next: SpecialistProcurementCardValue; changes: WatchChange[] };
       try {
-        next = applySourceCard(card, fresh, now);
+        applied = applyFreshSourceCard(card, fresh, now);
       } catch (error) {
         logger.error("Specialist watched case could not store the source card", error, {
           sourceProcurementId: card.sourceProcurementId,
         });
         continue;
       }
-      const snapshot = next.watchSnapshot;
-      if (snapshot === undefined) {
-        catalog().upsertCase(next);
-        continue;
-      }
-      const nowDate = new Date(now);
-      const changes = previous === undefined ? [] : diffCardSnapshots(previous, snapshot);
-      const deadlineChanged = changes.some((item) => item.kind === "deadline_changed");
-      // Time passing is a change too: the platform can keep «приём заявок» on
-      // the page for weeks after acceptance closed, so field diffs alone never
-      // announce that the window is gone. Reported by state, not only at the
-      // crossing: a deadline that expired before this code ran is still worth
-      // one row — the stable change id keeps it a one-time event.
-      if (!deadlineChanged && bidsDeadlinePassed(next, nowDate)) {
-        const change: WatchChange = {
-          kind: "deadline_changed",
-          field: "bidsDeadline",
-          previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
-          current: "срок подачи истёк",
-        };
-        if (unreported(next, change)) changes.push(change);
-      }
-      // A day-ahead warning only for cases the specialist entered: an
-      // expiring deadline on a monitor-only card would be noise.
-      if (
-        !deadlineChanged &&
-        next.triage === "participate" &&
-        deadlineWithin(next, nowDate, DEADLINE_SOON_MS)
-      ) {
-        const change: WatchChange = {
-          kind: "deadline_changed",
-          field: "bidsDeadline",
-          previous: snapshot.bidsDeadline ?? previous?.bidsDeadline ?? null,
-          current: "срок подачи истекает завтра",
-        };
-        if (unreported(next, change)) changes.push(change);
-      }
-      if (changes.length === 0) {
-        catalog().upsertCase(next);
-        continue;
-      }
+      catalog().upsertCase(applied.next);
+      if (applied.changes.length === 0) continue;
       changedCount += 1;
-      for (const change of changes) {
-        const item = catalog().record(inboxItemFromWatchChange(next, change, now));
-        next = withTriage(applyInboxChangeToCard(next, item.item.change), workspace());
-        next = applySourceCard(next, fresh, now);
-      }
-      catalog().upsertCase(next);
       logger.info("Specialist watched case changed", {
         sourceProcurementId: card.sourceProcurementId,
-        kinds: changes.map((item) => item.kind),
+        kinds: applied.changes.map((item) => item.kind),
       });
-      if (
-        next.triage === "participate" &&
-        changes.some((item) => item.kind === "document_added")
-      ) {
-        startParticipateIngest(next);
-      }
     }
     return { monitoredCount, changedCount };
   }
@@ -1791,8 +1810,40 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
     }
     if (action === "refresh" && card !== undefined) {
-      card = withTriage(applyInboxChangeToCard(card, item.change), workspace());
-      catalog().upsertCase(card);
+      if (cardWatch === undefined) {
+        // No live reader is wired (fixture/offline mode): the change the row
+        // carries is the freshest data available (R25).
+        card = withTriage(applyInboxChangeToCard(card, item.change), workspace());
+        catalog().upsertCase(card);
+      } else {
+        try {
+          const fresh = await cardWatch.read(card.sourceProcurementId);
+          if (fresh === undefined) {
+            throw new Error("source card unavailable");
+          }
+          // «Обновить» reads the live card, not the historical event the row
+          // stored: the platform may have moved further since (R25). The
+          // resolved transition is consumed — re-detecting it must not spawn
+          // the same row again.
+          card = applyFreshSourceCard(card, fresh, clock(), {
+            suppressTransitions: new Set([watchTransitionKey(item.change)]),
+          }).next;
+          catalog().upsertCase(card);
+        } catch (error) {
+          logger.error("Specialist inbox refresh failed", error, {
+            sourceProcurementId: card.sourceProcurementId,
+          });
+          await recordJournal(journal, {
+            kind: "platform",
+            level: "error",
+            message: `Не удалось обновить карточку: ${card.sourceProcurementId}`,
+            sourceProcurementId: card.sourceProcurementId,
+          });
+          // The row stays: the specialist sees the failure and can retry
+          // instead of losing the notification to a silent dismiss.
+          return reply.code(502).send({ error: "refresh_failed" });
+        }
+      }
     }
     if (action === "documents" && card !== undefined && documentIngest !== undefined) {
       ingestProgress.begin(card.id);
@@ -1811,6 +1862,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
           sourceProcurementId: card.sourceProcurementId,
         });
+        // The row stays in the inbox: the specialist sees the failure and
+        // can retry instead of losing the notification to a silent
+        // dismiss (R25).
+        return reply.code(502).send({ error: "ingest_failed" });
       }
     }
 
@@ -1913,6 +1968,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       workspace().removeSearchId(card.id);
     }
     let next = withTriage(card, workspace());
+    // Stale rows for this case are cleared before the fresh read: changes the
+    // read detects are reported as new rows and must survive the cleanup.
+    catalog().dismissByProcurementId(next.id);
     // Hydrate the platform card before returning; file ingest continues after.
     if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
       next = await hydrateSourceCard(next);
@@ -1921,7 +1979,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
     }
     catalog().upsertCase(next);
-    catalog().dismissByProcurementId(next.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persistProgress([next.id]);
     if (parsed.data.kind === "participate") {
@@ -2064,7 +2121,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "card_unavailable" });
     }
     try {
-      catalog().upsertCase(withTriage(applySourceCard(card, live, clock()), workspace()));
+      catalog().upsertCase(applyFreshSourceCard(card, live, clock()).next);
       await persistProgress([card.id]);
     } catch (error) {
       // The page was read fine; only the console copy failed. Still show it.

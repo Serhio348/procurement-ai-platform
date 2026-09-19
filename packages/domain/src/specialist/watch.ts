@@ -22,6 +22,15 @@ export interface WatchChange {
   field: string;
   previous: string | null;
   current: string | null;
+  /**
+   * Token identifying this occurrence of the change. Transition diffs carry
+   * the new snapshot's capturedAt (document diffs add the file url), so the
+   * same logical change happening again later — a price returning to a
+   * value reported before — becomes a new inbox event, while a redelivery
+   * of one apply still dedupes (R23). State-derived pushes leave it empty:
+   * their id stays stable across passes.
+   */
+  dedupeKey?: string;
 }
 
 /**
@@ -77,6 +86,7 @@ export function diffCardSnapshots(
       field: "status",
       previous: statusLabel(previous.status),
       current: statusLabel(current.status),
+      dedupeKey: current.capturedAt,
     });
   }
   if (
@@ -89,6 +99,7 @@ export function diffCardSnapshots(
       field: "price",
       previous: previous.priceLabel ?? previous.priceKey,
       current: current.priceLabel ?? current.priceKey,
+      dedupeKey: current.capturedAt,
     });
   }
   if (
@@ -101,10 +112,13 @@ export function diffCardSnapshots(
       field: "bidsDeadline",
       previous: previous.bidsDeadline,
       current: current.bidsDeadline,
+      dedupeKey: current.capturedAt,
     });
   }
   if (previous.documents !== undefined && current.documents !== undefined) {
-    changes.push(...diffListedDocuments(previous.documents, current.documents));
+    changes.push(
+      ...diffListedDocuments(previous.documents, current.documents, current.capturedAt),
+    );
   }
   return changes;
 }
@@ -112,6 +126,7 @@ export function diffCardSnapshots(
 function diffListedDocuments(
   previous: readonly ListedSourceAttachment[],
   current: readonly ListedSourceAttachment[],
+  capturedAt: string,
 ): WatchChange[] {
   const before = new Map(previous.map((item) => [item.sourceUrl, item] as const));
   const after = new Map(current.map((item) => [item.sourceUrl, item] as const));
@@ -124,6 +139,7 @@ function diffListedDocuments(
         field: "documents",
         previous: null,
         current: doc.name,
+        dedupeKey: `${capturedAt}:${url}`,
       });
       continue;
     }
@@ -133,6 +149,7 @@ function diffListedDocuments(
         field: "documents",
         previous: was.name,
         current: doc.name,
+        dedupeKey: `${capturedAt}:${url}`,
       });
     }
   }
@@ -143,6 +160,7 @@ function diffListedDocuments(
       field: "documents",
       previous: doc.name,
       current: null,
+      dedupeKey: `${capturedAt}:${url}`,
     });
   }
   return changes;
@@ -174,6 +192,20 @@ export function normalizePriceKey(raw: string | undefined): string | undefined {
   return trimmedFraction.length === 0 ? left : `${left}.${trimmedFraction}`;
 }
 
+/**
+ * Signature of one logical transition, ignoring when it was observed.
+ * Resolving an inbox row re-reads the live card and re-detects the same
+ * move; this key lets the caller consume that one transition without
+ * spawning a duplicate row (R25).
+ */
+export function watchTransitionKey(change: {
+  kind: ChangeKind;
+  previous: string | null;
+  current: string | null;
+}): string {
+  return `${change.kind}:${change.previous ?? ""}:${change.current ?? ""}`;
+}
+
 /** Inbox row for a change the platform found on a decided case. */
 export function inboxItemFromWatchChange(
   card: SpecialistProcurementCardValue,
@@ -188,10 +220,11 @@ export function inboxItemFromWatchChange(
       sourceProcurementId: card.sourceProcurementId,
     },
     change: {
-      // The new value is part of the id: the same change reported twice stays
-      // one inbox row, a further change becomes a new one.
+      // The new value plus the occurrence token make the id: the same change
+      // reported twice stays one inbox row, a change returning to an earlier
+      // value is a new row (R23), state pushes keep a stable id.
       id: uuidFromHex(
-        `inbox-watch:${card.id}:${change.kind}:${change.current ?? change.previous ?? ""}`,
+        `inbox-watch:${card.id}:${change.kind}:${change.current ?? change.previous ?? ""}:${change.dedupeKey ?? ""}`,
       ),
       procurementId: card.id,
       kind: change.kind,

@@ -125,12 +125,16 @@ export async function openSpecialistPersistence(options: {
     const reviewedIrrelevant = snapshot.reviewedIrrelevant.filter(
       (item) => !banned.has(item.profileId),
     );
+    const searchRuns = Object.fromEntries(
+      Object.entries(snapshot.searchRuns).filter(([id]) => !banned.has(id)),
+    );
     return SpecialistWorkspaceState.parse({
       ...snapshot,
       profiles,
       activeProfileId,
       searchIdsByProfile,
       reviewedIrrelevant,
+      searchRuns,
     });
   }
   /** One writer chain per cabinet so profile/inbox/cases saves do not deadlock. */
@@ -572,6 +576,14 @@ export async function openSpecialistPersistence(options: {
         .filter((item) => item.live === true && item.archived !== true && isWatchedTriage(item))
         .sort((left, right) => watchOrder(left) - watchOrder(right))
         .slice(0, limit);
+    },
+    async listIngestingCases(workspaceId) {
+      if (store !== undefined) return store.listIngestingCases(workspaceId);
+      const cases = await readJson<SpecialistProcurementCardValue[]>(
+        casesFilePath(options.workspacePath, workspaceId),
+        [],
+      );
+      return cases.filter((card) => card.ingesting !== undefined);
     },
     async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds, keepIds = []) {
       if (store !== undefined) {

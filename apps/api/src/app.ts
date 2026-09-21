@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   AdminCabinetListResponse,
   InboxFixtureItem,
@@ -57,6 +58,9 @@ import {
   isRejectedTriage,
   isScoredSearchMatch,
   isWatchedTriage,
+  cardAssessmentVerdictFor,
+  projectCardForProfile,
+  withCardAssessment,
   profileDisplayName,
   scoreIntentCard,
   selectRelevantSearchCards,
@@ -222,7 +226,43 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const watchLimit = options.watchLimit ?? DEFAULT_WATCH_LIMIT;
   const documentIngest = options.documentIngest;
   const ingestProgress = options.ingestProgress ?? createIngestProgressHub();
-  const searchProgress = options.searchProgress ?? createSearchProgressHub();
+  const searchRunsHub = options.searchProgress ?? createSearchProgressHub();
+  /**
+   * Every progress mutation lands in the workspace too, so the run survives
+   * a restart — the stored snapshot is the checkpoint (R16). The ambient
+   * AsyncLocalStorage cabinet owns the run, so mirroring writes to the
+   * cabinet that started the search, not whichever request happens to be
+   * in flight.
+   */
+  const mirrorSearchRun = (profileId: string): void => {
+    const run = searchRunsHub.snapshot(profileId);
+    if (run === undefined) return;
+    workspace().setSearchRun(run);
+  };
+  const searchProgress: ReturnType<typeof createSearchProgressHub> = {
+    snapshot: (profileId) => searchRunsHub.snapshot(profileId),
+    isCurrent: (profileId, runId) => searchRunsHub.isCurrent(profileId, runId),
+    begin: (run) => {
+      searchRunsHub.begin(run);
+      mirrorSearchRun(run.profileId);
+    },
+    scored: (profileId, runId, patch) => {
+      searchRunsHub.scored(profileId, runId, patch);
+      mirrorSearchRun(profileId);
+    },
+    skip: (profileId, runId, row) => {
+      searchRunsHub.skip(profileId, runId, row);
+      mirrorSearchRun(profileId);
+    },
+    finish: (profileId, runId, status) => {
+      searchRunsHub.finish(profileId, runId, status);
+      mirrorSearchRun(profileId);
+    },
+    clear: (profileId) => {
+      searchRunsHub.clear(profileId);
+      workspace().forgetSearchRun(profileId);
+    },
+  };
   const liveProcurementsOnly = options.liveProcurementsOnly === true;
   const clock = options.clock ?? (() => new Date().toISOString());
   const journal = options.journal ?? createMemoryAdminJournal();
@@ -344,31 +384,62 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    * with get_documents. Persist triage first, then download in the cabinet
    * that owned the request.
    */
+  /**
+   * Card ids are derived from the source row, so two cabinets share them —
+   * dedup keys on {workspaceId, card.id} and never blocks another cabinet's
+   * job (R17). The `ingesting` flag is persisted before the download starts:
+   * after a restart the cabinet re-opens, sees the flag and resumes — files
+   * already hashed are the checkpoint and are skipped (R16).
+   */
   const ingestJobs = new Set<string>();
   const startDocumentJob = (
     card: SpecialistProcurementCardValue,
+    kind: "ingest" | "reindex",
     run: (next: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>,
     failedMessage: string,
   ): void => {
-    if (ingestJobs.has(card.id)) return;
-    ingestJobs.add(card.id);
-    ingestProgress.begin(card.id);
     const cabinet = currentCabinet();
+    const jobKey = `${cabinet.workspaceId}:${card.id}`;
+    if (ingestJobs.has(jobKey)) return;
+    ingestJobs.add(jobKey);
+    ingestProgress.begin(cabinet.workspaceId, card.id);
+    const flagged = SpecialistProcurementCard.parse({ ...card, ingesting: kind });
+    catalog().upsertCase(flagged);
     void cabinetAls.run(cabinet, async () => {
       try {
-        const ingested = withTriage(await run(card), workspace());
-        ingestProgress.done(card.id);
-        catalog().upsertCase(ingested);
+        // Durable intent first: a crash mid-download must leave the flag on
+        // disk so the next open resumes the job instead of forgetting it.
+        await persist(cabinet);
+        const ingested = withTriage(await run(flagged), workspace());
+        const finished = SpecialistProcurementCard.parse({
+          ...ingested,
+          ingesting: undefined,
+        });
+        ingestProgress.done(cabinet.workspaceId, card.id);
+        catalog().upsertCase(finished);
         await persist(cabinet);
         logger.info("Specialist document job finished", {
           sourceProcurementId: card.sourceProcurementId,
-          documentCount: ingested.documents.length,
+          documentCount: finished.documents.length,
         });
       } catch (error) {
-        ingestProgress.fail(card.id);
+        ingestProgress.fail(cabinet.workspaceId, card.id);
         logger.error("Specialist document job failed", error, {
           sourceProcurementId: card.sourceProcurementId,
         });
+        try {
+          const stuck = catalog().procurement(card.id);
+          if (stuck !== undefined) {
+            catalog().upsertCase(
+              SpecialistProcurementCard.parse({ ...stuck, ingesting: undefined }),
+            );
+            await persist(cabinet);
+          }
+        } catch (cleanupError) {
+          logger.error("Specialist document job flag cleanup failed", cleanupError, {
+            sourceProcurementId: card.sourceProcurementId,
+          });
+        }
         await recordJournal(journal, {
           kind: "documents",
           level: "error",
@@ -376,14 +447,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           sourceProcurementId: card.sourceProcurementId,
         });
       } finally {
-        ingestJobs.delete(card.id);
+        ingestJobs.delete(jobKey);
       }
     });
   };
   const startParticipateIngest = (card: SpecialistProcurementCardValue): void => {
     const ingest = documentIngest;
     if (ingest === undefined) return;
-    startDocumentJob(card, (next) => ingest.ingest(next), "Не удалось скачать документы");
+    const workspaceId = currentCabinet().workspaceId;
+    startDocumentJob(
+      card,
+      "ingest",
+      (next) => ingest.ingest(next, workspaceId),
+      "Не удалось скачать документы",
+    );
   };
   const startReindex = (card: SpecialistProcurementCardValue): void => {
     const ingest = documentIngest;
@@ -396,7 +473,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       startParticipateIngest(card);
       return;
     }
-    startDocumentJob(card, (next) => reindex(next), "Не удалось перечитать документы");
+    const workspaceId = currentCabinet().workspaceId;
+    startDocumentJob(
+      card,
+      "reindex",
+      (next) => reindex(next, workspaceId),
+      "Не удалось перечитать документы",
+    );
   };
 
   const listPage = async (
@@ -418,8 +501,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const seen = new Set<string>();
       // The caller (GET /api/procurements) requires profileId for this tab.
       for (const id of workspace().searchIds(query.profileId ?? "")) {
-        const card = (catalog().procurement(id) ?? (await resolveCase(id)));
-        if (card === undefined) continue;
+        const stored = catalog().procurement(id) ?? (await resolveCase(id));
+        if (stored === undefined) continue;
+        // The queue belongs to a profile: it shows that profile's own
+        // verdict, not another direction's (R04).
+        const card = projectCardForProfile(stored, query.profileId ?? "");
         if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
         // A review candidate the specialist opened from the inbox waits
         // in the queue for an explicit decision — it is not a "match".
@@ -503,11 +589,80 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     provisionWorkspace: (user) => cabinets.ensurePersonalWorkspace(user.id, user.name),
     workspaceIdFor: (userId) => cabinets.workspaceIdFor(userId),
   });
+  /**
+   * First open of a cabinet in this process: a stored run that died
+   * mid-flight is marked "interrupted" instead of silently vanishing, and a
+   * document job whose `ingesting` flag was persisted resumes — files
+   * already hashed are the checkpoint and are skipped (R16).
+   */
+  const restoredWorkspaces = new Set<string>();
+  const restoreDurableWork = (cabinet: SpecialistCabinet): void => {
+    let marked = false;
+    for (const run of cabinet.workspace.searchRuns()) {
+      const restored =
+        run.status === "retrieving" || run.status === "scoring"
+          ? SpecialistSearchRun.parse({ ...run, status: "interrupted" })
+          : run;
+      if (restored !== run) {
+        cabinet.workspace.setSearchRun(restored);
+        marked = true;
+      }
+      // Seed the raw hub: this hook runs before the cabinet enters the
+      // AsyncLocalStorage scope, so the mirroring wrapper would write into
+      // the default cabinet.
+      if (searchRunsHub.snapshot(run.profileId) === undefined) searchRunsHub.begin(restored);
+    }
+    void cabinetAls
+      .run(cabinet, async () => {
+        if (marked) {
+          try {
+            await persist(cabinet);
+          } catch (error) {
+            logger.error("Specialist interrupted-run mark persist failed", error);
+          }
+        }
+        const pending = await cabinets.listIngestingCases(cabinet.workspaceId);
+        if (pending.length === 0) return;
+        if (documentIngest === undefined) {
+          // No ingest port in this process: drop the stale flag so it does
+          // not resurface on every open.
+          for (const card of pending) {
+            catalog().upsertCase(
+              SpecialistProcurementCard.parse({ ...card, ingesting: undefined }),
+            );
+          }
+          try {
+            await persist(cabinet);
+          } catch (error) {
+            logger.error("Specialist stale ingest flag cleanup failed", error);
+          }
+          return;
+        }
+        for (const card of pending) {
+          logger.info("Specialist document job resumed after restart", {
+            sourceProcurementId: card.sourceProcurementId,
+            kind: card.ingesting,
+          });
+          if (card.ingesting === "reindex") startReindex(card);
+          else startParticipateIngest(card);
+        }
+      })
+      .catch((error: unknown) => {
+        logger.error("Specialist durable work restore failed", error, {
+          workspaceId: cabinet.workspaceId,
+        });
+      });
+  };
+
   app.addHook("onRequest", async (request) => {
     const path = request.url.split("?")[0] ?? request.url;
     if (path === "/api/health" || path.startsWith("/api/auth")) return;
     const workspaceId = request.principal?.workspaceId ?? TEST_WORKSPACE_ID;
     request.cabinet = await cabinets.open(workspaceId);
+    if (!restoredWorkspaces.has(request.cabinet.workspaceId)) {
+      restoredWorkspaces.add(request.cabinet.workspaceId);
+      restoreDurableWork(request.cabinet);
+    }
   });
   app.addHook("preHandler", (request, _reply, done) => {
     cabinetAls.run(request.cabinet ?? defaultCabinet, () => {
@@ -609,8 +764,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   /**
    * Puts a found card into the catalog. A case seen before keeps its
    * documents and facts; only the listing fields, lastSeenAt and the profile
-   * link are refreshed. A review case that a later search matches exactly is
-   * promoted to "match"; the reverse never happens.
+   * link are refreshed. The verdict belongs to the profile that ran the
+   * search: it lands in `assessments[profileId]` and the card-level
+   * foundAs/score/reason are recomputed as a derived view — one direction
+   * cannot overwrite another's answer (R04).
    */
   async function rememberFound(
     card: SpecialistProcurementCardValue,
@@ -618,7 +775,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     now: string,
   ): Promise<{ card: SpecialistProcurementCardValue; isNew: boolean }> {
     const existing = await findExistingCase(card.sourceProcurementId);
-    const foundAs = card.foundAs === "match" || existing?.foundAs === "match" ? "match" : card.foundAs;
     const merged: SpecialistProcurementCardValue =
       existing === undefined
         ? { ...card, lastSeenAt: now }
@@ -630,13 +786,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             live: existing.live === true || card.live === true,
             ...(card.buyerName === undefined ? {} : { buyerName: card.buyerName }),
             ...(card.amountLabel === undefined ? {} : { amountLabel: card.amountLabel }),
-            ...(foundAs === undefined ? {} : { foundAs }),
-            ...(card.relevanceScore === undefined ? {} : { relevanceScore: card.relevanceScore }),
-            ...(card.relevanceReason === undefined ? {} : { relevanceReason: card.relevanceReason }),
             ...(card.actions.length > existing.actions.length ? { actions: card.actions } : {}),
             lastSeenAt: now,
           };
-    const owned = withTriage(attachProfileToCard(merged, profileId), workspace());
+    const linked = attachProfileToCard(merged, profileId);
+    const assessed =
+      card.foundAs === undefined
+        ? linked
+        : withCardAssessment(linked, profileId, {
+            verdict: card.foundAs,
+            ...(card.relevanceScore === undefined ? {} : { score: card.relevanceScore }),
+            ...(card.relevanceReason === undefined ? {} : { reason: card.relevanceReason }),
+            evaluatedAt: now,
+          });
+    const owned = withTriage(assessed, workspace());
     catalog().upsertCase(owned);
     return { card: owned, isNew: existing === undefined };
   }
@@ -798,7 +961,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     now: string,
     plan: SearchIntentPlan,
     scoring: { inboxForMatches: boolean; persistEach: boolean },
+    runId?: string,
   ): Promise<{ matched: SpecialistProcurementCardValue[]; discarded: number; ambiguousCount: number }> {
+    // A newer run for this profile owns the queue and the progress slot:
+    // after every await a superseded run stops instead of interleaving
+    // its verdicts into the successor's state (R15). Discovery passes no
+    // runId — it never touches the manual-run progress slot.
+    const runAlive = (): boolean =>
+      runId === undefined || searchProgress.isCurrent(profile.id, runId);
     let discarded = 0;
     let ambiguousCount = 0;
     let matchCount = 0;
@@ -818,17 +988,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     // every card, so per-hit review calls cannot reset it.
     const reviewBudget: ReviewBudget = { used: 0 };
     for (const item of pending) {
+      if (!runAlive()) break;
       const outcome =
         searchReview === undefined
           ? scoreIntentCard(procedureCardFromHit(item.hit, now), plan).outcome
           : (await searchReview.review([item.hit], reviewProfile, reviewBudget))[0];
+      if (!runAlive()) break;
       scoredCount += 1;
       if (outcome?.verdict === "irrelevant") {
         discarded += 1;
         workspace().rememberIrrelevant(profile.id, item.card.sourceProcurementId, now);
         const forgotten = dropFromProfileQueue(item.card.id, profile.id);
         if (forgotten) dropped.push(item.card.id);
-        searchProgress.scored(profile.id, {
+        searchProgress.scored(profile.id, runId, {
           scoredCount,
           matchCount,
           discardedCount: discarded,
@@ -842,7 +1014,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           scoredCount,
           pendingCount: pending.length,
         });
-        searchProgress.skip(profile.id, {
+        searchProgress.skip(profile.id, runId, {
           sourceProcurementId: item.card.sourceProcurementId,
           title: item.card.title.slice(0, 160),
           reason: outcome.reason.length > 0 ? outcome.reason : "карточка не подходит профилю",
@@ -861,6 +1033,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         continue;
       }
       const existing = await findExistingCase(item.card.sourceProcurementId);
+      if (!runAlive()) break;
       const procedureStatus = outcome?.status ?? item.hit.status ?? item.card.status;
       const requestedClosedStatus =
         isClosedProcedureStatus(procedureStatus) && profile.statuses.includes(procedureStatus);
@@ -872,7 +1045,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         discarded += 1;
         const forgotten = dropFromProfileQueue(item.card.id, profile.id);
         if (forgotten) dropped.push(item.card.id);
-        searchProgress.scored(profile.id, {
+        searchProgress.scored(profile.id, runId, {
           scoredCount,
           matchCount,
           discardedCount: discarded,
@@ -886,7 +1059,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           scoredCount,
           pendingCount: pending.length,
         });
-        searchProgress.skip(profile.id, {
+        searchProgress.skip(profile.id, runId, {
           sourceProcurementId: item.card.sourceProcurementId,
           title: item.card.title.slice(0, 160),
           reason: "завершена или отменена, статус не выбран в профиле",
@@ -935,22 +1108,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           ? builtCard
           : applyFreshSourceCard(builtCard, outcome.card, now).next;
       const remembered = await rememberFound(reviewedCard, profile.id, now);
+      if (!runAlive()) break;
+      // Inbox rows carry this profile's verdict: a candidate stays a review
+      // row even when another direction matched the same card (R04).
+      const profileView = projectCardForProfile(remembered.card, profile.id);
       if (outcome?.verdict === "relevant") {
         matchCount += 1;
         matched.push(remembered.card);
         workspace().appendSearchId(profile.id, remembered.card.id);
         catalog().dismissByProcurementId(item.card.id);
         if (scoring.inboxForMatches && remembered.isNew) {
-          catalog().record(inboxItemFromFoundCard(remembered.card, now));
+          catalog().record(inboxItemFromFoundCard(profileView, now));
         }
       } else {
         ambiguousCount += 1;
         // Manual search resurfaces a still-undecided row (incl. a dismissed
         // one); a discovery pass only announces genuinely new candidates so
         // it cannot nag the specialist about the same card every hour.
-        if (remembered.isNew || !scoring.inboxForMatches) queueFoundInbox(remembered.card, now);
+        if (remembered.isNew || !scoring.inboxForMatches) queueFoundInbox(profileView, now);
       }
-      searchProgress.scored(profile.id, {
+      searchProgress.scored(profile.id, runId, {
         scoredCount,
         matchCount,
         discardedCount: discarded,
@@ -984,9 +1161,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     profile: SpecialistWorkingProfile,
     now: string,
     plan: SearchIntentPlan,
+    runId: string,
   ): void {
     if (pending.length === 0) {
-      searchProgress.finish(profile.id, "done");
+      searchProgress.finish(profile.id, runId, "done");
       return;
     }
     const cabinet = currentCabinet();
@@ -995,15 +1173,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         await scorePendingHits(pending, profile, now, plan, {
           inboxForMatches: false,
           persistEach: true,
-        });
+        }, runId);
         await pruneStaleCases();
         await persist(cabinet);
-        searchProgress.scored(profile.id, {
+        searchProgress.scored(profile.id, runId, {
           matchCount: searchQueueCards(profile.id).length,
         });
-        searchProgress.finish(profile.id, "done");
+        searchProgress.finish(profile.id, runId, "done");
       } catch (error) {
-        searchProgress.finish(profile.id, "failed");
+        searchProgress.finish(profile.id, runId, "failed");
         logger.error("Specialist search review job failed", error, {
           profileName: profileDisplayName(profile),
         });
@@ -1057,6 +1235,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return ids
       .map((id) => byId.get(id))
       .filter((card): card is SpecialistProcurementCardValue => card !== undefined)
+      .map((card) => projectCardForProfile(card, profileId))
       .filter(
         (card) =>
           isScoredSearchMatch(card) &&
@@ -1112,7 +1291,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         continue;
       }
       const already = known.get(card.sourceProcurementId);
-      if (already?.foundAs === "match" && options.skipKnownIrrelevant) {
+      // "Already matched" is per profile: another direction's verdict must
+      // not exempt this profile from scoring the card itself (R04).
+      if (
+        already !== undefined &&
+        cardAssessmentVerdictFor(already, profile.id) === "match" &&
+        options.skipKnownIrrelevant
+      ) {
         if (searchQueueHas(profile.id, already.id) || already.profileIds.includes(profile.id)) {
           continue;
         }
@@ -1284,8 +1469,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
     logSearchTrace(profile, selected);
     const now = clock();
-    // A new button search replaces this profile's unread queue only.
-    // Other profiles keep their cards.
+    // A new button search supersedes this profile's previous run: writes
+    // carrying the old runId become no-ops the moment begin() swaps the
+    // progress slot, so two overlapping runs cannot interleave (R15).
+    const runId = randomUUID();
     if (offset === 0) {
       workspace().replaceSearchIds(profile.id, []);
     }
@@ -1297,6 +1484,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const background = searchReview !== undefined;
     searchProgress.begin({
       profileId: profile.id,
+      runId,
       profileName: profileDisplayName(profile),
       status: collected.pending.length === 0 ? "done" : background ? "retrieving" : "scoring",
       retrievedCount: collected.pending.length,
@@ -1318,21 +1506,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const scored = await scorePendingHits(collected.pending, profile, now, plan, {
         inboxForMatches: false,
         persistEach: false,
-      });
+      }, runId);
       discardedCount += scored.discarded;
       ambiguousCount += scored.ambiguousCount;
-      searchProgress.scored(profile.id, {
+      searchProgress.scored(profile.id, runId, {
         matchCount: searchQueueCards(profile.id).length,
         discardedCount: scored.discarded,
         reviewCount: scored.ambiguousCount,
       });
-      searchProgress.finish(profile.id, "done");
+      searchProgress.finish(profile.id, runId, "done");
       await pruneStaleCases();
       await persist();
     } else {
       ambiguousCount += collected.pending.length;
       await persist();
-      startListingReviewJob(collected.pending, profile, now, plan);
+      startListingReviewJob(collected.pending, profile, now, plan, runId);
     }
     const items = searchQueueCards(profile.id);
     logger.info("Specialist profile search recorded", {
@@ -1702,6 +1890,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (workspace().profiles().length === 1) {
       return reply.code(409).send({ error: "last_profile" });
     }
+    // Drop the run slot first: a background scoring job of this profile
+    // turns into a no-op instead of finishing against a deleted owner.
+    searchProgress.clear(params.id);
     workspace().removeProfile(params.id);
     await cabinets.deleteProfile(currentCabinet(), params.id);
     logger.info("Specialist working profile removed", { id: params.id });
@@ -1846,13 +2037,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
     }
     if (action === "documents" && card !== undefined && documentIngest !== undefined) {
-      ingestProgress.begin(card.id);
+      const workspaceId = currentCabinet().workspaceId;
+      ingestProgress.begin(workspaceId, card.id);
       try {
-        card = withTriage(await documentIngest.ingest(card), workspace());
-        ingestProgress.done(card.id);
+        card = withTriage(await documentIngest.ingest(card, workspaceId), workspace());
+        ingestProgress.done(workspaceId, card.id);
         catalog().upsertCase(card);
       } catch (error) {
-        ingestProgress.fail(card.id);
+        ingestProgress.fail(workspaceId, card.id);
         logger.error("Specialist inbox document ingest failed", error, {
           sourceProcurementId: card.sourceProcurementId,
         });
@@ -2084,7 +2276,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    return SpecialistIngestProgress.parse(ingestProgress.snapshot(card.id));
+    return SpecialistIngestProgress.parse(
+      ingestProgress.snapshot(currentCabinet().workspaceId, card.id),
+    );
   });
 
   app.get("/api/procurements/:id", async (request, reply) => {

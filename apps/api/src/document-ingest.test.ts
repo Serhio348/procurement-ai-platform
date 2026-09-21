@@ -10,6 +10,8 @@ import { putBlob } from "./blobs.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 
+const WS = "00000000-0000-4000-8000-0000000000ee";
+
 const tmpDirs: string[] = [];
 
 afterEach(async () => {
@@ -73,15 +75,15 @@ describe("createProcurementDocumentIngest", () => {
       live: true,
     });
 
-    progress.begin(card.id);
-    const next = await port.ingest(card);
-    progress.done(card.id);
+    progress.begin(WS, card.id);
+    const next = await port.ingest(card, WS);
+    progress.done(WS, card.id);
 
     expect(next.documents[0]?.status).toBe("hashed");
     expect(next.documents[0]?.hash).toBe(hash);
-    expect(progress.snapshot(card.id).phase).toBe("done");
-    expect(progress.snapshot(card.id).files[0]?.state).toMatch(/read|skipped/);
-    expect(progress.snapshot(card.id).files[0]?.hash).toBe(hash);
+    expect(progress.snapshot(WS, card.id).phase).toBe("done");
+    expect(progress.snapshot(WS, card.id).files[0]?.state).toMatch(/read|skipped/);
+    expect(progress.snapshot(WS, card.id).files[0]?.hash).toBe(hash);
     expect(callTool.mock.calls.map((item) => item[0])).toEqual([
       "procurement.get_documents",
       "procurement.download",
@@ -146,7 +148,7 @@ describe("createProcurementDocumentIngest", () => {
       live: true,
     });
 
-    const next = await port.ingest(card);
+    const next = await port.ingest(card, WS);
 
     expect(next.documents.map((item) => item.name)).toEqual([
       "Комплект.zip",
@@ -189,13 +191,13 @@ describe("createProcurementDocumentIngest", () => {
       ],
     });
 
-    progress.begin(card.id);
+    progress.begin(WS, card.id);
     const reindex = port.reindex;
     if (reindex === undefined) {
       throw new Error("reindex is required");
     }
-    const next = await reindex(card);
-    progress.done(card.id);
+    const next = await reindex(card, WS);
+    progress.done(WS, card.id);
 
     expect(callTool).not.toHaveBeenCalled();
     expect(next.documents[0]?.status).toBe("hashed");
@@ -267,7 +269,7 @@ describe("createProcurementDocumentIngest", () => {
       ],
     });
 
-    const next = await port.ingest(card);
+    const next = await port.ingest(card, WS);
 
     expect(callTool.mock.calls.map((item) => item[0])).toEqual([
       "procurement.get_documents",
@@ -297,7 +299,7 @@ describe("createProcurementDocumentIngest", () => {
       live: true,
     });
 
-    const next = await port.ingest(card);
+    const next = await port.ingest(card, WS);
 
     expect(next.documents[0]?.status).toBe("download_failed");
     expect(next.documents[0]?.note).toMatch(/не найден в хранилище/);

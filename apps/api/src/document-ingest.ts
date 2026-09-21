@@ -41,13 +41,23 @@ import {
 import { silentLogger, type Logger } from "@procurement/observability";
 import { contentTypeForName, getBlob, putBlob } from "./blobs.js";
 import type { CommercialReaderPort } from "./commercial-reader.js";
-import type { IngestProgressHub } from "./ingest-progress.js";
+import {
+  bindIngestScope,
+  type IngestProgressHub,
+  type ScopedIngestProgress,
+} from "./ingest-progress.js";
 import type { BlobStore } from "./object-store.js";
 
 export interface SpecialistDocumentIngestPort {
-  ingest: (card: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>;
+  ingest: (
+    card: SpecialistProcurementCardValue,
+    workspaceId: string,
+  ) => Promise<SpecialistProcurementCardValue>;
   /** Re-reads blobs already on the case. Does not call the platform. */
-  reindex?: (card: SpecialistProcurementCardValue) => Promise<SpecialistProcurementCardValue>;
+  reindex?: (
+    card: SpecialistProcurementCardValue,
+    workspaceId: string,
+  ) => Promise<SpecialistProcurementCardValue>;
 }
 
 export interface ProcurementDocumentIngestOptions {
@@ -80,7 +90,11 @@ export function createProcurementDocumentIngest(
   const logger = options.logger ?? silentLogger;
 
   return {
-    async ingest(card: SpecialistProcurementCardValue): Promise<SpecialistProcurementCardValue> {
+    async ingest(
+      card: SpecialistProcurementCardValue,
+      workspaceId: string,
+    ): Promise<SpecialistProcurementCardValue> {
+      const progress = bindIngestScope(options.progress, workspaceId);
       const requestId = RequestId.parse(randomUUID());
       const sourceId = SourceId.parse(card.live ? "goszakupki_by" : "fixture");
       const listed = await client.getDocuments(
@@ -90,7 +104,7 @@ export function createProcurementDocumentIngest(
         },
         requestId,
       );
-      options.progress?.listed(card.id, listed.documents);
+      progress?.listed(card.id, listed.documents);
       const scan = createDocumentScanEngine();
       const nativeExtractor = new RoutingDocumentExtractor();
       const scanExtractor = new RoutingDocumentExtractor({
@@ -126,7 +140,7 @@ export function createProcurementDocumentIngest(
             scanExtractor,
             usesVision: scan.usesVision,
             logger,
-            ...(options.progress === undefined ? {} : { progress: options.progress }),
+            ...(progress === undefined ? {} : { progress }),
             procurementId: card.id,
           });
           documents.push(...ingested);
@@ -142,14 +156,18 @@ export function createProcurementDocumentIngest(
       }
       return finishCommercialRead(card, documents, options, logger);
     },
-    async reindex(card: SpecialistProcurementCardValue): Promise<SpecialistProcurementCardValue> {
+    async reindex(
+      card: SpecialistProcurementCardValue,
+      workspaceId: string,
+    ): Promise<SpecialistProcurementCardValue> {
+      const progress = bindIngestScope(options.progress, workspaceId);
       const stored = card.documents.filter(
         (document) =>
           document.hash !== undefined &&
           document.status === "hashed" &&
           !isArchiveMemberSourceUrl(document.sourceUrl),
       );
-      options.progress?.listed(
+      progress?.listed(
         card.id,
         stored.map((document) => ({ name: document.name, sourceUrl: document.sourceUrl })),
       );
@@ -172,7 +190,7 @@ export function createProcurementDocumentIngest(
               scanExtractor,
               usesVision: scan.usesVision,
               logger,
-              ...(options.progress === undefined ? {} : { progress: options.progress }),
+              ...(progress === undefined ? {} : { progress }),
               procurementId: card.id,
             })),
           );
@@ -280,7 +298,7 @@ async function ingestOne(input: {
   scanExtractor: RoutingDocumentExtractor;
   usesVision: boolean;
   logger: Logger;
-  progress?: IngestProgressHub;
+  progress?: ScopedIngestProgress;
   procurementId: string;
 }): Promise<SpecialistCaseDocumentValue[]> {
   const listed = {
@@ -372,7 +390,7 @@ async function reindexOne(input: {
   scanExtractor: RoutingDocumentExtractor;
   usesVision: boolean;
   logger: Logger;
-  progress?: IngestProgressHub;
+  progress?: ScopedIngestProgress;
   procurementId: string;
 }): Promise<SpecialistCaseDocumentValue[]> {
   const hash = input.document.hash;
@@ -421,7 +439,7 @@ async function indexStoredFile(input: {
   scanExtractor: RoutingDocumentExtractor;
   usesVision: boolean;
   logger: Logger;
-  progress?: IngestProgressHub;
+  progress?: ScopedIngestProgress;
   procurementId: string;
   depth: number;
 }): Promise<SpecialistCaseDocumentValue[]> {
@@ -507,7 +525,7 @@ async function indexStoredFile(input: {
 
 function finishIndexed(
   input: {
-    progress?: IngestProgressHub;
+    progress?: ScopedIngestProgress;
     procurementId: string;
     sourceUrl: string;
   },

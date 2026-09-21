@@ -225,7 +225,9 @@ export function ProcurementsApp({
     }
     if (searchRun !== undefined && searchRun.retrievedCount > 0) {
       const pct =
-        searchRun.status === "done" || searchRun.status === "failed"
+        searchRun.status === "done" ||
+        searchRun.status === "failed" ||
+        searchRun.status === "interrupted"
           ? 100
           : Math.min(99, Math.round((searchRun.scoredCount / searchRun.retrievedCount) * 100));
       setSearchPct(pct);
@@ -240,6 +242,10 @@ export function ProcurementsApp({
     if (searchRun === undefined) return;
     if (searchRun.status === "failed") {
       setNotice("Не удалось дочитать карточки поиска.");
+      return;
+    }
+    if (searchRun.status === "interrupted") {
+      setNotice("Поиск прервался при перезапуске сервера — запустите его ещё раз.");
       return;
     }
     if (searchRun.status === "retrieving" || searchRun.status === "scoring") {

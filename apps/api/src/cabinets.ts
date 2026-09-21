@@ -80,6 +80,8 @@ export interface CabinetRegistry {
     sourceIds: readonly string[],
   ) => Promise<Map<string, SpecialistProcurementCardValue>>;
   listWatchedCases: (workspaceId: string, limit: number) => Promise<SpecialistProcurementCardValue[]>;
+  /** Cases with a document job persisted mid-flight; resumed on open (R16). */
+  listIngestingCases: (workspaceId: string) => Promise<SpecialistProcurementCardValue[]>;
   listStaleUndecidedIds: (
     workspaceId: string,
     cutoffIso: string,
@@ -203,6 +205,9 @@ export function createMemoryCabinetRegistry(options: {
         .filter((item) => item.live && item.archived !== true && isWatchedTriage(item))
         .sort((left, right) => watchOrder(left) - watchOrder(right))
         .slice(0, limit);
+    },
+    async listIngestingCases(workspaceId) {
+      return casesOf(workspaceId).filter((card) => card.ingesting !== undefined);
     },
     async listStaleUndecidedIds(workspaceId, cutoffIso, keepSourceIds, keepIds = []) {
       const cutoff = Date.parse(cutoffIso);

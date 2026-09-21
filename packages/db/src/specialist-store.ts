@@ -1,11 +1,13 @@
 import {
   InboxFixtureItem,
   SpecialistProcurementCard,
+  SpecialistSearchRun,
   SpecialistWorkingProfile,
   SpecialistWorkspaceState,
   type InboxFixtureItem as InboxFixtureItemValue,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistSearchRun as SpecialistSearchRunValue,
   type SpecialistProcurementListTab,
   type SpecialistTriageKind,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
@@ -47,6 +49,22 @@ function searchIdsByProfileFromSettings(
   return out;
 }
 
+/** Search runs live in the settings JSON next to the per-profile queue (R16). */
+function searchRunsFromSettings(
+  settings: Record<string, unknown> | null | undefined,
+): Record<string, SpecialistSearchRunValue> {
+  if (settings === undefined || settings === null) return {};
+  const raw = settings["searchRuns"];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, SpecialistSearchRunValue> = {};
+  // A corrupt entry must not fail the whole workspace load — drop it.
+  for (const [profileId, run] of Object.entries(raw)) {
+    const parsed = SpecialistSearchRun.safeParse(run);
+    if (parsed.success) out[profileId] = parsed.data;
+  }
+  return out;
+}
+
 /** Profile ids removed in this workspace; stale cabinet saves must not resurrect them. */
 export function deletedProfileIdsFromSettings(
   settings: Record<string, unknown> | null | undefined,
@@ -60,14 +78,18 @@ export function deletedProfileIdsFromSettings(
 export function workspaceSettingsPayload(
   searchIdsByProfile: Record<string, string[]>,
   deletedProfileIds: readonly string[],
+  searchRuns: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const banned = deletedProfileIdsFromSettings({ deletedProfileIds: [...deletedProfileIds] });
   const search = Object.fromEntries(
     Object.entries(searchIdsByProfile).filter(([profileId]) => !banned.includes(profileId)),
   );
+  const runs = Object.fromEntries(
+    Object.entries(searchRuns).filter(([profileId]) => !banned.includes(profileId)),
+  );
   return banned.length === 0
-    ? { searchIdsByProfile: search }
-    : { searchIdsByProfile: search, deletedProfileIds: banned };
+    ? { searchIdsByProfile: search, searchRuns: runs }
+    : { searchIdsByProfile: search, deletedProfileIds: banned, searchRuns: runs };
 }
 
 export function omitDeletedProfiles<T extends { id: string }>(
@@ -297,6 +319,7 @@ export function createSpecialistStore(db: Database) {
             .filter((row) => row.archived)
             .map((row) => row.sourceProcurementId),
           searchIdsByProfile: searchIdsByProfileFromSettings(settingRows[0]?.settings),
+          searchRuns: searchRunsFromSettings(settingRows[0]?.settings),
         });
       });
     },
@@ -337,7 +360,12 @@ export function createSpecialistStore(db: Database) {
             ),
           );
         const settingsJson = jsonbSql(
-          workspaceSettingsPayload(searchIdsByProfile, deletedProfileIds),
+          workspaceSettingsPayload(
+            searchIdsByProfile,
+            deletedProfileIds,
+            // Keep other profiles' runs; the deleted profile's is filtered out.
+            searchRunsFromSettings(settingRows[0]?.settings),
+          ),
         );
         await tx
           .insert(workspaceSettings)
@@ -423,7 +451,11 @@ export function createSpecialistStore(db: Database) {
             });
         }
         const settingsJson = jsonbSql(
-          workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds),
+          workspaceSettingsPayload(
+            state.searchIdsByProfile,
+            deletedProfileIds,
+            state.searchRuns,
+          ),
         );
         await tx
           .insert(workspaceSettings)
@@ -599,6 +631,32 @@ export function createSpecialistStore(db: Database) {
             asc(workspaceProcurements.lastSeenAt),
           )
           .limit(limit);
+        const items: SpecialistProcurementCardValue[] = [];
+        for (const row of rows) {
+          const parsed = parseCaseRow(row);
+          if (parsed !== undefined) items.push(parsed);
+        }
+        return items;
+      });
+    },
+
+    /**
+     * Cases with a document job persisted mid-flight. Read on cabinet open
+     * so a restart resumes the download instead of losing it (R16).
+     */
+    async listIngestingCases(
+      workspaceId: string,
+    ): Promise<SpecialistProcurementCardValue[]> {
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              sql`${workspaceProcurements.card} ->> 'ingesting' is not null`,
+            ),
+          );
         const items: SpecialistProcurementCardValue[] = [];
         for (const row of rows) {
           const parsed = parseCaseRow(row);
@@ -1028,7 +1086,7 @@ async function writeWorkspaceState(
       });
   }
   const settingsJson = jsonbSql(
-    workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds),
+    workspaceSettingsPayload(state.searchIdsByProfile, deletedProfileIds, state.searchRuns),
   );
   await tx
     .insert(workspaceSettings)

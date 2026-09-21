@@ -226,6 +226,18 @@ export const SpecialistCardSnapshot = z.object({
 });
 export type SpecialistCardSnapshot = z.infer<typeof SpecialistCardSnapshot>;
 
+/**
+ * What one profile's search decided about a card. Kept per profile so a
+ * second direction's run cannot overwrite the first one's answer (R04).
+ */
+export const SpecialistCardAssessment = z.object({
+  verdict: z.enum(["match", "review"]),
+  score: z.number().int().min(0).max(100).optional(),
+  reason: z.string().max(500).optional(),
+  evaluatedAt: IsoDateTime,
+});
+export type SpecialistCardAssessment = z.infer<typeof SpecialistCardAssessment>;
+
 export const SpecialistProcurementCard = z.object({
   id: ProcurementId,
   /**
@@ -270,6 +282,13 @@ export const SpecialistProcurementCard = z.object({
   /** Plain-language why the score came out this way. Written by code. */
   relevanceReason: z.string().max(500).optional(),
   /**
+   * Per-profile verdicts: profileId → what that direction's search decided.
+   * The top-level foundAs/score/reason are a derived view over this map
+   * (a match from any profile wins); a profile-scoped view projects its own
+   * entry so one direction cannot overwrite another's answer (R04).
+   */
+  assessments: z.record(z.string().uuid(), SpecialistCardAssessment).default({}),
+  /**
    * The specialist moved the case to the archive: done participating, kept for
    * the record. Archived cases stay listed but leave "Мои закупки" and stop
    * being re-read by monitoring.
@@ -289,6 +308,13 @@ export const SpecialistProcurementCard = z.object({
    * cases and on records decided before this field existed.
    */
   sourceCard: ProcedureCard.optional(),
+  /**
+   * A background document job for this case was persisted in flight. The flag
+   * survives a restart: on the next cabinet open the job resumes — already
+   * hashed files are the checkpoint and are skipped (R16). Absent when no
+   * job is running.
+   */
+  ingesting: z.enum(["ingest", "reindex"]).optional(),
 });
 export type SpecialistProcurementCard = z.infer<typeof SpecialistProcurementCard>;
 export type SpecialistFoundAs = NonNullable<SpecialistProcurementCard["foundAs"]>;
@@ -352,7 +378,14 @@ export const SpecialistSearchProgressQuery = z.object({
 });
 export type SpecialistSearchProgressQuery = z.infer<typeof SpecialistSearchProgressQuery>;
 
-export const SpecialistSearchRunStatus = z.enum(["retrieving", "scoring", "done", "failed"]);
+export const SpecialistSearchRunStatus = z.enum([
+  "retrieving",
+  "scoring",
+  "done",
+  "failed",
+  /** The process stopped mid-run; the stored snapshot survives a restart (R16). */
+  "interrupted",
+]);
 export type SpecialistSearchRunStatus = z.infer<typeof SpecialistSearchRunStatus>;
 
 /**
@@ -361,6 +394,13 @@ export type SpecialistSearchRunStatus = z.infer<typeof SpecialistSearchRunStatus
  */
 export const SpecialistSearchRun = z.object({
   profileId: z.string().uuid(),
+  /**
+   * Identity of this run. A newer search for the same profile supersedes
+   * the older one; progress writes carrying a stale runId are dropped so
+   * concurrent runs cannot interleave into each other's queue (R15).
+   * Absent on synthetic "idle" snapshots.
+   */
+  runId: z.string().uuid().optional(),
   profileName: z.string().min(1),
   status: SpecialistSearchRunStatus,
   retrievedCount: z.number().int().nonnegative(),
@@ -520,6 +560,12 @@ export const SpecialistWorkspaceState = z.object({
    * this queue, not every case ever stored in the cabinet.
    */
   searchIdsByProfile: z.record(z.string().uuid(), z.array(z.string().uuid())).default({}),
+  /**
+   * Latest search run per profile, persisted with the workspace so a restart
+   * does not lose it. A run stored mid-flight is marked "interrupted" on the
+   * next cabinet open instead of silently vanishing (R16).
+   */
+  searchRuns: z.record(z.string().uuid(), SpecialistSearchRun).default({}),
 });
 export type SpecialistWorkspaceState = z.infer<typeof SpecialistWorkspaceState>;
 

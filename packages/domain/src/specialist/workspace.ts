@@ -1,14 +1,16 @@
 import {
   SpecialistReviewVerdict,
+  SpecialistSearchRun,
   SpecialistTriageDecision,
   SpecialistWorkingProfile,
   SpecialistWorkspaceState,
   type SpecialistProfileWrite,
+  type SpecialistSearchRun as SpecialistSearchRunValue,
   type SpecialistTriageKind,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
   type SpecialistWorkspaceState as SpecialistWorkspaceStateValue,
 } from "@procurement/contracts";
-import { resolvePlatformKeywords, sameSearchPhrases } from "./looking-for.js";
+import { resolvePlatformKeywords } from "./looking-for.js";
 
 /** How long a review verdict of "irrelevant" is trusted before the hit may be looked at again. */
 export const REVIEW_VERDICT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -61,6 +63,7 @@ export class SpecialistWorkspace {
   #reviewedIrrelevant: SpecialistReviewVerdict[] = [];
   #archivedSourceIds = new Set<string>();
   #searchIdsByProfile: Record<string, string[]> = {};
+  #searchRuns: Record<string, SpecialistSearchRunValue> = {};
 
   constructor(profile: SpecialistWorkingProfileValue = emptySpecialistWorkingProfile()) {
     const parsed = SpecialistWorkingProfile.parse(profile);
@@ -90,6 +93,12 @@ export class SpecialistWorkspace {
     workspace.#searchIdsByProfile = Object.fromEntries(
       Object.entries(state.searchIdsByProfile).map(([profileId, ids]) => [profileId, [...ids]]),
     );
+    workspace.#searchRuns = Object.fromEntries(
+      Object.entries(state.searchRuns).map(([profileId, run]) => [
+        profileId,
+        SpecialistSearchRun.parse(run),
+      ]),
+    );
     return workspace;
   }
 
@@ -104,6 +113,7 @@ export class SpecialistWorkspace {
       searchIdsByProfile: Object.fromEntries(
         Object.entries(this.#searchIdsByProfile).map(([profileId, ids]) => [profileId, [...ids]]),
       ),
+      searchRuns: { ...this.#searchRuns },
     });
   }
 
@@ -200,6 +210,7 @@ export class SpecialistWorkspace {
     }
     this.#profiles = this.#profiles.filter((item) => item.id !== id);
     delete this.#searchIdsByProfile[id];
+    delete this.#searchRuns[id];
     // Orphan review rows only slow the next persist; drop them with the profile.
     this.#reviewedIrrelevant = this.#reviewedIrrelevant.filter((item) => item.profileId !== id);
     if (this.#activeProfileId === id) {
@@ -232,6 +243,23 @@ export class SpecialistWorkspace {
 
   searchIds(profileId: string): readonly string[] {
     return this.#searchIdsByProfile[profileId] ?? [];
+  }
+
+  /**
+   * Latest search run per profile. The record survives a restart: the API
+   * layer marks a run stored mid-flight as "interrupted" instead of losing
+   * it (R16).
+   */
+  setSearchRun(run: SpecialistSearchRunValue): void {
+    this.#searchRuns[run.profileId] = SpecialistSearchRun.parse(run);
+  }
+
+  forgetSearchRun(profileId: string): void {
+    delete this.#searchRuns[profileId];
+  }
+
+  searchRuns(): readonly SpecialistSearchRunValue[] {
+    return Object.values(this.#searchRuns);
   }
 
   replaceProfile(input: SpecialistProfileWrite): void {
@@ -320,14 +348,8 @@ export class SpecialistWorkspace {
     const excludeKeywords = input.excludeKeywords
       .map((phrase) => phrase.trim())
       .filter((phrase) => phrase.length > 0);
-    // New search phrases mean the source must be re-read from scratch and
-    // earlier "irrelevant" verdicts no longer describe this profile.
-    const phrasesChanged =
-      !sameSearchPhrases(keywords, current.keywords) ||
-      !sameSearchPhrases(excludeKeywords, current.excludeKeywords);
     const next = SpecialistWorkingProfile.parse({
       ...current,
-      lastDiscoveryAt: phrasesChanged ? undefined : current.lastDiscoveryAt,
       name: input.name.trim(),
       purpose: (input.purpose ?? "").trim() || lookingFor,
       description: lookingFor,
@@ -337,11 +359,66 @@ export class SpecialistWorkspace {
       excludeSingleSource: input.excludeSingleSource,
       filters: input.filters ?? current.filters,
     });
-    this.#profiles = this.#profiles.map((item) => (item.id === id ? next : item));
-    if (phrasesChanged) {
+    // Any change to a field that steers retrieval or scoring — phrases,
+    // name/purpose (they feed the intent plan), statuses, filters — means
+    // the source must be re-read and earlier "irrelevant" verdicts no
+    // longer describe this profile (R12).
+    const searchChanged = searchProfileSignature(next) !== searchProfileSignature(current);
+    const stamped = searchChanged
+      ? SpecialistWorkingProfile.parse({ ...next, lastDiscoveryAt: undefined })
+      : next;
+    this.#profiles = this.#profiles.map((item) => (item.id === id ? stamped : item));
+    if (searchChanged) {
       this.#reviewedIrrelevant = this.#reviewedIrrelevant.filter((item) => item.profileId !== id);
     }
   }
+}
+
+/**
+ * The fields that decide what the source returns and how hits are scored.
+ * Serialised canonically (sorted keys, sorted lists) so a reorder is not a
+ * change. The watermark and watch flag are deliberately excluded: toggling
+ * watch does not change what the profile means, and `lastDiscoveryAt` is
+ * the thing the signature guards (R12).
+ */
+function searchProfileSignature(
+  profile: Pick<
+    SpecialistWorkingProfileValue,
+    | "name"
+    | "purpose"
+    | "description"
+    | "keywords"
+    | "excludeKeywords"
+    | "statuses"
+    | "excludeSingleSource"
+    | "filters"
+  >,
+): string {
+  return stableStringify({
+    name: profile.name,
+    purpose: profile.purpose,
+    description: profile.description,
+    keywords: [...profile.keywords].sort(),
+    excludeKeywords: [...profile.excludeKeywords].sort(),
+    statuses: [...profile.statuses].sort(),
+    excludeSingleSource: profile.excludeSingleSource,
+    filters: profile.filters,
+  });
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 /** Search queue is a process session. Disk and SQL keep the profile cabinet. */
@@ -368,6 +445,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
     reviewedIrrelevant?: unknown;
     archivedSourceIds?: unknown;
     searchIdsByProfile?: unknown;
+    searchRuns?: unknown;
   };
   const dismissedInboxIds = Array.isArray(record.dismissedInboxIds) ? record.dismissedInboxIds : [];
   const reviewedIrrelevant = Array.isArray(record.reviewedIrrelevant) ? record.reviewedIrrelevant : [];
@@ -377,6 +455,12 @@ function migrateWorkspaceState(raw: unknown): unknown {
     record.searchIdsByProfile !== null &&
     !Array.isArray(record.searchIdsByProfile)
       ? record.searchIdsByProfile
+      : {};
+  const searchRuns =
+    typeof record.searchRuns === "object" &&
+    record.searchRuns !== null &&
+    !Array.isArray(record.searchRuns)
+      ? record.searchRuns
       : {};
   if (Array.isArray(record.profiles) && record.profiles.length > 0) {
     const profiles = record.profiles.map((item) => SpecialistWorkingProfile.parse(item));
@@ -390,6 +474,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       reviewedIrrelevant,
       archivedSourceIds,
       searchIdsByProfile,
+      searchRuns,
     };
   }
   if (record.profile !== undefined) {
@@ -402,6 +487,7 @@ function migrateWorkspaceState(raw: unknown): unknown {
       reviewedIrrelevant,
       archivedSourceIds,
       searchIdsByProfile,
+      searchRuns,
     };
   }
   const created = emptySpecialistWorkingProfile();

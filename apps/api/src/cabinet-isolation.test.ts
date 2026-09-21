@@ -1,5 +1,5 @@
-import { SearchHit } from "@procurement/contracts";
-import { describe, expect, it } from "vitest";
+import { SearchHit, type SpecialistProcurementCard } from "@procurement/contracts";
+import { describe, expect, it, vi } from "vitest";
 import { buildSpecialistApi } from "./app.js";
 import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createMemoryCabinetRegistry } from "./cabinets.js";
@@ -282,6 +282,105 @@ describe("personal cabinets", () => {
         item.message.includes("просмотрел кабинет: Иван (spec@example.com)"),
       ),
     ).toBe(true);
+
+    await app.close();
+  });
+
+  it("runs a document job per cabinet even when both hold the same card id", async () => {
+    // Card ids derive from the source row, so two cabinets searching the same
+    // phrase store the same card.id — the ingest dedup must still let each
+    // cabinet's job run (R17).
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const cabinets = createMemoryCabinetRegistry();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ingest = vi.fn(async (card: SpecialistProcurementCard) => {
+      await gate;
+      return { ...card, documents: [] };
+    });
+    const app = await buildSpecialistApi({
+      authDirectory: directory,
+      cabinets,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/shared-ingest",
+            url: "https://goszakupki.by/auction/view/shared-ingest",
+            title: "КТПБ общая закупка",
+          }),
+        ],
+      },
+      documentIngest: { ingest },
+    });
+
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const cookies: string[] = [];
+    for (const email of ["one@example.com", "two@example.com"]) {
+      const signed = await app.inject({
+        method: "POST",
+        url: "/api/auth/sign-up",
+        payload: { email, name: email, password: "secret-password" },
+      });
+      const listed = await app.inject({
+        method: "GET",
+        url: "/api/admin/users",
+        headers: { cookie: cookieHeader(adminIn) },
+      });
+      const id = (
+        JSON.parse(listed.body) as { items: Array<{ id: string; email: string }> }
+      ).items.find((item) => item.email === email)?.id;
+      await app.inject({
+        method: "POST",
+        url: `/api/admin/users/${id ?? ""}/approve`,
+        headers: { cookie: cookieHeader(adminIn) },
+        payload: { role: "specialist" },
+      });
+      cookies.push(cookieHeader(signed));
+    }
+
+    for (const cookie of cookies) {
+      const profile = JSON.parse(
+        (
+          await app.inject({
+            method: "GET",
+            url: "/api/profile",
+            headers: { cookie },
+          })
+        ).body,
+      ) as { id: string };
+      await app.inject({
+        method: "PUT",
+        url: `/api/profiles/${profile.id}`,
+        headers: { cookie },
+        payload: { name: "КТПБ", keywords: ["КТПБ"] },
+      });
+      const searched = await app.inject({
+        method: "POST",
+        url: "/api/procurements/search",
+        headers: { cookie },
+        payload: { profileId: profile.id },
+      });
+      const cardId = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+      await app.inject({
+        method: "POST",
+        url: `/api/procurements/${cardId}/decision`,
+        headers: { cookie },
+        payload: { kind: "participate" },
+      });
+    }
+
+    // Both cabinets' jobs start: a shared card id must not deduplicate the
+    // second cabinet's download while the first is still in flight.
+    await vi.waitFor(() => expect(ingest).toHaveBeenCalledTimes(2));
+    release();
 
     await app.close();
   });

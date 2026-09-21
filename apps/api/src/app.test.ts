@@ -787,6 +787,196 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("keeps each profile's verdict, score and reason on the same card", async () => {
+    const hit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/shared-1",
+      url: "https://goszakupki.by/auction/view/shared-1",
+      title: "Поставка кабеля ВВГнг",
+      status: "accepting_bids",
+    });
+    const review = vi.fn(
+      async (hits: readonly SearchHit[], profile: { name: string }): Promise<ReviewOutcome[]> =>
+        hits.map(() => ({
+          verdict: "relevant",
+          decidedBy: "card",
+          reason: `причина «${profile.name}»`,
+          matchedTerms: ["кабель"],
+          confidence: 1,
+          score: profile.name === "Насосы" ? 40 : 90,
+        })),
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [hit] },
+      searchReview: { review },
+    });
+    const profileA = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileA}`,
+      payload: { name: "Кабели", keywords: ["кабель"] },
+    });
+    const profileB = (
+      JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as {
+        id: string;
+      }
+    ).id;
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileB}`,
+      payload: { name: "Насосы", keywords: ["кабель"] },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId: profileA },
+    });
+    await vi.waitFor(async () => {
+      const queue = await app.inject({
+        method: "GET",
+        url: `/api/procurements?tab=search&profileId=${profileA}`,
+      });
+      const items = JSON.parse(queue.body).items as Array<{ relevanceScore?: number }>;
+      expect(items[0]?.relevanceScore).toBe(90);
+    });
+
+    // The same source card under the second profile gets its own answer.
+    await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId: profileB },
+    });
+    await vi.waitFor(async () => {
+      const queue = await app.inject({
+        method: "GET",
+        url: `/api/procurements?tab=search&profileId=${profileB}`,
+      });
+      const items = JSON.parse(queue.body).items as Array<{
+        relevanceScore?: number;
+        relevanceReason?: string;
+      }>;
+      expect(items[0]?.relevanceScore).toBe(40);
+      expect(items[0]?.relevanceReason).toBe("причина «Насосы»");
+    });
+
+    // B's later run did not overwrite what profile A sees (R04).
+    const queueA = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${profileA}`,
+    });
+    const itemsA = JSON.parse(queueA.body).items as Array<{
+      relevanceScore?: number;
+      relevanceReason?: string;
+    }>;
+    expect(itemsA[0]?.relevanceScore).toBe(90);
+    expect(itemsA[0]?.relevanceReason).toBe("причина «Кабели»");
+
+    await app.close();
+  });
+
+  it("superseded search runs cannot write into the newer run's queue (R15)", async () => {
+    const hitOld = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/old-1",
+      url: "https://goszakupki.by/auction/view/old-1",
+      title: "Кабель старый прогон",
+      status: "accepting_bids",
+    });
+    const hitNew = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/new-1",
+      url: "https://goszakupki.by/auction/view/new-1",
+      title: "Кабель новый прогон",
+      status: "accepting_bids",
+    });
+    let releaseOld: (() => void) | undefined;
+    let oldResumed = false;
+    const review = vi.fn(
+      async (hits: readonly SearchHit[]): Promise<ReviewOutcome[]> => {
+        if (hits[0]?.sourceProcurementId === "auction/old-1") {
+          // The first run's card review is still in flight when the second
+          // search starts; it resolves only after the new run owns the slot.
+          await new Promise<void>((resolve) => {
+            releaseOld = resolve;
+          });
+          oldResumed = true;
+          return hits.map(() => ({
+            verdict: "relevant",
+            decidedBy: "card",
+            reason: "старый прогон",
+            matchedTerms: [],
+            confidence: 1,
+            score: 10,
+          }));
+        }
+        return hits.map(() => ({
+          verdict: "relevant",
+          decidedBy: "card",
+          reason: "новый прогон",
+          matchedTerms: [],
+          confidence: 1,
+          score: 90,
+        }));
+      },
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: vi.fn().mockResolvedValueOnce([hitOld]).mockResolvedValue([hitNew]) },
+      searchReview: { review },
+    });
+    const profileId = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileId}`,
+      payload: { name: "Кабели", keywords: ["кабель"] },
+    });
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId } });
+    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(1));
+
+    // The second launch supersedes: it owns the queue and the progress slot.
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId },
+    });
+    const runId = (JSON.parse(second.body).run as { runId?: string }).runId;
+    await vi.waitFor(async () => {
+      const queue = await app.inject({
+        method: "GET",
+        url: `/api/procurements?tab=search&profileId=${profileId}`,
+      });
+      const titles = (JSON.parse(queue.body).items as Array<{ title: string }>).map(
+        (item) => item.title,
+      );
+      expect(titles).toEqual(["Кабель новый прогон"]);
+    });
+
+    // Let the stale run resume and attempt its writes — they must be no-ops.
+    releaseOld?.();
+    await vi.waitFor(() => expect(oldResumed).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const queue = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${profileId}`,
+    });
+    expect(
+      (JSON.parse(queue.body).items as Array<{ title: string }>).map((item) => item.title),
+    ).toEqual(["Кабель новый прогон"]);
+    const progress = await app.inject({
+      method: "GET",
+      url: `/api/procurements/search/progress?profileId=${profileId}`,
+    });
+    const run = JSON.parse(progress.body) as { runId?: string; status: string; scoredCount: number };
+    expect(run.runId).toBe(runId);
+    expect(run.status).toBe("done");
+
+    await app.close();
+  });
+
   it("runs search, queue and progress for the named profile, not the active one", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
@@ -1797,7 +1987,8 @@ describe("specialist API", () => {
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     now = "2026-09-09T11:00:00.000Z";
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
-    // A save that keeps the phrases keeps the watermark; new phrases drop it.
+    // Any search-significant field invalidates the watermark (R12): the name
+    // feeds the intent plan, so renaming is a new search too, not only new phrases.
     await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ и НКУ", keywords: ["КТПБ"] } });
     await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ и НКУ", keywords: ["КТПБ", "НКУ"] } });
@@ -1809,7 +2000,7 @@ describe("specialist API", () => {
     expect(froms).toEqual([
       undefined,
       "2026-09-08T00:00:00+03:00",
-      "2026-09-08T00:00:00+03:00",
+      undefined,
       undefined,
       undefined,
     ]);
@@ -4114,6 +4305,133 @@ describe("specialist API", () => {
     expect(JSON.parse(missingBlob.body).error).toBe("blob_missing");
     expect(missingBlob.statusCode).toBe(404);
     expect(missing.statusCode).toBe(404);
+
+    await app.close();
+  });
+});
+
+describe("durable jobs (R16)", () => {
+  it("marks a search run stored mid-flight as interrupted on first cabinet open", async () => {
+    const profileId = "00000000-0000-4000-8000-000000000777";
+    const workspace = SpecialistWorkspace.parse({
+      profiles: [{ id: profileId, name: "КТПБ", keywords: ["КТПБ"] }],
+      activeProfileId: profileId,
+      searchRuns: {
+        [profileId]: {
+          runId: "00000000-0000-4000-8000-000000000778",
+          profileId,
+          profileName: "КТПБ",
+          status: "scoring",
+          retrievedCount: 5,
+          scoredCount: 2,
+          matchCount: 1,
+          discardedCount: 1,
+          reviewCount: 0,
+          skipped: [],
+        },
+      },
+    });
+    const app = await buildSpecialistApi({ workspace });
+
+    const progress = await app.inject({
+      method: "GET",
+      url: `/api/procurements/search/progress?profileId=${profileId}`,
+    });
+    const body = JSON.parse(progress.body) as { status: string; scoredCount: number };
+
+    expect(progress.statusCode).toBe(200);
+    expect(body.status).toBe("interrupted");
+    expect(body.scoredCount).toBe(2);
+    expect(workspace.searchRuns()[0]?.status).toBe("interrupted");
+
+    await app.close();
+  });
+
+  it("resumes a document job whose flag was persisted mid-flight", async () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000779",
+      title: "КТПБ для резюме",
+      status: "accepting_bids",
+      statusLabel: "Приём заявок",
+      url: "https://goszakupki.by/auction/view/resume-1",
+      sourceProcurementId: "auction/resume-1",
+      live: true,
+      triage: "participate",
+      ingesting: "ingest",
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(card);
+    const ingest = vi.fn(async (next: typeof card) =>
+      SpecialistProcurementCard.parse({
+        ...next,
+        documents: [
+          {
+            name: "ТЗ.pdf",
+            sourceUrl: "https://goszakupki.by/files/resume-1",
+            hash: "a".repeat(64),
+            status: "hashed",
+          },
+        ],
+      }),
+    );
+    const app = await buildSpecialistApi({ catalog, documentIngest: { ingest } });
+
+    // The first request opens the cabinet and resumes the stored job.
+    await app.inject({ method: "GET", url: "/api/procurements" });
+    const stored = await waitForCase(app, card.id, (body) => {
+      expect(body["documents"]).toHaveLength(1);
+      expect(body["ingesting"]).toBeUndefined();
+    });
+
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect((stored["documents"] as Array<{ name: string }>)[0]?.name).toBe("ТЗ.pdf");
+
+    await app.close();
+  });
+
+  it("keeps a completed run durable in the workspace state", async () => {
+    const workspace = new SpecialistWorkspace();
+    const app = await buildSpecialistApi({
+      workspace,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/durable-1",
+            url: "https://goszakupki.by/auction/view/durable-1",
+            title: "КТПБ durable",
+          }),
+        ],
+      },
+      searchReview: {
+        review: async (hits) =>
+          hits.map(
+            (): ReviewOutcome => ({
+              verdict: "relevant",
+              decidedBy: "card",
+              reason: "совпадение",
+              matchedTerms: ["КТПБ"],
+              confidence: 1,
+            }),
+          ),
+      },
+    });
+    const profileId = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileId}`,
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId },
+    });
+    const runs = workspace.searchRuns();
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("done");
+    expect(runs[0]?.runId).toEqual(expect.any(String));
 
     await app.close();
   });

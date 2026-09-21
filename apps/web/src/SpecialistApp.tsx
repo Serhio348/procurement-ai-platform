@@ -335,7 +335,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
 
   useEffect(() => {
     if (searchRun === undefined) return undefined;
-    if (searchRun.status === "done" || searchRun.status === "failed") return undefined;
+    if (
+      searchRun.status === "done" ||
+      searchRun.status === "failed" ||
+      searchRun.status === "interrupted"
+    )
+      return undefined;
     const timer = window.setInterval(() => {
       // The run names its own profile: polling follows the search, not
       // whichever profile happens to be active in this tab right now.
@@ -347,7 +352,12 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           .then((next) => {
             setSearchRun(next);
             if (list === undefined) return;
-            if (next.status !== "done" && next.status !== "failed") return;
+            if (
+              next.status !== "done" &&
+              next.status !== "failed" &&
+              next.status !== "interrupted"
+            )
+              return;
             void list({ tab: "search", profileId: runProfileId, limit: 400 })
               .then((items) => {
                 setProcurements((current) => mergeSearchPane(current, items, runProfileId));

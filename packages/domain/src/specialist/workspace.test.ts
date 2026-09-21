@@ -25,17 +25,37 @@ describe("discovery watermark", () => {
     expect(discoveryPublishedFrom({ lastDiscoveryAt: "2026-09-09T00:30:00.000Z" })).toBe("2026-09-08");
   });
 
-  it("survives a profile save that keeps the search phrases and resets when they change", () => {
+  it("survives an identical profile save and resets when any search-significant field changes", () => {
     const workspace = new SpecialistWorkspace();
     const id = workspace.profile().id;
     workspace.replaceProfile(write);
     workspace.markDiscovered(id, "2026-09-09T10:00:00.000Z");
+    workspace.rememberIrrelevant(id, "auction/old", "2026-09-09T10:00:00.000Z");
     expect(workspace.profile().lastDiscoveryAt).toBe("2026-09-09T10:00:00.000Z");
 
+    // Saving the same values is not a new profile: watermark and verdicts stay.
+    workspace.replaceProfile({ ...write });
+    expect(workspace.profile().lastDiscoveryAt).toBe("2026-09-09T10:00:00.000Z");
+    expect(workspace.isReviewedIrrelevant(id, "auction/old")).toBe(true);
+
+    // Name feeds the intent plan — changing it invalidates the cache (R12).
     workspace.replaceProfile({ ...write, name: "Щиты и подстанции" });
-    expect(workspace.profile().lastDiscoveryAt).toBe("2026-09-09T10:00:00.000Z");
+    expect(workspace.profile().lastDiscoveryAt).toBeUndefined();
+    expect(workspace.isReviewedIrrelevant(id, "auction/old")).toBe(false);
 
-    workspace.replaceProfile({ ...write, keywords: ["КТПБ", "НКУ"] });
+    workspace.markDiscovered(id, "2026-09-09T10:00:00.000Z");
+    workspace.rememberIrrelevant(id, "auction/old", "2026-09-09T10:00:00.000Z");
+    // A wider status window must see procedures the narrower one dropped.
+    workspace.replaceProfile({ ...write, statuses: ["accepting_bids", "completed"] });
+    expect(workspace.profile().lastDiscoveryAt).toBeUndefined();
+    expect(workspace.isReviewedIrrelevant(id, "auction/old")).toBe(false);
+
+    workspace.markDiscovered(id, "2026-09-09T10:00:00.000Z");
+    // Same for site-side filters and the single-source switch.
+    workspace.replaceProfile({ ...write, filters: { regionIds: ["5000001"] } });
+    expect(workspace.profile().lastDiscoveryAt).toBeUndefined();
+    workspace.markDiscovered(id, "2026-09-09T10:00:00.000Z");
+    workspace.replaceProfile({ ...write, excludeSingleSource: true });
     expect(workspace.profile().lastDiscoveryAt).toBeUndefined();
   });
 
@@ -193,5 +213,41 @@ describe("lastWorkingKind", () => {
     workspace.recordDecision("auction/1", "monitor", "2026-09-12T10:00:00.000Z");
     workspace.recordDecision("auction/1", "reject", "2026-09-13T10:00:00.000Z");
     expect(workspace.lastWorkingKind("auction/1")).toBe("monitor");
+  });
+});
+
+describe("persisted search runs (R16)", () => {
+  const run = {
+    runId: "00000000-0000-4000-8000-000000000778",
+    profileName: "КТПБ",
+    status: "scoring" as const,
+    retrievedCount: 5,
+    scoredCount: 2,
+    matchCount: 1,
+    discardedCount: 1,
+    reviewCount: 0,
+    listingDiscardedCount: 0,
+    skipped: [],
+  };
+
+  it("round-trips the run through the workspace snapshot", () => {
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profile().id;
+    workspace.setSearchRun({ ...run, profileId });
+
+    const restored = SpecialistWorkspace.parse(workspace.snapshot());
+    expect(restored.searchRuns()).toEqual([
+      expect.objectContaining({ profileId, status: "scoring", scoredCount: 2 }),
+    ]);
+  });
+
+  it("drops the run with its profile", () => {
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profile().id;
+    workspace.setSearchRun({ ...run, profileId });
+    workspace.addProfile();
+    workspace.removeProfile(profileId);
+
+    expect(workspace.searchRuns()).toEqual([]);
   });
 });

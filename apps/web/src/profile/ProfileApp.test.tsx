@@ -137,6 +137,56 @@ describe("ProfileApp", () => {
     expect(setWatch).toHaveBeenCalledWith(profileId, true);
   });
 
+  // R29: a phrase typed but not committed with Enter is still saved.
+  it("saves a keyword that was typed but never added with Enter", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => profile({ keywords: ["КТПБ", "сети электроснабжения"] }));
+
+    renderProfile(profile(), save);
+
+    await user.type(screen.getByLabelText("Добавить слово"), "сети электроснабжения");
+    expect(screen.getByText(/несохранённые изменения/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keywords: ["КТПБ", "сети электроснабжения"],
+      }),
+    );
+  });
+
+  it("does not mark the form dirty when the pending word only repeats a chip", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => profile());
+
+    renderProfile(profile(), save);
+
+    await user.type(screen.getByLabelText("Добавить слово"), "ктпб");
+    expect(screen.queryByText(/несохранённые изменения/)).toBeNull();
+  });
+
+  it("saves a pending word before turning watch on", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => profile({ keywords: ["КТПБ", "НКУ"] }));
+    const setWatch = vi.fn(async (_id: string, watchNewProcurements: boolean) =>
+      profile({ keywords: ["КТПБ", "НКУ"], watchNewProcurements }),
+    );
+
+    renderProfile(profile(), save, setWatch);
+
+    await user.type(screen.getByLabelText("Добавить слово"), "НКУ");
+    await user.click(screen.getByRole("button", { name: "Следить за новыми закупками" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ keywords: ["КТПБ", "НКУ"] }),
+    );
+    expect(setWatch).toHaveBeenCalledWith(profileId, true);
+    expect(await screen.findByRole("button", { name: "Слежение включено" })).toBeTruthy();
+    // The saved phrase becomes a chip, the input is cleared.
+    expect(screen.getByRole("button", { name: "Убрать НКУ" })).toBeTruthy();
+    expect((screen.getByLabelText("Добавить слово") as HTMLInputElement).value).toBe("");
+  });
+
   it("after creating a named profile shows a toast and returns to the list", async () => {
     const user = userEvent.setup();
     const current = profile({ name: "", keywords: [] });

@@ -98,6 +98,7 @@
 - [`docs/architecture/STAGE-89.md`](docs/architecture/STAGE-89.md) — полнота списков и доверие: серверная пагинация до UI, rate-limit на auth, атомарный «последний админ», evaluation гоняет реальный pipeline (R27, R38–R40)
 - [`docs/architecture/STAGE-90.md`](docs/architecture/STAGE-90.md) — модель видит то же, что scorer: релевантные цитаты лотов с lotCount вместо первых N названий (R14)
 - [`docs/architecture/STAGE-91.md`](docs/architecture/STAGE-91.md) — честные состояния списков: `ApiError`, автомат loading/error/ready/stale по вкладке, generation-защита от гонок, индикатор связи после трёх сбоев polling, точечная блокировка действий (R28)
+- [`docs/architecture/STAGE-92.md`](docs/architecture/STAGE-92.md) — pending-фраза «Добавить слово» входит в сохранение и `dirty`, локальный ввод синхронизируется с ответом сервера (R29)
 
 ---
 

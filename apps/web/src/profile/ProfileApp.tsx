@@ -79,20 +79,9 @@ export function ProfileApp({
   }, [initial.id]);
 
   function addQueries(): void {
-    const phrases = addWord
-      .split(/[\n,;]/u)
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
+    const phrases = splitPhrases(addWord);
     if (phrases.length === 0) return;
-    const seen = new Set(keywords.map((item) => item.toLowerCase()));
-    const next = [...keywords];
-    for (const phrase of phrases) {
-      const key = phrase.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      next.push(phrase);
-    }
-    setKeywords(next);
+    setKeywords(mergePhrases(keywords, phrases));
     setAddWord("");
   }
 
@@ -120,12 +109,19 @@ export function ProfileApp({
     setFilters((current) => ({ ...current, [key]: value } as typeof current));
   }
 
+  // A word typed into «Добавить слово» but not committed with Enter is still
+  // a search phrase the specialist sees — saving and the dirty flag count it
+  // as if it were already a chip (R29).
+  function effectiveKeywords(): string[] {
+    return mergePhrases(keywords, splitPhrases(addWord));
+  }
+
   function currentWrite(): SpecialistProfileWrite {
     return {
       name: name.trim(),
       purpose: name.trim(),
       description: "",
-      keywords,
+      keywords: effectiveKeywords(),
       excludeKeywords: splitExcludeLines(excluded),
       statuses: [...statuses],
       excludeSingleSource,
@@ -150,6 +146,8 @@ export function ProfileApp({
     try {
       const next = await save(currentWrite());
       setProfile(next);
+      setKeywords(next.keywords);
+      setAddWord("");
       const title = profileDisplayName(next);
       await navigate("/profiles", {
         state: {
@@ -172,6 +170,8 @@ export function ProfileApp({
       const saved = dirty ? await save(currentWrite()) : profile;
       const next = await setWatch(saved.id, !saved.watchNewProcurements);
       setProfile(next);
+      setKeywords(next.keywords);
+      setAddWord("");
       setNotice(
         next.watchNewProcurements
           ? "Слежение включено: новые закупки по профилю будут предлагаться сами."
@@ -630,6 +630,25 @@ function sameWrite(
     write.excludeSingleSource === saved.excludeSingleSource &&
     JSON.stringify(write.filters) === JSON.stringify(saved.filters)
   );
+}
+
+function splitPhrases(text: string): string[] {
+  return text
+    .split(/[\n,;]/u)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function mergePhrases(base: readonly string[], extra: readonly string[]): string[] {
+  const seen = new Set(base.map((item) => item.toLowerCase()));
+  const next = [...base];
+  for (const phrase of extra) {
+    const key = phrase.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(phrase);
+  }
+  return next;
 }
 
 function splitExcludeLines(text: string): string[] {

@@ -822,6 +822,37 @@ describe("MyProcurementsApp", () => {
     expect(onPurge).toHaveBeenCalledTimes(2);
   });
 
+  // R28 hotfix: the default now() is a fresh arrow per render — it must not
+  // re-arm the load effect and loop the list fetch.
+  it("does not refetch when a re-render passes a fresh now() prop", async () => {
+    const load = vi.fn(async () => [card]);
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    load.mockClear();
+    rerender(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(load).not.toHaveBeenCalled();
+  });
+
   // R28: only the running operation is blocked — other cards stay clickable.
   it("disables only the card whose action is running", async () => {
     const user = userEvent.setup();

@@ -215,6 +215,10 @@ export function MyProcurementsApp({
   const hasLoad = load !== undefined;
   const loadRef = useRef(load);
   loadRef.current = load;
+  // `now` defaults to a fresh arrow each render — keep it in a ref so the
+  // load callback stays referentially stable and the effect cannot loop.
+  const nowRef = useRef(now);
+  nowRef.current = now;
   // A late response from a previous tab must not overwrite the current one:
   // every run gets a generation, stale answers are dropped (R28).
   const generationRef = useRef(0);
@@ -237,7 +241,7 @@ export function MyProcurementsApp({
           if (generationRef.current !== generation) return;
           setLists((current) => ({
             ...current,
-            [tab]: { kind: "ready", items, updatedAt: now() },
+            [tab]: { kind: "ready", items, updatedAt: nowRef.current() },
           }));
         })
         .catch((error: unknown) => {
@@ -256,7 +260,7 @@ export function MyProcurementsApp({
           if (generationRef.current === generation) setRefreshing(false);
         });
     },
-    [now],
+    [],
   );
 
   useEffect(() => {

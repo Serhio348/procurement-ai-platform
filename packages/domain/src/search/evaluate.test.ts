@@ -57,6 +57,48 @@ describe("evaluateSearch", () => {
     expect(text).toMatch(/Чужое назначение[\s\S]*?new FP=0 FN=0/);
     expect(text).toMatch(/Подстрока НКУ[\s\S]*?new: match=0 review=0 discard=3/);
   });
+
+  it("scores the platform card: lots settle cases the title leaves open (R07/R61)", () => {
+    const report = evaluateSearch(NKU_PUMP_SEED_CASES, NKU_PUMP_PROFILE);
+    const byId = Object.fromEntries(report.rows.map((row) => [row.id, row]));
+    // The object lives only in a lot; the lot clause wins regardless of
+    // its position in the list.
+    expect(byId["nku-lot-supply"]?.newDecision).toBe("match");
+    expect(byId["nku-lot-second"]?.newDecision).toBe("match");
+    expect(byId["nku-lot-supply"]?.relevanceReason).toContain("Лот 1");
+    expect(byId["nku-lot-second"]?.relevanceReason).toContain("Лот 2");
+    // Works stay the subject even when a lot names the object (R08).
+    expect(byId["nku-lot-work"]?.newDecision).toBe("discard");
+    expect(byId["nku-including-works"]?.newDecision).toBe("discard");
+  });
+
+  it("reports retrieval recall and the deciding stage instead of one blended score", () => {
+    const report = evaluateSearch(NKU_PUMP_CASES, NKU_PUMP_PROFILE);
+    // Every gold-relevant case survives the listing filter; noise that
+    // slipped through is counted separately from the card verdicts.
+    expect(report.retrieval.relevantDropped).toBe(0);
+    expect(report.retrieval.recall).toBe(1);
+    expect(report.retrieval.irrelevantKept).toBeGreaterThan(0);
+    expect(report.stages.listing + report.stages.card + report.stages.model).toBe(
+      report.rows.length,
+    );
+    // Unsettled rows reach the model/human step; the default reviewer marks
+    // them «review» rather than silently discarding them.
+    const review = report.rows.filter((row) => row.newDecision === "review");
+    expect(review.length).toBeGreaterThan(0);
+    expect(review.every((row) => row.stage === "model")).toBe(true);
+  });
+
+  it("passes unsettled rows to the injected reviewer like the runtime model port", () => {
+    const report = evaluateSearch(NKU_PUMP_SEED_CASES, NKU_PUMP_PROFILE, {
+      review: () => "irrelevant",
+    });
+    const byId = Object.fromEntries(report.rows.map((row) => [row.id, row]));
+    // A card the scorer could not settle (bare supply, no purpose) is
+    // discarded by the model verdict instead of hanging as «review».
+    expect(byId["nku-no-purpose"]?.stage).toBe("model");
+    expect(byId["nku-no-purpose"]?.newDecision).toBe("discard");
+  });
 });
 
 describe("metricsFromRows", () => {

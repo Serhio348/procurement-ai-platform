@@ -57,32 +57,39 @@ export function createPostgresAuthDirectory(
     id: string,
     next: { role?: SpecialistRole | null; accessStatus: AccessStatus },
   ): Promise<AuthRecord | undefined> {
-    const current = (await allUsers()).find((user) => user.id === id);
-    if (current === undefined) return undefined;
-    const proposed = (await allUsers()).map((user) =>
-      user.id === id
-        ? {
-            ...user,
-            role: next.role === undefined ? user.role : next.role,
-            accessStatus: next.accessStatus,
-          }
-        : user,
-    );
-    if (!hasActiveAdmin(proposed)) {
-      throw new AuthConflictError("last_admin");
-    }
-    const updatedAt = now().toISOString();
-    const rows = await db
-      .update(authUsers)
-      .set({
-        ...(next.role === undefined ? {} : { role: next.role }),
-        accessStatus: next.accessStatus,
-        updatedAt,
-      })
-      .where(eq(authUsers.id, id))
-      .returning();
-    const row = rows[0];
-    return row === undefined ? undefined : toRecord(row);
+    // The last-admin check and the write must share one lock: two concurrent
+    // revokes could otherwise both pass the read and strip every admin
+    // (R39). Locking the user rows serializes the rare mutations.
+    return db.transaction(async (tx) => {
+      const locked = await tx.select().from(authUsers).for("update");
+      const users = sortUsers(locked.map(toRecord));
+      const current = users.find((user) => user.id === id);
+      if (current === undefined) return undefined;
+      const proposed = users.map((user) =>
+        user.id === id
+          ? {
+              ...user,
+              role: next.role === undefined ? user.role : next.role,
+              accessStatus: next.accessStatus,
+            }
+          : user,
+      );
+      if (!hasActiveAdmin(proposed)) {
+        throw new AuthConflictError("last_admin");
+      }
+      const updatedAt = now().toISOString();
+      const rows = await tx
+        .update(authUsers)
+        .set({
+          ...(next.role === undefined ? {} : { role: next.role }),
+          accessStatus: next.accessStatus,
+          updatedAt,
+        })
+        .where(eq(authUsers.id, id))
+        .returning();
+      const row = rows[0];
+      return row === undefined ? undefined : toRecord(row);
+    });
   }
 
   return {

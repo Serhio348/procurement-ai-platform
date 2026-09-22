@@ -27,6 +27,7 @@ import { AuthConflictError } from "./errors.js";
 import { toIsoDateTime } from "./instant.js";
 import { clearSessionCookie, readCookie, SESSION_COOKIE, sessionCookie } from "./cookie.js";
 import type { AuthMailPort } from "./mail.js";
+import { RateLimiter } from "./rate-limit.js";
 
 export const TEST_SPECIALIST_SESSION: AuthRecord = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -46,6 +47,7 @@ export interface RegisterAuthOptions {
   journal?: AdminJournalPort;
   provisionWorkspace?: (user: AuthRecord) => Promise<string>;
   workspaceIdFor?: (userId: string) => Promise<string | undefined>;
+  rateLimiter?: RateLimiter;
 }
 
 declare module "fastify" {
@@ -57,6 +59,21 @@ declare module "fastify" {
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/** Public auth budgets (R38): a shared per-source ceiling plus tighter
+ * per-account windows for credential and reset attempts. */
+export const AUTH_IP_LIMIT = 30;
+export const AUTH_IP_WINDOW_MS = 60_000;
+export const SIGN_IN_ACCOUNT_LIMIT = 8;
+export const SIGN_IN_ACCOUNT_WINDOW_MS = 300_000;
+export const SIGN_UP_IP_LIMIT = 10;
+export const SIGN_UP_IP_WINDOW_MS = 600_000;
+export const FORGOT_ACCOUNT_LIMIT = 3;
+export const FORGOT_ACCOUNT_WINDOW_MS = 600_000;
+
+function retryAfterSeconds(retryMs: number): string {
+  return String(Math.max(1, Math.ceil(retryMs / 1000)));
+}
+
 export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions = {}): void {
   const directory = options.directory;
   const mail = options.mail;
@@ -64,6 +81,19 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
   const publicUrl = (options.publicUrl ?? "http://127.0.0.1:5173").replace(/\/$/, "");
   const internalToken = options.internalApiToken?.trim() ?? "";
   const journal = options.journal;
+  const rateLimiter = options.rateLimiter ?? new RateLimiter();
+
+  const rateLimited = (request: FastifyRequest, reply: FastifyReply, retryMs: number, scope: string) => {
+    void recordJournal(journal, {
+      kind: "platform",
+      level: "info",
+      message: `Превышен лимит запросов авторизации (${scope}) с ${request.ip}`,
+    });
+    return reply
+      .code(429)
+      .header("retry-after", retryAfterSeconds(retryMs))
+      .send({ error: "rate_limited" });
+  };
 
   const resolveUser = async (request: FastifyRequest): Promise<AuthRecord | undefined> => {
     if (directory === undefined) return TEST_SPECIALIST_SESSION;
@@ -104,7 +134,18 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
 
   app.addHook("onRequest", async (request, reply) => {
     const path = requestPath(request.url);
-    if (path === "/api/health" || path.startsWith("/api/auth")) return;
+    if (path === "/api/health") return;
+    if (path.startsWith("/api/auth")) {
+      // The session poll (GET) is frequent and harmless; only credential and
+      // sign-up writes count against the per-source budget.
+      if (WRITE_METHODS.has(request.method)) {
+        const retryMs = rateLimiter.hit(`ip:${request.ip}`, AUTH_IP_LIMIT, AUTH_IP_WINDOW_MS);
+        if (retryMs > 0) {
+          return rateLimited(request, reply, retryMs, "источник");
+        }
+      }
+      return;
+    }
     if (path === "/api/inbox/events" && request.method === "POST" && internalToken.length > 0) {
       if (headerValue(request.headers["x-internal-token"]) !== internalToken) {
         return reply.code(401).send({ error: "unauthorized" });
@@ -153,6 +194,14 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
+    const signUpRetry = rateLimiter.hit(
+      `signup:${request.ip}`,
+      SIGN_UP_IP_LIMIT,
+      SIGN_UP_IP_WINDOW_MS,
+    );
+    if (signUpRetry > 0) {
+      return rateLimited(request, reply, signUpRetry, "sign-up");
+    }
     try {
       const user = await directory.signUp(parsed.data);
       if (options.provisionWorkspace !== undefined) {
@@ -178,10 +227,22 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
+    const accountKey = `signin:${parsed.data.email.trim().toLowerCase()}`;
+    const accountRetry = rateLimiter.hit(
+      accountKey,
+      SIGN_IN_ACCOUNT_LIMIT,
+      SIGN_IN_ACCOUNT_WINDOW_MS,
+    );
+    if (accountRetry > 0) {
+      return rateLimited(request, reply, accountRetry, "sign-in");
+    }
     const user = await directory.signIn(parsed.data);
     if (user === undefined) {
       return reply.code(401).send({ error: "invalid_credentials" });
     }
+    // A real sign-in resets the counter: the limiter exists for guessing,
+    // not for punishing the owner of the account.
+    rateLimiter.clear(accountKey);
     // Signing in elsewhere must not kick this session: the console is opened
     // on a desktop and a phone alike, and closing the older session here made
     // two clients log each other out in a loop.
@@ -221,6 +282,16 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
     const parsed = AuthForgotPasswordWrite.safeParse(request.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
+    }
+    // The same 429 for a known and an unknown address: the limit must not
+    // become an oracle for which accounts exist.
+    const resetRetry = rateLimiter.hit(
+      `forgot:${parsed.data.email.trim().toLowerCase()}`,
+      FORGOT_ACCOUNT_LIMIT,
+      FORGOT_ACCOUNT_WINDOW_MS,
+    );
+    if (resetRetry > 0) {
+      return rateLimited(request, reply, resetRetry, "сброс пароля");
     }
     const token = await directory.createPasswordReset(parsed.data.email);
     if (token !== undefined) {

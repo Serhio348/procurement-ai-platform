@@ -603,4 +603,62 @@ describe("MyProcurementsApp", () => {
     await user.click(screen.getByRole("tab", { name: "Все закупки" }));
     expect(screen.getByText("Сети электроснабжения")).toBeTruthy();
   });
+
+  it("names the real trash size in the empty-trash confirmation", async () => {
+    const user = userEvent.setup();
+    const first = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const second = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "Вторая в корзине",
+      triage: "reject",
+      sourceProcurementId: "single-source/2",
+    });
+    const third = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000003",
+      title: "Третья в корзине",
+      triage: "reject",
+      sourceProcurementId: "single-source/3",
+    });
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[first, second, third]}
+          onEmptyTrash={async () => undefined}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Очистить корзину" }));
+    expect(screen.getByText(/Будет удалено 3 записи/)).toBeTruthy();
+  });
+
+  it("filters the loaded list by a typed query", async () => {
+    const user = userEvent.setup();
+    const second = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "Сети электроснабжения",
+      sourceProcurementId: "request/2",
+      triage: "monitor",
+    });
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[card, second]}
+          now={() => new Date("2026-08-01T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    expect(screen.getByText("Сети электроснабжения")).toBeTruthy();
+    await user.type(screen.getByRole("searchbox", { name: "Поиск по списку" }), "генеральн");
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    expect(screen.queryByText("Сети электроснабжения")).toBeNull();
+    expect(screen.getByText("1–1 из 1")).toBeTruthy();
+  });
 });

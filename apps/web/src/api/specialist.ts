@@ -64,7 +64,7 @@ export async function deleteInbox(
 export async function fetchProcurements(
   query: { tab?: string; profileId?: string; limit?: number; offset?: number } = {},
   fetcher: typeof fetch = fetch,
-): Promise<readonly SpecialistProcurementCardValue[]> {
+): Promise<SpecialistProcurementListResponse> {
   const params = new URLSearchParams();
   if (query.tab !== undefined) params.set("tab", query.tab);
   if (query.profileId !== undefined) params.set("profileId", query.profileId);
@@ -75,7 +75,7 @@ export async function fetchProcurements(
   if (!response.ok) {
     throw new Error("Не удалось загрузить закупки");
   }
-  return SpecialistProcurementListResponse.parse(await response.json()).items;
+  return SpecialistProcurementListResponse.parse(await response.json());
 }
 
 export async function fetchProcurement(

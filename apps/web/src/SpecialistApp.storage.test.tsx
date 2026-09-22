@@ -181,12 +181,40 @@ describe("SpecialistApp search list", () => {
         profiles={[profile]}
         activeProfileId={profile.id}
         search={search}
-        listMine={async () => [queued]}
+        listMine={async () => ({ items: [queued], total: 1, tab: "search", hasMore: false })}
       />,
     );
 
     expect(await screen.findByRole("button", { name: /Из сохранённой очереди/ })).toBeTruthy();
     expect(search).not.toHaveBeenCalled();
+  });
+
+  it("walks every page of the stored search queue, not only the first", async () => {
+    const secondPage = SpecialistProcurementCard.parse({
+      ...found,
+      id: "00000000-0000-4000-8000-000000000778",
+      title: "Со второй страницы очереди",
+      sourceProcurementId: "request/778",
+    });
+    const listMine = vi.fn(
+      async (query?: { offset?: number }) =>
+        query?.offset === 0 || query?.offset === undefined
+          ? { items: [found], total: 2, tab: "search" as const, hasMore: true }
+          : { items: [secondPage], total: 2, tab: "search" as const, hasMore: false },
+    );
+    render(
+      <SpecialistApp
+        inbox={[]}
+        procurements={[]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        listMine={listMine}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /Со второй страницы очереди/ })).toBeTruthy();
+    expect(listMine.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(listMine.mock.calls[1]?.[0]?.offset).toBe(1);
   });
 
   it("resumes polling a still-running search after a page reload", async () => {
@@ -211,7 +239,7 @@ describe("SpecialistApp search list", () => {
           procurements={[]}
           profiles={[profile]}
           activeProfileId={profile.id}
-          listMine={async () => []}
+          listMine={async () => ({ items: [], total: 0, tab: "search", hasMore: false })}
           searchProgress={searchProgress}
         />,
       );

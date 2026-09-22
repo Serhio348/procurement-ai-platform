@@ -1657,6 +1657,19 @@ h3 {
   flex-wrap: wrap;
 }
 
+.my-procurements-search {
+  margin: 0 0 12px;
+}
+
+.my-procurements-search-input {
+  width: 100%;
+  max-width: 380px;
+  padding: 8px 12px;
+  border: 1px solid #d5dae2;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
 .my-procurements-tab,
 .my-procurements-tab-active {
   padding: 8px 14px;

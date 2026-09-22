@@ -99,6 +99,37 @@ export const NKU_PUMP_SEED_CASES: readonly SearchEvalCase[] = [
     title: "Поставка НКУ 0,4 кВ",
     gold: "uncertain",
   },
+  // Lot-level cases: the platform returns rows whose title alone does not
+  // settle the case, so the card stage must read lots (R07/R08/R61).
+  {
+    id: "nku-lot-supply",
+    title: "Поставка оборудования для насосной станции",
+    extraText: "в составе НКУ",
+    gold: "relevant",
+    lots: [{ title: "НКУ 0,4 кВ для управления насосами" }],
+  },
+  {
+    id: "nku-lot-second",
+    title: "Поставка оборудования для насосной станции",
+    extraText: "в составе НКУ",
+    gold: "relevant",
+    lots: [
+      { title: "Кабельная продукция" },
+      { title: "Шкаф управления насосами" },
+    ],
+  },
+  {
+    id: "nku-lot-work",
+    title: "Выполнение работ на насосной станции",
+    extraText: "демонтаж и монтаж НКУ",
+    gold: "irrelevant",
+    lots: [{ title: "Монтаж НКУ 0,4 кВ" }],
+  },
+  {
+    id: "nku-including-works",
+    title: "Монтаж системы управления насосами, включая поставку НКУ",
+    gold: "irrelevant",
+  },
 ];
 
 /**

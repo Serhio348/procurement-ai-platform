@@ -13,7 +13,7 @@ import {
   procurementBelongsToProfile,
   profileDisplayName,
 } from "@procurement/domain";
-import { ConfirmToast, TRASH_EMPTY_PROMPT, TRASH_MOVE_PROMPT, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
+import { ConfirmToast, TRASH_MOVE_PROMPT, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { ingestProgressCaption } from "./ProcurementsApp.js";
 
@@ -126,6 +126,23 @@ function filterByProfile(
   return items.filter((card) => procurementBelongsToProfile(card, profile));
 }
 
+function pluralRu(count: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(count) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function matchesListQuery(item: SpecialistProcurementCard, query: string): boolean {
+  const haystack = [item.title, item.buyerName, item.sourceProcurementId, item.id]
+    .filter((part): part is string => part !== undefined)
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
 function profileNamesForCard(
   item: SpecialistProcurementCard,
   profiles: readonly SpecialistWorkingProfile[],
@@ -169,6 +186,7 @@ export function MyProcurementsApp({
   const isTrash = section === "trash";
   const [filter, setFilter] = useState<MineTab>("all");
   const [profileFilter, setProfileFilter] = useState("all");
+  const [listQuery, setListQuery] = useState("");
   const [page, setPage] = useState(0);
   const [pendingId, setPendingId] = useState<string | undefined>();
   const [confirm, setConfirm] = useState<
@@ -234,7 +252,10 @@ export function MyProcurementsApp({
         : filter === "all"
           ? decided
           : decided.filter((item) => item.triage === filter);
-  const visible = filterByProfile(byDecision, profiles, profileFilter);
+  const query = listQuery.trim().toLowerCase();
+  const visible = filterByProfile(byDecision, profiles, profileFilter).filter(
+    (item) => query.length === 0 || matchesListQuery(item, query),
+  );
 
   const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -243,7 +264,7 @@ export function MyProcurementsApp({
 
   useEffect(() => {
     setPage(0);
-  }, [activeTab, profileFilter]);
+  }, [activeTab, profileFilter, listQuery]);
 
   useEffect(() => {
     if (page > pageCount - 1) setPage(Math.max(0, pageCount - 1));
@@ -299,11 +320,13 @@ export function MyProcurementsApp({
   }
 
   const emptyMessage =
-    isTrash
-      ? "Корзина пуста."
-      : byDecision.length > 0 && visible.length === 0
-        ? "Нет закупок по выбранному профилю."
-        : EMPTY_TEXT[filter];
+    byDecision.length > 0 && visible.length === 0 && query.length > 0
+      ? "По запросу ничего не нашлось."
+      : isTrash
+        ? "Корзина пуста."
+        : byDecision.length > 0 && visible.length === 0
+          ? "Нет закупок по выбранному профилю."
+          : EMPTY_TEXT[filter];
 
   return (
     <Shell>
@@ -311,7 +334,7 @@ export function MyProcurementsApp({
         <ConfirmToast
           message={
             confirm.kind === "empty"
-              ? TRASH_EMPTY_PROMPT
+              ? `Очистить корзину безвозвратно? Будет удалено ${visible.length} ${pluralRu(visible.length, "запись", "записи", "записей")} — вернуть их уже будет нельзя.`
               : confirm.kind === "purge"
                 ? TRASH_PURGE_PROMPT
                 : TRASH_MOVE_PROMPT
@@ -360,6 +383,20 @@ export function MyProcurementsApp({
             </button>
           ) : null}
         </div>
+        {byDecision.length > 0 ? (
+          <div className="my-procurements-search">
+            <input
+              type="search"
+              className="my-procurements-search-input"
+              placeholder="Поиск по списку"
+              aria-label="Поиск по списку"
+              value={listQuery}
+              onChange={(event) => {
+                setListQuery(event.target.value);
+              }}
+            />
+          </div>
+        ) : null}
         {isTrash ? (
           <p className="my-procurements-lead">{EMPTY_TEXT.trash}</p>
         ) : (

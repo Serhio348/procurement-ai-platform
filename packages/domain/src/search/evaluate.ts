@@ -1,10 +1,24 @@
-import { SearchHit, type SearchHit as SearchHitValue } from "@procurement/contracts";
+import {
+  ProcedureCard,
+  SearchHit,
+  type ProcedureCard as ProcedureCardValue,
+  type SearchHit as SearchHitValue,
+} from "@procurement/contracts";
 import { inferSearchIntentPlan, type IntentProfileSlice } from "./intent-plan.js";
-import { scoreSearchIntent } from "./intent-score.js";
+import { scoreIntentCard } from "./review.js";
 import { selectRelevantSearchCards } from "./search-cards.js";
 
 export type SearchEvalGold = "relevant" | "irrelevant" | "uncertain";
 export type SearchEvalDecision = "match" | "review" | "discard";
+/** Pipeline stage that settled the row: listing filter, platform card, or model/human. */
+export type SearchEvalStage = "listing" | "card" | "model";
+
+/** A lot the harness can attach to the synthetic card to exercise lot-level scoring. */
+export interface SearchEvalLot {
+  title: string;
+  description?: string;
+  positions?: readonly string[];
+}
 
 export interface SearchEvalCase {
   id: string;
@@ -16,6 +30,8 @@ export interface SearchEvalCase {
   /** Listing buyer, same field old cheapClassify already reads. */
   buyerName?: string;
   sourceStatus?: string;
+  /** Platform-card lots; absent means the fetch returned none. */
+  lots?: readonly SearchEvalLot[];
 }
 
 export type SearchEvalProfile = IntentProfileSlice;
@@ -27,6 +43,10 @@ export interface SearchEvalRow {
   gold: SearchEvalGold;
   oldDecision: SearchEvalDecision;
   newDecision: SearchEvalDecision;
+  /** Retrieval-stage verdict; the card stage never sees listing discards. */
+  listingDecision?: SearchEvalDecision;
+  /** Where the final decision was made; "model" means review would leave code scoring. */
+  stage?: SearchEvalStage;
   relevanceScore?: number;
   relevanceReason?: string;
 }
@@ -50,12 +70,68 @@ export interface SearchEvalGoldCounts {
   uncertain: number;
 }
 
+/** Listing-stage outcome: how much signal and noise survived the retrieval filter. */
+export interface SearchEvalRetrieval {
+  relevantKept: number;
+  relevantDropped: number;
+  irrelevantKept: number;
+  irrelevantDropped: number;
+  /** Share of gold-relevant cases that reached the card stage at all. */
+  recall: number | undefined;
+}
+
+/** How many rows each pipeline stage settled; "model" rows go to model/human review. */
+export interface SearchEvalStages {
+  listing: number;
+  card: number;
+  model: number;
+}
+
 export interface SearchEvalReport {
   profileName: string;
   rows: SearchEvalRow[];
   gold: SearchEvalGoldCounts;
+  retrieval: SearchEvalRetrieval;
+  stages: SearchEvalStages;
   old: SearchEvalMetrics;
   next: SearchEvalMetrics;
+}
+
+/**
+ * The model/human step the runtime calls when the card cannot settle a case.
+ * The default marks every unsettled row as needing a human, so offline runs
+ * stay honest: a «review» decision means the pipeline did not decide.
+ */
+export type SearchEvalReviewer = (
+  card: ProcedureCardValue,
+  item: SearchEvalCase,
+) => "relevant" | "irrelevant" | "needs_human";
+
+export interface SearchEvalOptions {
+  review?: SearchEvalReviewer;
+}
+
+/** Synthetic platform card from a labelled case, same fields procurement.get would fill. */
+export function procedureCardFromEvalCase(item: SearchEvalCase): ProcedureCardValue {
+  const hit = hitFromEvalCase(item);
+  return ProcedureCard.parse({
+    sourceId: hit.sourceId,
+    sourceProcurementId: hit.sourceProcurementId,
+    url: hit.url,
+    title: hit.title,
+    fetchedAt: "2026-01-01T00:00:00.000Z",
+    ...(hit.kind === undefined ? {} : { kind: hit.kind }),
+    ...(hit.pageFamily === undefined ? {} : { pageFamily: hit.pageFamily }),
+    ...(hit.status === undefined ? {} : { status: hit.status }),
+    ...(hit.sourceStatus === undefined ? {} : { sourceStatus: hit.sourceStatus }),
+    ...(item.buyerName === undefined ? {} : { rawFields: { "Заказчик": item.buyerName } }),
+    lots: (item.lots ?? []).map((lot, index) => ({
+      number: String(index + 1),
+      title: lot.title,
+      ...(lot.description === undefined ? {} : { description: lot.description }),
+      positions: (lot.positions ?? []).map((title) => ({ title })),
+    })),
+  });
 }
 
 /**
@@ -86,6 +162,7 @@ export function goldCountsFromRows(
 export function evaluateSearch(
   cases: readonly SearchEvalCase[],
   profile: SearchEvalProfile,
+  options?: SearchEvalOptions,
 ): SearchEvalReport {
   const hits = cases.map(hitFromEvalCase);
   const limit = Math.max(cases.length, 1);
@@ -104,32 +181,42 @@ export function evaluateSearch(
     },
     limit,
   );
+  const reviewer: SearchEvalReviewer =
+    options?.review ?? (() => "needs_human");
   const rows = cases.map((item) => {
     const oldDecision = decisionFromSelection(item.id, oldSelected);
     const listingDecision = decisionFromSelection(item.id, newSelected);
-    const scored = scoreSearchIntent(
-      {
-        title: item.title,
-        ...(item.extraText === undefined ? {} : { extraText: item.extraText }),
-      },
-      intent,
-    );
-    // Listing only filters. The verdict is the same scorer that runs after
-    // procurement.get; seed titles stand in for title + lot subject.
-    const newDecision =
-      listingDecision === "discard"
-        ? "discard"
-        : scored.decision === "match"
-          ? "match"
-          : scored.decision === "veto" || scored.decision === "discard"
-            ? "discard"
-            : "review";
+    // The card stage scores the same synthetic platform card the runtime
+    // builds after procurement.get: title plus each lot, aggregated by
+    // scoreIntentCard. A plain «no object found» is not a verdict — it goes
+    // to the model/human step exactly like in scorePendingHits.
+    const card = procedureCardFromEvalCase(item);
+    const { scored, outcome } = scoreIntentCard(card, intent);
+    let newDecision: SearchEvalDecision;
+    let stage: SearchEvalStage;
+    if (listingDecision === "discard") {
+      newDecision = "discard";
+      stage = "listing";
+    } else if (outcome?.verdict === "relevant") {
+      newDecision = "match";
+      stage = "card";
+    } else if (outcome?.verdict === "irrelevant") {
+      newDecision = "discard";
+      stage = "card";
+    } else {
+      const reviewed = reviewer(card, item);
+      newDecision =
+        reviewed === "relevant" ? "match" : reviewed === "irrelevant" ? "discard" : "review";
+      stage = "model";
+    }
     const row: SearchEvalRow = {
       id: item.id,
       title: item.title,
       gold: item.gold,
       oldDecision,
       newDecision,
+      listingDecision,
+      stage,
       relevanceScore: scored.score,
       relevanceReason: scored.reason,
       ...(item.extraText === undefined ? {} : { extraText: item.extraText }),
@@ -140,9 +227,42 @@ export function evaluateSearch(
     profileName: profile.name,
     rows,
     gold: goldCountsFromRows(rows),
+    retrieval: retrievalFromRows(rows),
+    stages: stageCounts(rows),
     old: metricsFromRows(rows, "oldDecision"),
     next: metricsFromRows(rows, "newDecision"),
   };
+}
+
+function retrievalFromRows(rows: readonly SearchEvalRow[]): SearchEvalRetrieval {
+  const retrieval: SearchEvalRetrieval = {
+    relevantKept: 0,
+    relevantDropped: 0,
+    irrelevantKept: 0,
+    irrelevantDropped: 0,
+    recall: undefined,
+  };
+  for (const row of rows) {
+    const kept = row.listingDecision !== "discard";
+    if (row.gold === "relevant") {
+      if (kept) retrieval.relevantKept += 1;
+      else retrieval.relevantDropped += 1;
+    } else if (row.gold === "irrelevant") {
+      if (kept) retrieval.irrelevantKept += 1;
+      else retrieval.irrelevantDropped += 1;
+    }
+  }
+  const relevant = retrieval.relevantKept + retrieval.relevantDropped;
+  retrieval.recall = relevant === 0 ? undefined : retrieval.relevantKept / relevant;
+  return retrieval;
+}
+
+function stageCounts(rows: readonly SearchEvalRow[]): SearchEvalStages {
+  const stages: SearchEvalStages = { listing: 0, card: 0, model: 0 };
+  for (const row of rows) {
+    if (row.stage !== undefined) stages[row.stage] += 1;
+  }
+  return stages;
 }
 
 export function metricsFromRows(
@@ -172,8 +292,13 @@ export function formatSearchEvalReport(report: SearchEvalReport): string {
   const newFn = report.rows.filter((row) => mismatch(row, "newDecision", "negative"));
   const lines = [
     `Profile: ${report.profileName}`,
-    `Cases: ${String(report.rows.length)} (uncertain gold labels are skipped in Precision/Recall/F1)`,
+    `Cases: ${String(report.rows.length)} (uncertain gold labels are skipped in Precision/Recall/F1; review counts as not-match)`,
     `Gold: relevant=${String(report.gold.relevant)} irrelevant=${String(report.gold.irrelevant)} uncertain=${String(report.gold.uncertain)}`,
+    "",
+    "Retrieval (listing stage):",
+    `Recall: ${formatRatio(report.retrieval.recall)} (relevant kept ${String(report.retrieval.relevantKept)}, dropped ${String(report.retrieval.relevantDropped)})`,
+    `Noise reaching card stage: ${String(report.retrieval.irrelevantKept)} irrelevant kept, ${String(report.retrieval.irrelevantDropped)} discarded`,
+    `Settled at stage: listing=${String(report.stages.listing)} card=${String(report.stages.card)} model/human=${String(report.stages.model)}`,
     "",
     "Old search:",
     `Precision: ${formatRatio(report.old.precision)}`,
@@ -286,5 +411,7 @@ function formatRow(row: SearchEvalRow): string {
   const extra = row.extraText === undefined ? "" : ` | extra: ${row.extraText}`;
   const score = row.relevanceScore === undefined ? "—" : String(row.relevanceScore);
   const reason = row.relevanceReason === undefined ? "—" : row.relevanceReason;
-  return `- ${row.id}: «${row.title}»${extra}\n  gold=${row.gold} old=${row.oldDecision} new=${row.newDecision} score=${score}\n  reason: ${reason}`;
+  const stage = row.stage === undefined ? "" : ` stage=${row.stage}`;
+  const listing = row.listingDecision === undefined ? "" : ` listing=${row.listingDecision}`;
+  return `- ${row.id}: «${row.title}»${extra}\n  gold=${row.gold} old=${row.oldDecision} new=${row.newDecision}${listing}${stage} score=${score}\n  reason: ${reason}`;
 }

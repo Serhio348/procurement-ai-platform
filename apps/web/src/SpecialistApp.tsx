@@ -7,6 +7,7 @@ import type {
   SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
   SpecialistProcurementCard,
+  SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistProfileWrite,
   SpecialistSearchResponse,
@@ -29,6 +30,8 @@ import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
 import { ProfileList } from "./profile/ProfileList.js";
 import { NoticeStack, type InboxNotice } from "./shell/NoticeToast.js";
+
+const LIST_PAGE_LIMIT = 500;
 
 export interface SpecialistAppProps {
   inbox: readonly SpecialistInboxEntry[];
@@ -66,7 +69,8 @@ export interface SpecialistAppProps {
     tab?: string;
     profileId?: string;
     limit?: number;
-  }) => Promise<readonly SpecialistProcurementCard[]>;
+    offset?: number;
+  }) => Promise<SpecialistProcurementListResponse>;
   loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
   searchProgress?: (profileId: string) => Promise<SpecialistSearchRun>;
 }
@@ -254,12 +258,29 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           }
         };
 
-  const listMine = props.listMine;
+  // Lists are paged server-side; the console walks every page so a card past
+  // the first window stays reachable and counters show the real total (R27).
+  const loadEntireList = useCallback(
+    async (query: { tab: string; profileId?: string }) => {
+      const pull = listMineRef.current;
+      if (pull === undefined) return [] as SpecialistProcurementCard[];
+      const items: SpecialistProcurementCard[] = [];
+      let offset = 0;
+      for (;;) {
+        const page = await pull({ ...query, limit: LIST_PAGE_LIMIT, offset });
+        items.push(...page.items);
+        if (!page.hasMore || page.items.length === 0) return items;
+        offset += page.items.length;
+      }
+    },
+    [],
+  );
+
   const loadList = useCallback(
     async (tab: "all" | "monitor" | "participate" | "archive" | "trash") => {
-      return (await listMine?.({ tab, limit: 100 })) ?? [];
+      return loadEntireList({ tab });
     },
-    [listMine],
+    [loadEntireList],
   );
 
   function rememberCard(card: SpecialistProcurementCard): void {
@@ -315,11 +336,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   // First open: the stored search queue and a still-running search must
   // survive a page reload — the same load the profile switch performs.
   useEffect(() => {
-    const list = listMineRef.current;
     const pull = searchProgressRef.current;
     const profileId = activeProfileId;
-    if (list !== undefined && profileId.length > 0) {
-      void list({ tab: "search", profileId, limit: 400 })
+    if (listMineRef.current !== undefined && profileId.length > 0) {
+      void loadEntireList({ tab: "search", profileId })
         .then((items) => {
           setProcurements((current) => mergeSearchPane(current, items, profileId));
         })
@@ -331,7 +351,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         .catch(() => undefined);
     }
     // Mount-only restore; the running-search poll below keeps it fresh.
-  }, []);
+  }, [loadEntireList]);
 
   useEffect(() => {
     if (searchRun === undefined) return undefined;
@@ -346,19 +366,17 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       // whichever profile happens to be active in this tab right now.
       const runProfileId = searchRun.profileId;
       const pull = searchProgressRef.current;
-      const list = listMineRef.current;
       if (pull !== undefined) {
         void pull(runProfileId)
           .then((next) => {
             setSearchRun(next);
-            if (list === undefined) return;
             if (
               next.status !== "done" &&
               next.status !== "failed" &&
               next.status !== "interrupted"
             )
               return;
-            void list({ tab: "search", profileId: runProfileId, limit: 400 })
+            void loadEntireList({ tab: "search", profileId: runProfileId })
               .then((items) => {
                 setProcurements((current) => mergeSearchPane(current, items, runProfileId));
               })
@@ -366,8 +384,8 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           })
           .catch(() => undefined);
       }
-      if (list !== undefined) {
-        void list({ tab: "search", profileId: runProfileId, limit: 400 })
+      if (listMineRef.current !== undefined) {
+        void loadEntireList({ tab: "search", profileId: runProfileId })
           .then((items) => {
             setProcurements((current) => mergeSearchPane(current, items, runProfileId));
           })
@@ -380,7 +398,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       }
     }, 800);
     return () => window.clearInterval(timer);
-  }, [applyInboxItems, refreshInbox, searchRun]);
+  }, [applyInboxItems, loadEntireList, refreshInbox, searchRun]);
 
   async function openProfileSearch(id: string): Promise<void> {
     if (activateProfile !== undefined) {
@@ -388,11 +406,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     } else {
       setActiveProfileId(id);
     }
-    const list = listMineRef.current;
     const pull = searchProgressRef.current;
-    if (list !== undefined) {
+    if (listMineRef.current !== undefined) {
       try {
-        const items = await list({ tab: "search", profileId: id, limit: 400 });
+        const items = await loadEntireList({ tab: "search", profileId: id });
         setProcurements((current) => mergeSearchPane(current, items, id));
       } catch {
         // Keep the cards already on screen for this profile.
@@ -579,7 +596,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(decide === undefined
                 ? {}
                 : { onRemove: async (id: string) => void decide(id, "reject") })}
-              {...(listMine === undefined ? {} : { load: loadList })}
+              {...(props.listMine === undefined ? {} : { load: loadList })}
               activeIngest={ingestById}
             />
           }
@@ -594,7 +611,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(restore === undefined ? {} : { onRestore: restore })}
               {...(purge === undefined ? {} : { onPurge: purge })}
               {...(emptyTrash === undefined ? {} : { onEmptyTrash: emptyTrash })}
-              {...(listMine === undefined ? {} : { load: loadList })}
+              {...(props.listMine === undefined ? {} : { load: loadList })}
             />
           }
         />

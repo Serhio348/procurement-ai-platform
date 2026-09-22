@@ -558,7 +558,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return withTriage(fromCatalog, workspace());
   };
 
-  const app = Fastify({ logger: false });
+  // Behind nginx: X-Forwarded-For carries the real client for auth rate
+  // limits. The API port stays on loopback, so the header cannot be spoofed
+  // from outside (R38).
+  const app = Fastify({ logger: false, trustProxy: true });
   // Fastify's own logger is off; without this a throwing route answers 500
   // and leaves nothing in the journal to debug from.
   app.setErrorHandler((error: unknown, request, reply) => {

@@ -1,7 +1,8 @@
-import { SpecialistInboxListResponse, SpecialistSearchResponse, SpecialistWorkingProfile } from "@procurement/contracts";
+import { SpecialistInboxListResponse, SpecialistProcurementListResponse, SpecialistSearchResponse, SpecialistWorkingProfile } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import {
   fetchInbox,
+  fetchProcurements,
   fetchProfile,
   saveProfile,
   searchFailureMessage,
@@ -37,6 +38,32 @@ describe("fetchInbox", () => {
     );
     expect(inbox).toHaveLength(1);
     expect(inbox[0]?.title).toBe("Поставка КТПБ");
+  });
+});
+
+describe("fetchProcurements", () => {
+  it("keeps the page metadata so callers can walk further windows", async () => {
+    let url: string | undefined;
+    const page = await fetchProcurements(
+      { tab: "trash", limit: 500, offset: 100 },
+      async (input) => {
+        url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
+        return new Response(
+          JSON.stringify(
+            SpecialistProcurementListResponse.parse({
+              items: [],
+              total: 300,
+              tab: "trash",
+              hasMore: true,
+            }),
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    expect(url).toBe("/api/procurements?tab=trash&limit=500&offset=100");
+    expect(page.total).toBe(300);
+    expect(page.hasMore).toBe(true);
   });
 });
 

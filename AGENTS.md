@@ -95,6 +95,7 @@
 - [`docs/architecture/STAGE-86.md`](docs/architecture/STAGE-86.md) — целостность записи кабинета: fail-closed БД, честные ошибки persist, single-flight, tmp+rename, durable inbox (R18–R21, R26)
 - [`docs/architecture/STAGE-87.md`](docs/architecture/STAGE-87.md) — события мониторинга: единый diff при любом чтении живой карточки, identity перехода через `dedupeKey`, inbox-строка закрывается только после успешного действия (R22, R23, R25)
 - [`docs/architecture/STAGE-88.md`](docs/architecture/STAGE-88.md) — профильная модель состояния: оценки по паре «карточка–профиль», `runId` владеет прогрессом, fingerprint профиля, durable прогон и ingest, scope по кабинету (R04, R12, R15–R17)
+- [`docs/architecture/STAGE-89.md`](docs/architecture/STAGE-89.md) — полнота списков и доверие: серверная пагинация до UI, rate-limit на auth, атомарный «последний админ», evaluation гоняет реальный pipeline (R27, R38–R40)
 
 ---
 

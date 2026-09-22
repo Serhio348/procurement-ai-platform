@@ -400,4 +400,87 @@ describe("specialist auth API", () => {
     expect(JSON.parse(stillFirst.body).user?.email).toBe("admin@example.com");
     await app.close();
   });
+
+  it("rate-limits repeated sign-in attempts against one account", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const app = await buildSpecialistApi({ authDirectory: directory });
+
+    const attempt = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/auth/sign-in",
+        payload: { email: "admin@example.com", password: "wrong-password" },
+      });
+    for (let index = 0; index < 8; index += 1) {
+      expect((await attempt()).statusCode).toBe(401);
+    }
+    const blocked = await attempt();
+    expect(blocked.statusCode).toBe(429);
+    expect(JSON.parse(blocked.body).error).toBe("rate_limited");
+    expect(blocked.headers["retry-after"]).toBeDefined();
+
+    // A different account on the same source is not locked out by the
+    // attacked account's window.
+    const other = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "other@example.com", password: "wrong-password" },
+    });
+    expect(other.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("keeps the per-source budget separate across client addresses", async () => {
+    const directory = createMemoryAuthDirectory();
+    const app = await buildSpecialistApi({ authDirectory: directory });
+
+    const attempt = (remoteAddress: string, index: number) =>
+      app.inject({
+        method: "POST",
+        url: "/api/auth/sign-in",
+        remoteAddress,
+        // Fresh account each time: the shared-IP budget must trip, not the
+        // per-account one.
+        payload: { email: `u${String(index)}@example.com`, password: "wrong-password" },
+      });
+    for (let index = 0; index < 30; index += 1) {
+      await attempt("10.0.0.1", index);
+    }
+    expect((await attempt("10.0.0.1", 30)).statusCode).toBe(429);
+    expect((await attempt("10.0.0.2", 31)).statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("throttles password reset per address without revealing the account", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const sent: string[] = [];
+    const app = await buildSpecialistApi({
+      authDirectory: directory,
+      authMail: {
+        send: async (mail) => {
+          sent.push(mail.to);
+        },
+      },
+    });
+
+    const ask = (email: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/auth/forgot-password",
+        payload: { email },
+      });
+    for (let index = 0; index < 3; index += 1) {
+      expect((await ask("admin@example.com")).statusCode).toBe(200);
+    }
+    expect((await ask("admin@example.com")).statusCode).toBe(429);
+    // Unknown address hits the same wall — the limiter is not an oracle.
+    for (let index = 0; index < 3; index += 1) {
+      expect((await ask("ghost@example.com")).statusCode).toBe(200);
+    }
+    expect((await ask("ghost@example.com")).statusCode).toBe(429);
+    expect(sent).toHaveLength(3);
+    await app.close();
+  });
 });

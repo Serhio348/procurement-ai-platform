@@ -16,7 +16,7 @@ import {
   type SearchClassifierInput as SearchClassifierInputValue,
   type SearchHit,
 } from "@procurement/contracts";
-import { cheapClassifyHit } from "@procurement/domain";
+import { cheapClassifyHit, classifierCardProjection } from "@procurement/domain";
 import {
   McpToolCallError,
   ProcurementMcpClient,
@@ -333,12 +333,11 @@ async function optionalCard(options: {
   }
 }
 
+// No intent plan here: the projection falls back to quoting the first lots
+// verbatim and reports lotCount, so the model still sees full lot text
+// (descriptions and positions), not just titles.
 function projectCard(card: ProcedureCard): NonNullable<SearchClassifierInputValue["card"]> {
-  return {
-    title: card.title,
-    lotTitles: card.lots.map((lot) => lot.title).slice(0, 8),
-    rawFields: Object.fromEntries(Object.entries(card.rawFields).slice(0, 12)),
-  };
+  return classifierCardProjection(card);
 }
 
 function candidateFromHit(

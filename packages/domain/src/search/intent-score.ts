@@ -178,13 +178,33 @@ export function scoreSearchIntentFromProcedure(
   return scoreIntentProcedure(card, plan);
 }
 
-function lotIntentText(lot: ProcedureCard["lots"][number]): string {
+export function lotIntentText(lot: ProcedureCard["lots"][number]): string {
   const parts: string[] = [lot.title];
   if (lot.description !== undefined && lot.description.length > 0) {
     parts.push(lot.description);
   }
   for (const position of lot.positions) parts.push(position.title);
   return parts.join(" ");
+}
+
+/**
+ * Every lot scored against the plan, in stable order. The aggregated card
+ * verdict uses this list; the classifier prompt uses it to quote the lots
+ * that actually matched instead of the first N titles (R14).
+ */
+export function scoreIntentLots(
+  card: ProcedureCard,
+  plan: SearchIntentPlan,
+): { lot: ProcedureCard["lots"][number]; scored: SearchIntentScore }[] {
+  return [...card.lots]
+    .sort((left, right) =>
+      left.number.localeCompare(right.number, "ru", { numeric: true }) ||
+      lotIntentText(left).localeCompare(lotIntentText(right), "ru"),
+    )
+    .map((lot) => {
+      const scored = scoreSearchIntent({ title: lotIntentText(lot) }, plan);
+      return { lot, scored: { ...scored, reason: `Лот ${lot.number}: ${scored.reason}` } };
+    });
 }
 
 /**
@@ -198,15 +218,7 @@ function scoreIntentProcedure(
   plan: SearchIntentPlan,
 ): SearchIntentScore {
   const titleScore = scoreSearchIntent({ title: card.title }, plan);
-  const lotScores = [...card.lots]
-    .sort((left, right) =>
-      left.number.localeCompare(right.number, "ru", { numeric: true }) ||
-      lotIntentText(left).localeCompare(lotIntentText(right), "ru"),
-    )
-    .map((lot) => {
-      const scored = scoreSearchIntent({ title: lotIntentText(lot) }, plan);
-      return { ...scored, reason: `Лот ${lot.number}: ${scored.reason}` };
-    });
+  const lotScores = scoreIntentLots(card, plan).map((entry) => entry.scored);
   const priority: Record<IntentScoreDecision, number> = { match: 3, review: 2, veto: 1, discard: 0 };
   const clauses = [titleScore, ...lotScores].sort(
     (left, right) => priority[right.decision] - priority[left.decision] || right.score - left.score,

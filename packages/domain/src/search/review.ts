@@ -16,6 +16,8 @@ import {
 } from "@procurement/contracts";
 import { cheapClassifyHit, type CheapClassifyProfile, type CheapClassifyResult } from "./cheap-classify.js";
 import {
+  lotIntentText,
+  scoreIntentLots,
   scoreSearchIntentFromProcedure,
   type SearchIntentScore,
 } from "./intent-score.js";
@@ -142,6 +144,63 @@ export function scoreIntentCard(
   return { scored, outcome: outcomeFromIntentCard(scored) };
 }
 
+const CLASSIFIER_LOT_TITLE_LIMIT = 8;
+const CLASSIFIER_LOT_EXCERPT_LIMIT = 8;
+const CLASSIFIER_LOT_EXCERPT_CHARS = 600;
+const CLASSIFIER_RAW_FIELD_LIMIT = 12;
+
+/**
+ * Card projection for the model. The scorer reads every lot title,
+ * description and position; the model used to see only the first eight lot
+ * titles, so an object found in a position or a later lot vanished exactly
+ * at the semantic check (R14). Excerpts quote the full text of the lots
+ * that actually matched the plan first, then fill remaining slots in card
+ * order; `lotCount` tells the model how much was not shown. Without a plan
+ * the first lots are quoted verbatim — still better than bare titles.
+ */
+export function classifierCardProjection(
+  card: ProcedureCard,
+  plan?: SearchIntentPlan,
+): NonNullable<SearchClassifierInputValue["card"]> {
+  // scoreIntentLots already returns lots in the stable (number, text)
+  // order; the same ordering drives the excerpt pick so a «lot» is the
+  // same object on both sides.
+  const entries =
+    plan === undefined
+      ? scoreIntentLotsOrdered(card).map((lot) => ({ lot, hit: false }))
+      : scoreIntentLots(card, plan).map(({ lot, scored }) => ({
+          lot,
+          hit:
+            scored.matchedObjects.length > 0 ||
+            scored.matchedDesired.length > 0 ||
+            scored.excludedActions.length > 0 ||
+            scored.matchedContext.length > 0,
+        }));
+  const excerpted = [...entries]
+    .sort((left, right) => Number(right.hit) - Number(left.hit))
+    .slice(0, CLASSIFIER_LOT_EXCERPT_LIMIT);
+  return {
+    title: card.title,
+    lotTitles: card.lots.map((lot) => lot.title).slice(0, CLASSIFIER_LOT_TITLE_LIMIT),
+    lotExcerpts: excerpted.map(({ lot }) => ({
+      number: lot.number,
+      text: lotIntentText(lot).slice(0, CLASSIFIER_LOT_EXCERPT_CHARS),
+    })),
+    lotCount: card.lots.length,
+    rawFields: Object.fromEntries(
+      Object.entries(card.rawFields).slice(0, CLASSIFIER_RAW_FIELD_LIMIT),
+    ),
+  };
+}
+
+function scoreIntentLotsOrdered(card: ProcedureCard): ProcedureCard["lots"] {
+  return [...card.lots].sort(
+    (left, right) =>
+      left.number.localeCompare(right.number, "ru", { numeric: true }) ||
+      lotIntentText(left).localeCompare(lotIntentText(right), "ru"),
+  );
+}
+
 export function buildSearchClassifierInput(
   profile: ReviewProfile,
   hit: SearchHit,
@@ -172,13 +231,7 @@ export function buildSearchClassifierInput(
     hit,
     ...(card === undefined
       ? {}
-      : {
-          card: {
-            title: card.title,
-            lotTitles: card.lots.map((lot) => lot.title).slice(0, 8),
-            rawFields: Object.fromEntries(Object.entries(card.rawFields).slice(0, 12)),
-          },
-        }),
+      : { card: classifierCardProjection(card, profile.intent) }),
   });
 }
 

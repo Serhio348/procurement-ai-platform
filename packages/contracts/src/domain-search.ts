@@ -65,6 +65,17 @@ export const SearchClassifierInput = z.object({
     .object({
       title: z.string(),
       lotTitles: z.array(z.string()).default([]),
+      /**
+       * Full text (title + description + positions) of the lots that
+       * actually matched the profile terms — the same text the
+       * deterministic scorer read. Together with `lotCount` this replaces
+       * the silent «first 8 titles» cut (R14).
+       */
+      lotExcerpts: z
+        .array(z.object({ number: z.string(), text: z.string() }))
+        .default([]),
+      /** Total lots on the card: the model knows how much was not shown. */
+      lotCount: z.number().int().nonnegative().optional(),
       rawFields: z.record(z.string(), z.string()).default({}),
     })
     .optional(),

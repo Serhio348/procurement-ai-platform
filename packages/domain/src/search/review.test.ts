@@ -173,4 +173,90 @@ describe("buildSearchClassifierInput", () => {
     expect(input.card?.lotTitles).toHaveLength(8);
     expect(buildSearchClassifierInput(profile, hit, undefined).card).toBeUndefined();
   });
+
+  it("quotes the ninth lot that matched instead of stopping at eight titles (R14)", () => {
+    const plan = inferSearchIntentPlan({
+      name: "НКУ для насосов",
+      keywords: ["НКУ", "шкаф управления"],
+      excludeKeywords: [],
+    });
+    const hit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/9",
+      url: "https://goszakupki.by/auction/view/9",
+      title: "Закупка оборудования для насосной станции",
+    });
+    const subject = card("Закупка оборудования для насосной станции", [
+      ...Array.from({ length: 8 }, (_, i) => ({ title: `Кабельная продукция ${String(i)}` })),
+      { title: "Поставка НКУ для управления насосами" },
+    ]);
+    const input = buildSearchClassifierInput({ ...profile, intent: plan }, hit, subject);
+    // The old projection gave the model eight bare titles; the matched lot
+    // sat outside the cut. Now its full text is quoted and the total lot
+    // count is reported.
+    expect(input.card?.lotCount).toBe(9);
+    expect(input.card?.lotTitles).toHaveLength(8);
+    const excerpt = input.card?.lotExcerpts.find((lot) => lot.number === "9");
+    expect(excerpt?.text).toContain("НКУ");
+    expect(excerpt?.text).toContain("насос");
+  });
+
+  it("quotes a lot whose object lives only in a position, not the lot title (R14)", () => {
+    const plan = inferSearchIntentPlan({
+      name: "НКУ для насосов",
+      keywords: ["шкаф управления"],
+      excludeKeywords: [],
+    });
+    const hit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/10",
+      url: "https://goszakupki.by/auction/view/10",
+      title: "Закупка оборудования",
+    });
+    const subject = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/10",
+      url: "https://goszakupki.by/auction/view/10",
+      title: "Закупка оборудования",
+      lots: [
+        {
+          number: "1",
+          title: "Оборудование для насосной станции",
+          positions: [{ title: "Шкаф управления насосами НКУ-0,4 кВ" }],
+        },
+      ],
+      fetchedAt: "2026-09-09T00:00:00.000Z",
+    });
+    const input = buildSearchClassifierInput({ ...profile, intent: plan }, hit, subject);
+    expect(input.card?.lotExcerpts[0]?.text).toContain("Шкаф управления насосами");
+  });
+
+  it("surfaces the same matched lots in either card lot order (R07/R14)", () => {
+    const plan = inferSearchIntentPlan({
+      name: "НКУ для насосов",
+      keywords: ["НКУ"],
+      excludeKeywords: [],
+    });
+    const hit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/11",
+      url: "https://goszakupki.by/auction/view/11",
+      title: "Закупка оборудования",
+    });
+    const subject = card("Закупка оборудования", [
+      { title: "Кабельная продукция" },
+      { title: "Поставка НКУ для насосов" },
+      { title: "Метизы" },
+    ]);
+    const forward = buildSearchClassifierInput({ ...profile, intent: plan }, hit, subject);
+    const reversed = buildSearchClassifierInput(
+      { ...profile, intent: plan },
+      hit,
+      ProcedureCard.parse({ ...subject, lots: [...subject.lots].reverse() }),
+    );
+    const excerptTexts = (input: typeof forward) =>
+      input.card?.lotExcerpts.map((lot) => lot.text).sort();
+    expect(excerptTexts(reversed)).toEqual(excerptTexts(forward));
+    expect(forward.card?.lotExcerpts.some((lot) => lot.text.includes("НКУ"))).toBe(true);
+  });
 });

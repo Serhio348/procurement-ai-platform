@@ -21,12 +21,12 @@ import {
   type SpecialistIngestProgress as SpecialistIngestProgressValue,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
 } from "@procurement/contracts";
-import { withCredentials } from "./http.js";
+import { ApiError, throwApiError, withCredentials } from "./http.js";
 
 export async function fetchInbox(fetcher: typeof fetch = fetch): Promise<readonly SpecialistInboxEntry[]> {
   const response = await fetcher("/api/inbox", withCredentials());
   if (!response.ok) {
-    throw new Error("Не удалось загрузить входящие");
+    await throwApiError(response, "Не удалось загрузить входящие");
   }
   return SpecialistInboxListResponse.parse(await response.json()).items;
 }
@@ -45,7 +45,7 @@ export async function resolveInbox(
     }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось обработать сообщение");
+    await throwApiError(response, "Не удалось обработать сообщение");
   }
   return SpecialistInboxResolveResponse.parse(await response.json());
 }
@@ -56,7 +56,7 @@ export async function deleteInbox(
 ): Promise<readonly SpecialistInboxEntry[]> {
   const response = await fetcher(`/api/inbox/${id}`, withCredentials({ method: "DELETE" }));
   if (!response.ok) {
-    throw new Error("Не удалось удалить сообщение");
+    await throwApiError(response, "Не удалось удалить сообщение");
   }
   return SpecialistInboxListResponse.parse(await response.json()).items;
 }
@@ -73,7 +73,7 @@ export async function fetchProcurements(
   const suffix = params.size === 0 ? "" : `?${params.toString()}`;
   const response = await fetcher(`/api/procurements${suffix}`, withCredentials());
   if (!response.ok) {
-    throw new Error("Не удалось загрузить закупки");
+    await throwApiError(response, "Не удалось загрузить закупки");
   }
   return SpecialistProcurementListResponse.parse(await response.json());
 }
@@ -84,7 +84,7 @@ export async function fetchProcurement(
 ): Promise<SpecialistProcurementCardValue> {
   const response = await fetcher(`/api/procurements/${id}`, withCredentials());
   if (!response.ok) {
-    throw new Error("Не удалось открыть закупку");
+    await throwApiError(response, "Не удалось открыть закупку");
   }
   return SpecialistProcurementCard.parse(await response.json());
 }
@@ -103,7 +103,7 @@ export async function searchProcurements(
     }),
   );
   if (!response.ok) {
-    throw new Error(await searchFailureMessage(response));
+    throw new ApiError(await searchFailureMessage(response), { status: response.status });
   }
   return SpecialistSearchResponse.parse(await response.json());
 }
@@ -117,7 +117,7 @@ export async function fetchSearchProgress(
     withCredentials(),
   );
   if (!response.ok) {
-    throw new Error("Не удалось получить прогресс поиска");
+    await throwApiError(response, "Не удалось получить прогресс поиска");
   }
   return SpecialistSearchRun.parse(await response.json());
 }
@@ -127,7 +127,7 @@ export async function fetchProfile(
 ): Promise<SpecialistWorkingProfileValue> {
   const response = await fetcher("/api/profile", withCredentials());
   if (!response.ok) {
-    throw new Error("Не удалось загрузить профиль");
+    await throwApiError(response, "Не удалось загрузить профиль");
   }
   return SpecialistWorkingProfile.parse(await response.json());
 }
@@ -137,7 +137,7 @@ export async function fetchProfiles(
 ): Promise<SpecialistProfileListResponseValue> {
   const response = await fetcher("/api/profiles", withCredentials());
   if (!response.ok) {
-    throw new Error("Не удалось загрузить профили");
+    await throwApiError(response, "Не удалось загрузить профили");
   }
   return SpecialistProfileListResponse.parse(await response.json());
 }
@@ -147,7 +147,7 @@ export async function createProfile(
 ): Promise<SpecialistWorkingProfileValue> {
   const response = await fetcher("/api/profiles", withCredentials({ method: "POST" }));
   if (!response.ok) {
-    throw new Error("Не удалось создать профиль");
+    await throwApiError(response, "Не удалось создать профиль");
   }
   return SpecialistWorkingProfile.parse(await response.json());
 }
@@ -158,7 +158,7 @@ export async function deleteProfile(
 ): Promise<SpecialistProfileListResponseValue> {
   const response = await fetcher(`/api/profiles/${id}`, withCredentials({ method: "DELETE" }));
   if (!response.ok) {
-    throw new Error(
+    await throwApiError(response, 
       response.status === 409
         ? "Нельзя удалить единственный профиль"
         : "Не удалось удалить профиль",
@@ -173,7 +173,7 @@ export async function activateProfile(
 ): Promise<SpecialistWorkingProfileValue> {
   const response = await fetcher(`/api/profiles/${id}/activate`, withCredentials({ method: "POST" }));
   if (!response.ok) {
-    throw new Error("Не удалось выбрать профиль");
+    await throwApiError(response, "Не удалось выбрать профиль");
   }
   return SpecialistWorkingProfile.parse(await response.json());
 }
@@ -192,7 +192,7 @@ export async function saveProfile(
     }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось сохранить профиль");
+    await throwApiError(response, "Не удалось сохранить профиль");
   }
   return SpecialistWorkingProfile.parse(await response.json());
 }
@@ -211,7 +211,7 @@ export async function setProfileWatch(
     }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось изменить слежение за новыми закупками");
+    await throwApiError(response, "Не удалось изменить слежение за новыми закупками");
   }
   return SpecialistWorkingProfile.parse(await response.json());
 }
@@ -226,7 +226,7 @@ export async function fetchProcurementCard(
     withCredentials(),
   );
   if (!response.ok) {
-    throw new Error("Не удалось открыть карточку закупки");
+    await throwApiError(response, "Не удалось открыть карточку закупки");
   }
   return ProcedureCard.parse(await response.json());
 }
@@ -237,7 +237,7 @@ export async function fetchIngestProgress(
 ): Promise<SpecialistIngestProgressValue> {
   const response = await fetcher(`/api/procurements/${id}/ingest-progress`, withCredentials());
   if (!response.ok) {
-    throw new Error("Не удалось получить прогресс индексации");
+    await throwApiError(response, "Не удалось получить прогресс индексации");
   }
   return SpecialistIngestProgress.parse(await response.json());
 }
@@ -256,7 +256,7 @@ export async function decideProcurement(
     }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось сохранить решение по закупке");
+    await throwApiError(response, "Не удалось сохранить решение по закупке");
   }
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }
@@ -270,7 +270,7 @@ export async function reindexProcurement(
     withCredentials({ method: "POST" }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось обновить документы закупки");
+    await throwApiError(response, "Не удалось обновить документы закупки");
   }
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }
@@ -284,7 +284,7 @@ export async function restoreProcurement(
     withCredentials({ method: "POST" }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось вернуть закупку из корзины");
+    await throwApiError(response, "Не удалось вернуть закупку из корзины");
   }
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }
@@ -292,7 +292,7 @@ export async function restoreProcurement(
 export async function emptyTrash(fetcher: typeof fetch = fetch): Promise<void> {
   const response = await fetcher("/api/procurements/trash", withCredentials({ method: "DELETE" }));
   if (!response.ok) {
-    throw new Error("Не удалось очистить корзину");
+    await throwApiError(response, "Не удалось очистить корзину");
   }
 }
 
@@ -302,7 +302,7 @@ export async function purgeProcurement(
 ): Promise<void> {
   const response = await fetcher(`/api/procurements/${id}`, withCredentials({ method: "DELETE" }));
   if (!response.ok) {
-    throw new Error("Не удалось удалить закупку из корзины");
+    await throwApiError(response, "Не удалось удалить закупку из корзины");
   }
 }
 
@@ -320,7 +320,7 @@ export async function setProcurementArchived(
     }),
   );
   if (!response.ok) {
-    throw new Error("Не удалось обновить архив");
+    await throwApiError(response, "Не удалось обновить архив");
   }
   return SpecialistProcurementListResponse.parse(await response.json()).items;
 }

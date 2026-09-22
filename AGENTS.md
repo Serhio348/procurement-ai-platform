@@ -97,6 +97,7 @@
 - [`docs/architecture/STAGE-88.md`](docs/architecture/STAGE-88.md) — профильная модель состояния: оценки по паре «карточка–профиль», `runId` владеет прогрессом, fingerprint профиля, durable прогон и ingest, scope по кабинету (R04, R12, R15–R17)
 - [`docs/architecture/STAGE-89.md`](docs/architecture/STAGE-89.md) — полнота списков и доверие: серверная пагинация до UI, rate-limit на auth, атомарный «последний админ», evaluation гоняет реальный pipeline (R27, R38–R40)
 - [`docs/architecture/STAGE-90.md`](docs/architecture/STAGE-90.md) — модель видит то же, что scorer: релевантные цитаты лотов с lotCount вместо первых N названий (R14)
+- [`docs/architecture/STAGE-91.md`](docs/architecture/STAGE-91.md) — честные состояния списков: `ApiError`, автомат loading/error/ready/stale по вкладке, generation-защита от гонок, индикатор связи после трёх сбоев polling, точечная блокировка действий (R28)
 
 ---
 

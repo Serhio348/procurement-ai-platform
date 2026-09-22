@@ -32,6 +32,8 @@ import { ProfileList } from "./profile/ProfileList.js";
 import { NoticeStack, type InboxNotice } from "./shell/NoticeToast.js";
 
 const LIST_PAGE_LIMIT = 500;
+const POLL_FAILURE_LIMIT = 3;
+type PollChannel = "inbox" | "run";
 
 export interface SpecialistAppProps {
   inbox: readonly SpecialistInboxEntry[];
@@ -121,15 +123,40 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     setNotices((current) => current.filter((item) => item.id !== id));
   }, []);
 
+  // Poll health (R28): three consecutive failures per channel raise a shared
+  // connection note; the next successful poll clears it. Shown data stays.
+  const pollFailures = useRef<Record<PollChannel, number>>({ inbox: 0, run: 0 });
+  const [pollStale, setPollStale] = useState<ReadonlySet<PollChannel>>(new Set());
+  const pollOk = useCallback((channel: PollChannel) => {
+    pollFailures.current[channel] = 0;
+    setPollStale((current) => {
+      if (!current.has(channel)) return current;
+      const next = new Set(current);
+      next.delete(channel);
+      return next;
+    });
+  }, []);
+  const pollFailed = useCallback((channel: PollChannel) => {
+    pollFailures.current[channel] += 1;
+    if (pollFailures.current[channel] >= POLL_FAILURE_LIMIT) {
+      setPollStale((current) =>
+        current.has(channel) ? current : new Set(current).add(channel),
+      );
+    }
+  }, []);
+
   useEffect(() => {
     if (refreshInbox === undefined) return undefined;
     const timer = setInterval(() => {
       void refreshInbox()
-        .then((items) => applyInboxItems(items))
-        .catch(() => undefined);
+        .then((items) => {
+          applyInboxItems(items);
+          pollOk("inbox");
+        })
+        .catch(() => pollFailed("inbox"));
     }, 30_000);
     return () => clearInterval(timer);
-  }, [refreshInbox, applyInboxItems]);
+  }, [refreshInbox, applyInboxItems, pollOk, pollFailed]);
 
   // Ids of the last profile search. The search pane unmounts on tab switch;
   // parent state plus GET ?tab=search keep this run, not the cabinet dump.
@@ -369,6 +396,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       if (pull !== undefined) {
         void pull(runProfileId)
           .then((next) => {
+            pollOk("run");
             setSearchRun(next);
             if (
               next.status !== "done" &&
@@ -380,25 +408,28 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               .then((items) => {
                 setProcurements((current) => mergeSearchPane(current, items, runProfileId));
               })
-              .catch(() => undefined);
+              .catch(() => pollFailed("run"));
           })
-          .catch(() => undefined);
+          .catch(() => pollFailed("run"));
       }
       if (listMineRef.current !== undefined) {
         void loadEntireList({ tab: "search", profileId: runProfileId })
           .then((items) => {
             setProcurements((current) => mergeSearchPane(current, items, runProfileId));
           })
-          .catch(() => undefined);
+          .catch(() => pollFailed("run"));
       }
       if (refreshInbox !== undefined) {
         void refreshInbox()
-          .then((items) => applyInboxItems(items))
-          .catch(() => undefined);
+          .then((items) => {
+            applyInboxItems(items);
+            pollOk("inbox");
+          })
+          .catch(() => pollFailed("inbox"));
       }
     }, 800);
     return () => window.clearInterval(timer);
-  }, [applyInboxItems, loadEntireList, refreshInbox, searchRun]);
+  }, [applyInboxItems, loadEntireList, pollFailed, pollOk, refreshInbox, searchRun]);
 
   async function openProfileSearch(id: string): Promise<void> {
     if (activateProfile !== undefined) {
@@ -445,6 +476,11 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   return (
     <InboxAlertProvider count={inbox.length}>
     <BrowserRouter>
+      {pollStale.size === 0 ? null : (
+        <p className="connection-stale" role="status">
+          Нет связи с сервером — показанные данные могут быть устаревшими.
+        </p>
+      )}
       <Routes>
         <Route
           path="/"

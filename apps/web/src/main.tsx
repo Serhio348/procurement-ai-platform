@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
@@ -30,6 +30,7 @@ import { LoginPage } from "./auth/LoginPage.js";
 import { RegisterPage } from "./auth/RegisterPage.js";
 import { ResetPasswordPage } from "./auth/ResetPasswordPage.js";
 import { SpecialistApp } from "./SpecialistApp.js";
+import { errorText } from "./api/http.js";
 import type {
   SpecialistInboxEntry,
   SpecialistProcurementCard,
@@ -91,31 +92,46 @@ function LiveConsole() {
         activeProfileId: string;
       }
     | "loading"
-    | "offline"
+    | { error: string }
   >("loading");
 
-  useEffect(() => {
-    void Promise.all([fetchInbox(), fetchProfiles()])
-      .then(([inbox, listed]) => {
-        setData({
-          inbox,
-          procurements: [],
-          profiles: listed.items,
-          activeProfileId: listed.activeProfileId,
-        });
-      })
-      .catch(() => {
-        setData("offline");
+  // One shared loader: the first mount and the «Повторить» button take the
+  // same path — no page reload, and the real failure reason is kept (R28).
+  const loadInitialData = useCallback(async () => {
+    setData("loading");
+    try {
+      const [inbox, listed] = await Promise.all([fetchInbox(), fetchProfiles()]);
+      setData({
+        inbox,
+        procurements: [],
+        profiles: listed.items,
+        activeProfileId: listed.activeProfileId,
       });
+    } catch (error) {
+      setData({ error: errorText(error, "Не удалось загрузить консоль.") });
+    }
   }, []);
+
+  useEffect(() => {
+    void loadInitialData();
+  }, [loadInitialData]);
 
   if (data === "loading") {
     return <AuthScreen />;
   }
-  if (data === "offline") {
+  if (typeof data === "object" && "error" in data) {
     return (
       <AuthScreen title="Нет связи">
-        <p className="auth-note">Не удалось загрузить консоль.</p>
+        <p className="auth-note">{data.error}</p>
+        <button
+          type="button"
+          className="auth-submit"
+          onClick={() => {
+            void loadInitialData();
+          }}
+        >
+          Повторить
+        </button>
       </AuthScreen>
     );
   }

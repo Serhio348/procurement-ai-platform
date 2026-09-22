@@ -661,4 +661,208 @@ describe("MyProcurementsApp", () => {
     expect(screen.queryByText("Сети электроснабжения")).toBeNull();
     expect(screen.getByText("1–1 из 1")).toBeTruthy();
   });
+
+  // R28: a failed load is an error screen, never a fake empty cabinet.
+  it("shows the load failure and retries instead of pretending the list is empty", async () => {
+    const user = userEvent.setup();
+    const load = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Сервер недоступен"))
+      .mockResolvedValue([card]);
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Сервер недоступен")).toBeTruthy();
+    });
+    expect(screen.queryByText(/Нет закупок|Корзина пуста|Загрузка…/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    expect(screen.queryByText("Сервер недоступен")).toBeNull();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  // R28: a failed refresh keeps the last good page and marks it stale.
+  it("keeps the loaded cards and marks the list stale when a refresh fails", async () => {
+    const user = userEvent.setup();
+    const watching = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000021",
+      title: "Кабель под наблюдением",
+      sourceProcurementId: "auction/21",
+      triage: "monitor",
+    });
+    let allLoads = 0;
+    const load = vi.fn(async (tab: string) => {
+      if (tab === "all") {
+        allLoads += 1;
+        if (allLoads === 2) throw new Error("Сбой сети");
+        return [card];
+      }
+      if (tab === "monitor") return [watching];
+      return [];
+    });
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    });
+    await user.click(screen.getByRole("tab", { name: "Слежу" }));
+    await waitFor(() => {
+      expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
+    });
+    await user.click(screen.getByRole("tab", { name: "Все" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Список не обновился/)).toBeTruthy();
+    });
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    expect(screen.getByText(/Сбой сети/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Список не обновился/)).toBeNull();
+    });
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+  });
+
+  // R28: a late response for a tab that is no longer active is dropped.
+  it("ignores a late response from a tab the specialist already left", async () => {
+    const user = userEvent.setup();
+    const watching = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000022",
+      title: "Кабель под наблюдением",
+      sourceProcurementId: "auction/22",
+      triage: "monitor",
+    });
+    let resolveAll: (items: readonly SpecialistProcurementCard[]) => void = () => undefined;
+    const load = vi.fn(
+      (tab: string) =>
+        new Promise<readonly SpecialistProcurementCard[]>((resolve) => {
+          if (tab === "all") resolveAll = resolve;
+          else resolve([watching]);
+        }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[]}
+          load={load}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(load).toHaveBeenCalledWith("all");
+    });
+    await user.click(screen.getByRole("tab", { name: "Слежу" }));
+    await waitFor(() => {
+      expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
+    });
+    // The «Все» answer arrives after the tab was left — it must not paint.
+    resolveAll([card]);
+    await waitFor(() => {
+      expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+    });
+    expect(screen.getByText("Кабель под наблюдением")).toBeTruthy();
+  });
+
+  // R28: a failed action keeps the card, shows why, and a retry clears it.
+  it("keeps the card and shows the reason when a purge fails, then a retry succeeds", async () => {
+    const user = userEvent.setup();
+    const trashed = SpecialistProcurementCard.parse({ ...card, triage: "reject" });
+    const onPurge = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Сервер недоступен"))
+      .mockResolvedValue(undefined);
+    render(
+      <MemoryRouter initialEntries={["/trash"]}>
+        <MyProcurementsApp
+          section="trash"
+          procurements={[trashed]}
+          onPurge={onPurge}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Сервер недоступен/)).toBeTruthy();
+    });
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "ОК" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Выбор генеральной подрядной организации")).toBeNull();
+    });
+    expect(screen.queryByText(/Сервер недоступен/)).toBeNull();
+    expect(onPurge).toHaveBeenCalledTimes(2);
+  });
+
+  // R28: only the running operation is blocked — other cards stay clickable.
+  it("disables only the card whose action is running", async () => {
+    const user = userEvent.setup();
+    const first = SpecialistProcurementCard.parse({ ...card, archived: true });
+    const second = SpecialistProcurementCard.parse({
+      ...card,
+      id: "00000000-0000-4000-8000-000000000023",
+      title: "Вторая в архиве",
+      sourceProcurementId: "single-source/23",
+      archived: true,
+    });
+    let finish = () => undefined;
+    const onArchive = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp
+          procurements={[first, second]}
+          onArchive={onArchive}
+          onRemove={vi.fn(async () => undefined)}
+          now={() => new Date("2026-09-11T10:00:00+03:00")}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Архив" }));
+    const restores = screen.getAllByRole("button", { name: "Вернуть" });
+    const removes = screen.getAllByRole("button", { name: "Убрать" });
+    await user.click(restores[0]!);
+    await waitFor(() => {
+      expect((restores[0] as HTMLButtonElement).disabled).toBe(true);
+    });
+    // The card stays on screen and only its own button is locked.
+    expect(screen.getByText("Выбор генеральной подрядной организации")).toBeTruthy();
+    expect((restores[1] as HTMLButtonElement).disabled).toBe(false);
+    expect((removes[0] as HTMLButtonElement).disabled).toBe(false);
+    expect((removes[1] as HTMLButtonElement).disabled).toBe(false);
+    finish();
+  });
 });

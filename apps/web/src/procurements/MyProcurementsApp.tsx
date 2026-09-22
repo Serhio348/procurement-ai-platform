@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   SpecialistIngestProgress,
@@ -15,6 +15,7 @@ import {
 } from "@procurement/domain";
 import { ConfirmToast, TRASH_MOVE_PROMPT, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
+import { errorText } from "../api/http.js";
 import { ingestProgressCaption } from "./ProcurementsApp.js";
 
 type MineTab = "all" | "monitor" | "participate" | "archive";
@@ -135,6 +136,17 @@ function pluralRu(count: number, one: string, few: string, many: string): string
   return many;
 }
 
+/**
+ * Explicit load lifecycle (R28): a failed fetch is an error screen, never a
+ * fake empty list; a failed refresh keeps the last good page as «stale».
+ * `empty` is not a state — it is `ready` with zero items.
+ */
+type TabListState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; items: readonly SpecialistProcurementCard[]; updatedAt: Date }
+  | { kind: "stale"; items: readonly SpecialistProcurementCard[]; updatedAt: Date; message: string };
+
 function matchesListQuery(item: SpecialistProcurementCard, query: string): boolean {
   const haystack = [item.title, item.buyerName, item.sourceProcurementId, item.id]
     .filter((part): part is string => part !== undefined)
@@ -188,52 +200,90 @@ export function MyProcurementsApp({
   const [profileFilter, setProfileFilter] = useState("all");
   const [listQuery, setListQuery] = useState("");
   const [page, setPage] = useState(0);
-  const [pendingId, setPendingId] = useState<string | undefined>();
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+  const [actionError, setActionError] = useState<string | undefined>();
   const [confirm, setConfirm] = useState<
     { kind: "empty" } | { kind: "purge" | "remove"; id: string } | undefined
   >();
   const [remote, setRemote] = useState<readonly SpecialistProcurementCard[] | undefined>(undefined);
-  const [loadedTab, setLoadedTab] = useState<ListTab | undefined>(undefined);
+  // Per-tab load state: coming back to a tab revalidates in place, so a
+  // failed refresh degrades to «stale» and keeps the last good items (R28).
+  const [lists, setLists] = useState<Partial<Record<ListTab, TabListState>>>({});
+  const [refreshing, setRefreshing] = useState(false);
   const listRef = useRef<HTMLElement | null>(null);
   const activeTab: ListTab = isTrash ? "trash" : filter;
   const hasLoad = load !== undefined;
   const loadRef = useRef(load);
   loadRef.current = load;
+  // A late response from a previous tab must not overwrite the current one:
+  // every run gets a generation, stale answers are dropped (R28).
+  const generationRef = useRef(0);
   const showProfileFilter = !isTrash && profiles.length > 0;
 
+  const runListLoad = useCallback(
+    (tab: ListTab) => {
+      const loader = loadRef.current;
+      if (loader === undefined) return;
+      const generation = ++generationRef.current;
+      setLists((current) => {
+        const held = current[tab];
+        return held !== undefined && "items" in held
+          ? current
+          : { ...current, [tab]: { kind: "loading" } };
+      });
+      setRefreshing(true);
+      void loader(tab)
+        .then((items) => {
+          if (generationRef.current !== generation) return;
+          setLists((current) => ({
+            ...current,
+            [tab]: { kind: "ready", items, updatedAt: now() },
+          }));
+        })
+        .catch((error: unknown) => {
+          if (generationRef.current !== generation) return;
+          const message = errorText(error, "Не удалось загрузить список.");
+          setLists((current) => {
+            const held = current[tab];
+            const next: TabListState =
+              held !== undefined && "items" in held
+                ? { kind: "stale", items: held.items, updatedAt: held.updatedAt, message }
+                : { kind: "error", message };
+            return { ...current, [tab]: next };
+          });
+        })
+        .finally(() => {
+          if (generationRef.current === generation) setRefreshing(false);
+        });
+    },
+    [now],
+  );
+
   useEffect(() => {
-    const loader = loadRef.current;
-    if (loader === undefined) {
-      setRemote(undefined);
-      setLoadedTab(undefined);
+    if (loadRef.current === undefined) {
+      setLists({});
       return undefined;
     }
-    let cancelled = false;
-    void loader(activeTab)
-      .then((items) => {
-        if (!cancelled) {
-          setRemote(items);
-          setLoadedTab(activeTab);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRemote([]);
-          setLoadedTab(activeTab);
-        }
-      });
+    runListLoad(activeTab);
     return () => {
-      cancelled = true;
+      generationRef.current += 1;
     };
-  }, [activeTab, hasLoad]);
+  }, [activeTab, hasLoad, runListLoad]);
 
   // When load() is set, paint only that tab page. Falling back to the parent
   // catalog mixes archive and search hits into «Все» and reshuffles cards.
-  const waiting = hasLoad && loadedTab !== activeTab;
+  const tabState = lists[activeTab];
+  const listItems = tabState !== undefined && "items" in tabState ? tabState.items : undefined;
+  const listFailed = hasLoad && tabState !== undefined && tabState.kind === "error";
+  const staleNote = tabState !== undefined && tabState.kind === "stale" ? tabState : undefined;
+  const waiting =
+    hasLoad &&
+    !listFailed &&
+    (tabState === undefined || tabState.kind === "loading");
   const source = hasLoad
-    ? waiting
+    ? waiting || listFailed
       ? []
-      : (remote ?? [])
+      : (listItems ?? [])
     : (remote ?? procurements);
   const decided = source.filter((item) => isDecided(item) && item.archived !== true);
   const archived = source.filter(
@@ -278,44 +328,93 @@ export function MyProcurementsApp({
     }
   }
 
+  // Cards live in two stores: per-tab server pages (load mode) or the parent
+  // catalog mirror `remote`. An optimistic patch applies to every cached tab
+  // so a removed card does not linger in another tab's snapshot (R28).
+  const patchItems = (
+    updater: (items: readonly SpecialistProcurementCard[]) => readonly SpecialistProcurementCard[],
+  ): void => {
+    if (hasLoad) {
+      setLists((current) => {
+        const next: Partial<Record<ListTab, TabListState>> = { ...current };
+        for (const tab of Object.keys(next) as ListTab[]) {
+          const state = next[tab];
+          if (state !== undefined && "items" in state) {
+            next[tab] = { ...state, items: updater(state.items) };
+          }
+        }
+        return next;
+      });
+    } else {
+      setRemote((current) => updater(current ?? source));
+    }
+  };
+  const restoreItems = (tab: ListTab, snapshot: readonly SpecialistProcurementCard[]): void => {
+    if (hasLoad) {
+      setLists((current) => {
+        const state = current[tab];
+        return state !== undefined && "items" in state
+          ? { ...current, [tab]: { ...state, items: snapshot } }
+          : current;
+      });
+    } else {
+      setRemote(snapshot);
+    }
+  };
+  const setPending = (key: string, on: boolean): void => {
+    setPendingIds((current) => {
+      const next = new Set(current);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
   async function runCardAction(
     item: SpecialistProcurementCard,
     action: (() => Promise<unknown> | void) | undefined,
     dropFromList = false,
+    op = "action",
   ): Promise<void> {
-    if (action === undefined || pendingId !== undefined) return;
-    setPendingId(item.id);
-    const previous = remote;
+    const key = `${item.id}:${op}`;
+    if (action === undefined || pendingIds.has(key)) return;
+    setPending(key, true);
+    const tab = activeTab;
+    const snapshot = hasLoad ? (listItems ?? []) : source;
     if (dropFromList) {
-      setRemote((current) => (current ?? source).filter((card) => card.id !== item.id));
+      patchItems((items) => items.filter((card) => card.id !== item.id));
     }
     try {
       await action();
+      setActionError(undefined);
       if (!dropFromList && hasLoad) {
-        setRemote((current) =>
-          (current ?? source).map((card) =>
+        patchItems((items) =>
+          items.map((card) =>
             card.id === item.id ? { ...card, archived: item.archived !== true } : card,
           ),
         );
       }
-    } catch {
-      if (dropFromList) setRemote(previous);
+    } catch (error) {
+      if (dropFromList) restoreItems(tab, snapshot);
+      setActionError(errorText(error, "Действие не сохранено."));
     } finally {
-      setPendingId(undefined);
+      setPending(key, false);
     }
   }
 
   async function runEmptyTrash(): Promise<void> {
-    if (onEmptyTrash === undefined || pendingId !== undefined) return;
-    setPendingId("empty");
-    const previous = remote;
-    setRemote([]);
+    if (onEmptyTrash === undefined || pendingIds.has("empty")) return;
+    setPending("empty", true);
+    const snapshot = hasLoad ? (listItems ?? []) : source;
+    patchItems((items) => items.filter((card) => card.triage !== "reject"));
     try {
       await onEmptyTrash();
-    } catch {
-      setRemote(previous);
+      setActionError(undefined);
+    } catch (error) {
+      restoreItems("trash", snapshot);
+      setActionError(errorText(error, "Не удалось очистить корзину."));
     } finally {
-      setPendingId(undefined);
+      setPending("empty", false);
     }
   }
 
@@ -350,10 +449,10 @@ export function MyProcurementsApp({
             const item = visible.find((card) => card.id === next.id);
             if (item === undefined) return;
             if (next.kind === "purge") {
-              void runCardAction(item, () => onPurge?.(item.id), true);
+              void runCardAction(item, () => onPurge?.(item.id), true, "purge");
               return;
             }
-            void runCardAction(item, () => onRemove?.(item.id), true);
+            void runCardAction(item, () => onRemove?.(item.id), true, "remove");
           }}
           onCancel={() => {
             setConfirm(undefined);
@@ -374,12 +473,12 @@ export function MyProcurementsApp({
             <button
               type="button"
               className="my-procurements-empty-trash"
-              disabled={pendingId !== undefined}
+              disabled={pendingIds.has("empty")}
               onClick={() => {
                 setConfirm({ kind: "empty" });
               }}
             >
-              {pendingId === "empty" ? "Очищаем…" : "Очистить корзину"}
+              {pendingIds.has("empty") ? "Очищаем…" : "Очистить корзину"}
             </button>
           ) : null}
         </div>
@@ -463,8 +562,42 @@ export function MyProcurementsApp({
             ) : null}
           </>
         )}
+        {actionError === undefined ? null : (
+          <p className="my-procurements-error" role="alert">
+            Не удалось сохранить изменение: {actionError}
+          </p>
+        )}
+        {staleNote === undefined ? null : (
+          <p className="my-procurements-stale" role="status">
+            Список не обновился: {staleNote.message} Показаны данные от{" "}
+            {staleNote.updatedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}.{" "}
+            <button
+              type="button"
+              className="my-procurements-retry"
+              disabled={refreshing}
+              onClick={() => {
+                runListLoad(activeTab);
+              }}
+            >
+              {refreshing ? "Обновляем…" : "Повторить"}
+            </button>
+          </p>
+        )}
         {waiting ? (
           <p className="my-procurements-empty">Загрузка…</p>
+        ) : listFailed ? (
+          <div className="my-procurements-error" role="alert">
+            <p>{tabState !== undefined && tabState.kind === "error" ? tabState.message : "Не удалось загрузить список."}</p>
+            <button
+              type="button"
+              className="my-procurements-retry"
+              onClick={() => {
+                runListLoad(activeTab);
+              }}
+            >
+              Повторить
+            </button>
+          </div>
         ) : visible.length === 0 ? (
           <p className="my-procurements-empty">{emptyMessage}</p>
         ) : (
@@ -558,9 +691,9 @@ export function MyProcurementsApp({
                             <button
                               type="button"
                               className="my-procurements-card-action"
-                              disabled={pendingId === item.id}
+                              disabled={pendingIds.has(`${item.id}:restore`)}
                               onClick={() => {
-                                void runCardAction(item, () => onRestore(item.id), true);
+                                void runCardAction(item, () => onRestore(item.id), true, "restore");
                               }}
                             >
                               Вернуть
@@ -570,7 +703,7 @@ export function MyProcurementsApp({
                             <button
                               type="button"
                               className="my-procurements-card-action my-procurements-card-action-danger"
-                              disabled={pendingId === item.id}
+                              disabled={pendingIds.has(`${item.id}:purge`)}
                               onClick={() => {
                                 setConfirm({ kind: "purge", id: item.id });
                               }}
@@ -585,9 +718,9 @@ export function MyProcurementsApp({
                             <button
                               type="button"
                               className="my-procurements-card-action"
-                              disabled={pendingId === item.id}
+                              disabled={pendingIds.has(`${item.id}:archive`)}
                               onClick={() => {
-                                void runCardAction(item, () => onArchive(item.id, !item.archived));
+                                void runCardAction(item, () => onArchive(item.id, !item.archived), false, "archive");
                               }}
                             >
                               {item.archived ? "Вернуть" : "В архив"}
@@ -597,7 +730,7 @@ export function MyProcurementsApp({
                             <button
                               type="button"
                               className="my-procurements-card-action my-procurements-card-action-danger"
-                              disabled={pendingId === item.id}
+                              disabled={pendingIds.has(item.id)}
                               onClick={() => {
                                 setConfirm({ kind: "remove", id: item.id });
                               }}

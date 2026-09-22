@@ -38,9 +38,11 @@ export interface CreateDiscoveryControllerOptions {
 export function createDiscoveryController(
   options: CreateDiscoveryControllerOptions = {},
 ): DiscoveryController {
+  // Spacing is opt-in here; the production default lives in main.ts env
+  // parsing (SPECIALIST_DISCOVERY_REQUEST_INTERVAL_MS, default 5 s).
   const requestIntervalMs = options.requestIntervalMs ?? 0;
   const failureThreshold = options.failureThreshold ?? 3;
-  const cooldownMs = options.cooldownMs ?? 5 * 60 * 1000;
+  const cooldownMs = options.cooldownMs ?? 30 * 60 * 1000;
 
   let isRunning = false;
   let startedAt: string | undefined;

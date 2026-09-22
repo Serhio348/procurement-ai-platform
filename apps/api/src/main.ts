@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   const discoveryController = createDiscoveryController({
     requestIntervalMs: Math.max(
       0,
-      Number.parseInt(process.env["SPECIALIST_DISCOVERY_REQUEST_INTERVAL_MS"] ?? "0", 10) || 0,
+      Number.parseInt(process.env["SPECIALIST_DISCOVERY_REQUEST_INTERVAL_MS"] ?? "5000", 10) || 0,
     ),
     failureThreshold: Math.max(
       1,
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     ),
     cooldownMs: Math.max(
       1_000,
-      Number.parseInt(process.env["SPECIALIST_DISCOVERY_COOLDOWN_MS"] ?? "300000", 10) || 300_000,
+      Number.parseInt(process.env["SPECIALIST_DISCOVERY_COOLDOWN_MS"] ?? "1800000", 10) || 1_800_000,
     ),
   });
   const app = await buildSpecialistApi({

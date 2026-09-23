@@ -402,4 +402,45 @@ describe("ProfileApp", () => {
 
     expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Профиль B");
   });
+
+  it("keeps purpose and description on save instead of wiping them", async () => {
+    const user = userEvent.setup();
+    const seeded = profile({
+      purpose: "Комплектные трансформаторные подстанции",
+      description: "seed-note",
+    });
+    const save = vi.fn(async () => seeded);
+
+    renderProfile(seeded, save);
+
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: "Комплектные трансформаторные подстанции",
+        description: "seed-note",
+      }),
+    );
+  });
+
+  it("sends an edited purpose and marks the form dirty", async () => {
+    const user = userEvent.setup();
+    const seeded = profile({ purpose: "КТП" });
+    const save = vi.fn(async () => seeded);
+
+    renderProfile(seeded, save);
+
+    const field = screen.getByLabelText("Назначение") as HTMLTextAreaElement;
+    expect(field.value).toBe("КТП");
+
+    await user.clear(field);
+    await user.type(field, "КТП и ВРУ для промышленных объектов");
+
+    expect(screen.getByText(/несохранённые изменения/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "КТП и ВРУ для промышленных объектов" }),
+    );
+  });
 });

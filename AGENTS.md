@@ -100,6 +100,7 @@
 - [`docs/architecture/STAGE-91.md`](docs/architecture/STAGE-91.md) — честные состояния списков: `ApiError`, автомат loading/error/ready/stale по вкладке, generation-защита от гонок, индикатор связи после трёх сбоев polling, точечная блокировка действий (R28)
 - [`docs/architecture/STAGE-92.md`](docs/architecture/STAGE-92.md) — pending-фраза «Добавить слово» входит в сохранение и `dirty`, локальный ввод синхронизируется с ответом сервера (R29)
 - [`docs/architecture/STAGE-93.md`](docs/architecture/STAGE-93.md) — guard несохранённых правок на навигацию по меню, форма профиля переинициализируется по `key={id}` (R30)
+- [`docs/architecture/STAGE-94.md`](docs/architecture/STAGE-94.md) — «Назначение» редактируется, `description` сохраняется — редактор больше не затирает поля review-контекста (R31)
 
 ---
 

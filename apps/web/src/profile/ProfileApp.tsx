@@ -59,6 +59,7 @@ export function ProfileApp({
 }): ReactElement {
   const [profile, setProfile] = useState(initial);
   const [name, setName] = useState(initial.name);
+  const [purpose, setPurpose] = useState(initial.purpose);
   const [keywords, setKeywords] = useState(initial.keywords);
   const [addWord, setAddWord] = useState("");
   const [excluded, setExcluded] = useState(initial.excludeKeywords.join("\n"));
@@ -120,8 +121,8 @@ export function ProfileApp({
   function currentWrite(): SpecialistProfileWrite {
     return {
       name: name.trim(),
-      purpose: name.trim(),
-      description: "",
+      purpose: purpose.trim(),
+      description: profile.description,
       keywords: effectiveKeywords(),
       excludeKeywords: splitExcludeLines(excluded),
       statuses: [...statuses],
@@ -148,6 +149,7 @@ export function ProfileApp({
     try {
       const next = await save(currentWrite());
       setProfile(next);
+      setPurpose(next.purpose);
       setKeywords(next.keywords);
       setAddWord("");
       const title = profileDisplayName(next);
@@ -172,6 +174,7 @@ export function ProfileApp({
       const saved = dirty ? await save(currentWrite()) : profile;
       const next = await setWatch(saved.id, !saved.watchNewProcurements);
       setProfile(next);
+      setPurpose(next.purpose);
       setKeywords(next.keywords);
       setAddWord("");
       setNotice(
@@ -216,6 +219,21 @@ export function ProfileApp({
               value={name}
               onChange={(event) => {
                 setName(event.target.value);
+              }}
+            />
+          </section>
+
+          <section className="profile-section" aria-labelledby="profile-purpose">
+            <label htmlFor="profile-purpose">Назначение</label>
+            <p className="profile-hint">
+              Что именно ищет профиль — этот текст читает проверка релевантности, чем точнее, тем меньше лишних закупок.
+            </p>
+            <textarea
+              id="profile-purpose"
+              rows={2}
+              value={purpose}
+              onChange={(event) => {
+                setPurpose(event.target.value);
               }}
             />
           </section>
@@ -626,6 +644,8 @@ function sameWrite(
   const list = (items: readonly string[]) => items.map((item) => item.trim().toLowerCase()).join("\n");
   return (
     write.name === saved.name.trim() &&
+    write.purpose === saved.purpose &&
+    write.description === saved.description &&
     list(write.keywords) === list(saved.keywords) &&
     list(write.excludeKeywords) === list(saved.excludeKeywords) &&
     [...write.statuses].sort().join(",") === [...saved.statuses].sort().join(",") &&

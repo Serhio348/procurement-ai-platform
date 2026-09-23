@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SourceId } from "@procurement/contracts";
@@ -21,6 +22,24 @@ import { createSearchIntentFromEnv } from "./search-intent.js";
 import { createProcurementSearchReview } from "./search-review.js";
 import { createDiscoveryController } from "./discovery-control.js";
 import { createProcurementCardWatch } from "./card-watch.js";
+
+// /api/health reports the deployed revision so an operator can verify which
+// build actually answers instead of inferring it from old inbox rows (R42).
+function resolveBuildSha(repoRoot: string): string | undefined {
+  const fromEnv = process.env["APP_BUILD_SHA"]?.trim();
+  if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    return sha.length > 0 ? sha : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 async function main(): Promise<void> {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -155,6 +174,23 @@ async function main(): Promise<void> {
           }),
         }),
     ...(mode === "live" ? { liveProcurementsOnly: true } : {}),
+    serviceHealth: {
+      sha: resolveBuildSha(repoRoot),
+      mode,
+      objectStore: objectStoreKind(process.env),
+      source: {
+        background: mcp !== undefined,
+        interactive: mcpInteractive !== undefined,
+      },
+      models: {
+        searchIntent: searchIntent !== undefined,
+        classifier: classifier !== undefined,
+        commercialReader: commercialReader !== undefined,
+      },
+      mail: authMail !== undefined,
+      postgresConfigured: persistence.postgresConfigured,
+      postgresPing: persistence.ping,
+    },
   });
   const port = Number.parseInt(process.env["API_PORT"] ?? "3001", 10);
   await app.listen({ port, host: "127.0.0.1" });

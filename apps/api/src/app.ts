@@ -7,6 +7,7 @@ import {
   SpecialistArchiveWrite,
   SpecialistDecisionWrite,
   SpecialistDiscoveryHealthResponse,
+  SpecialistServiceHealth,
   SpecialistDiscoveryResponse,
   SpecialistIngestProgress,
   SpecialistInboxEntry,
@@ -198,6 +199,20 @@ export interface BuildApiOptions {
   discoveryController?: DiscoveryController;
   /** PostgreSQL is the live system of record (reported by /api/health). */
   postgres?: boolean;
+  /**
+   * Readiness inputs for /api/health (R42). Each field reports a capability
+   * wired at boot; nothing here may carry secrets or env values.
+   */
+  serviceHealth?: {
+    sha?: string | undefined;
+    mode: "live" | "fixture";
+    objectStore: string;
+    source?: { background: boolean; interactive: boolean };
+    models?: { searchIntent: boolean; classifier: boolean; commercialReader: boolean };
+    mail?: boolean;
+    postgresConfigured?: boolean;
+    postgresPing?: () => Promise<boolean>;
+  };
 }
 
 export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise<SpecialistApi> {
@@ -664,7 +679,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   app.addHook("onRequest", async (request) => {
     const path = request.url.split("?")[0] ?? request.url;
-    if (path === "/api/health" || path.startsWith("/api/auth")) return;
+    if (path === "/api/health" || path === "/api/live" || path.startsWith("/api/auth")) return;
     const workspaceId = request.principal?.workspaceId ?? TEST_WORKSPACE_ID;
     request.cabinet = await cabinets.open(workspaceId);
     if (!restoredWorkspaces.has(request.cabinet.workspaceId)) {
@@ -1786,24 +1801,82 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   }
 
-  app.get("/api/health", async () => ({
-    ok: true as const,
-    postgres: options.postgres === true,
-  }));
+  // Liveness: the process answers while it runs. Readiness lives at
+  // /api/health — it reports whether the service can actually serve (R42).
+  app.get("/api/live", async () => ({ ok: true as const }));
 
-  app.get("/api/admin/discovery", async () => {
+  const watchingProfilesCount = async (): Promise<number> => {
     const ids = await cabinets.listIds();
-    let watchingCount = 0;
+    let count = 0;
     for (const id of ids.length > 0 ? ids : [defaultCabinet.workspaceId]) {
       const cabinet = await cabinets.open(id);
-      watchingCount += cabinet.workspace
+      count += cabinet.workspace
         .profiles()
         .filter((item) => shouldRunDiscovery(item.watchNewProcurements)).length;
     }
-    return SpecialistDiscoveryHealthResponse.parse({
-      health: discoveryController.health(watchingCount),
+    return count;
+  };
+
+  app.get("/api/health", async (_request, reply) => {
+    const health = options.serviceHealth;
+    let postgres: "ok" | "failed" | "off" = "off";
+    if (health?.postgresConfigured === true) {
+      const pinged = await (health.postgresPing?.() ?? Promise.resolve(false)).catch(
+        () => false,
+      );
+      postgres = pinged ? "ok" : "failed";
+    } else if (options.postgres === true) {
+      postgres = "ok";
+    }
+    const mode = health?.mode ?? "fixture";
+    const source: "live" | "fixture" | "off" =
+      mode === "fixture"
+        ? "fixture"
+        : health?.source?.background === true
+          ? "live"
+          : "off";
+    const models = health?.models ?? {
+      searchIntent: false,
+      classifier: false,
+      commercialReader: false,
+    };
+    const degraded: string[] = [];
+    if (postgres === "failed") degraded.push("PostgreSQL");
+    if (source === "off") degraded.push("Источник закупок");
+    if (source === "fixture") degraded.push("Источник: тестовые данные");
+    if (!models.searchIntent) degraded.push("Модель: разбор запроса");
+    if (!models.classifier) degraded.push("Модель: оценка карточек");
+    if (!models.commercialReader) degraded.push("Модель: чтение условий");
+    if (health?.mail !== true) degraded.push("Почта");
+    const ready =
+      postgres !== "failed" &&
+      source !== "off" &&
+      models.searchIntent &&
+      models.classifier;
+    const body = SpecialistServiceHealth.parse({
+      ok: true as const,
+      ready,
+      ...(health?.sha === undefined ? {} : { sha: health.sha }),
+      mode,
+      uptimeSec: Math.round(process.uptime()),
+      components: {
+        postgres,
+        source,
+        objectStore: health?.objectStore ?? "unknown",
+        models,
+        mail: health?.mail === true,
+      },
+      degraded,
+      discovery: discoveryController.health(await watchingProfilesCount()),
     });
+    return reply.code(ready ? 200 : 503).send(body);
   });
+
+  app.get("/api/admin/discovery", async () =>
+    SpecialistDiscoveryHealthResponse.parse({
+      health: discoveryController.health(await watchingProfilesCount()),
+    }),
+  );
 
   app.get("/api/admin/cabinets", async (_request, reply) => {
     if (options.authDirectory === undefined) {

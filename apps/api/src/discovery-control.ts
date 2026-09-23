@@ -47,6 +47,7 @@ export function createDiscoveryController(
   let isRunning = false;
   let startedAt: string | undefined;
   let finishedAt: string | undefined;
+  let lastSuccessAt: string | undefined;
   let lastAddedCount: number | undefined;
   let lastSkippedCount: number | undefined;
   let lastErrorAt: string | undefined;
@@ -83,6 +84,7 @@ export function createDiscoveryController(
       lastAddedCount = result.addedCount;
       lastSkippedCount = result.skippedDecidedCount;
       if (result.ran && result.reason === "ok") {
+        lastSuccessAt = now.toISOString();
         consecutiveFailures = 0;
         circuitOpen = false;
         cooldownUntil = 0;
@@ -116,6 +118,7 @@ export function createDiscoveryController(
         isRunning,
         ...(startedAt === undefined ? {} : { startedAt }),
         ...(finishedAt === undefined ? {} : { finishedAt }),
+        ...(lastSuccessAt === undefined ? {} : { lastSuccessAt }),
         ...(lastAddedCount === undefined ? {} : { lastAddedCount }),
         ...(lastSkippedCount === undefined ? {} : { lastSkippedCount }),
         ...(lastErrorAt === undefined ? {} : { lastErrorAt }),

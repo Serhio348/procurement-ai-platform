@@ -13,6 +13,7 @@ import type {
   SpecialistProfileWrite,
   SpecialistSearchResponse,
   SpecialistSearchRun,
+  SpecialistServiceHealth,
   SpecialistTriageKind,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
@@ -78,6 +79,7 @@ export interface SpecialistAppProps {
   loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
   searchProgress?: (profileId: string) => Promise<SpecialistSearchRun>;
   cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
+  serviceHealth?: () => Promise<SpecialistServiceHealth>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -169,6 +171,28 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     }, 30_000);
     return () => clearInterval(timer);
   }, [refreshInbox, applyInboxItems, pollOk, pollFailed]);
+
+  // Readiness (R42): when /api/health reports not-ready, a persistent banner
+  // names the degraded capabilities so the specialist does not trust a
+  // silently broken search/monitoring. An unreachable API is already covered
+  // by the poll-stale banner above, so failures here stay quiet.
+  const serviceHealthRef = useRef(props.serviceHealth);
+  serviceHealthRef.current = props.serviceHealth;
+  const [serviceDegraded, setServiceDegraded] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (serviceHealthRef.current === undefined) return undefined;
+    const check = async (): Promise<void> => {
+      try {
+        const health = await serviceHealthRef.current?.();
+        setServiceDegraded(health === undefined || health.ready ? [] : health.degraded);
+      } catch {
+        // Server unreachable: the poll-stale banner already covers it.
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Ids of the last profile search. The search pane unmounts on tab switch;
   // parent state plus GET ?tab=search keep this run, not the cabinet dump.
@@ -507,6 +531,11 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       {pollStale.size === 0 ? null : (
         <p className="connection-stale" role="status">
           Нет связи с сервером — показанные данные могут быть устаревшими.
+        </p>
+      )}
+      {serviceDegraded.length === 0 ? null : (
+        <p className="connection-stale service-degraded" role="alert">
+          Сервис работает не полностью: {serviceDegraded.join("; ")}
         </p>
       )}
       <Routes>

@@ -2483,3 +2483,9 @@ h3 {
   border-radius: 6px;
   font-size: 14px;
 }
+
+/* Degraded-service banner stacks above the connection-stale note (R42). */
+.service-degraded {
+  bottom: 64px;
+  background: #7a4a12;
+}

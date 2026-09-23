@@ -592,6 +592,8 @@ export const SpecialistDiscoveryHealth = z.object({
   isRunning: z.boolean(),
   startedAt: IsoDateTime.optional(),
   finishedAt: IsoDateTime.optional(),
+  /** Last pass that actually completed against the source (R42). */
+  lastSuccessAt: IsoDateTime.optional(),
   lastErrorAt: IsoDateTime.optional(),
   cooldownUntil: IsoDateTime.optional(),
   consecutiveFailures: z.number().int().nonnegative(),
@@ -607,6 +609,36 @@ export const SpecialistDiscoveryHealthResponse = z.object({
   health: SpecialistDiscoveryHealth,
 });
 export type SpecialistDiscoveryHealthResponse = z.infer<typeof SpecialistDiscoveryHealthResponse>;
+
+/**
+ * Readiness report (R42). Liveness stays at GET /api/live ({ok:true}) — the
+ * process answers while it runs. /api/health answers whether the service can
+ * actually serve: PostgreSQL pinged, source lane connected, models present.
+ * `degraded` holds human-readable component names; no secrets, no env values.
+ */
+export const SpecialistServiceHealth = z.object({
+  ok: z.literal(true),
+  ready: z.boolean(),
+  /** Deployed revision — verifies which build actually runs (APP_BUILD_SHA). */
+  sha: z.string().min(1).optional(),
+  mode: z.enum(["live", "fixture"]),
+  uptimeSec: z.number().nonnegative(),
+  components: z.object({
+    postgres: z.enum(["ok", "failed", "off"]),
+    source: z.enum(["live", "fixture", "off"]),
+    objectStore: z.string().min(1),
+    models: z.object({
+      searchIntent: z.boolean(),
+      classifier: z.boolean(),
+      commercialReader: z.boolean(),
+    }),
+    mail: z.boolean(),
+  }),
+  /** Human-readable names of missing/failed capabilities. */
+  degraded: z.array(z.string().min(1)),
+  discovery: SpecialistDiscoveryHealth.optional(),
+});
+export type SpecialistServiceHealth = z.infer<typeof SpecialistServiceHealth>;
 
 export const SpecialistLiveRun = z.object({
   capturedAt: IsoDateTime,

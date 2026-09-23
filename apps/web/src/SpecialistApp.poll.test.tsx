@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import {
   SpecialistProcurementCard,
+  SpecialistServiceHealth,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,5 +83,49 @@ describe("SpecialistApp poll health (R28)", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(screen.queryByText(/Нет связи с сервером/)).toBeNull();
+  });
+});
+
+describe("SpecialistApp service health banner (R42)", () => {
+  const degradedHealth = SpecialistServiceHealth.parse({
+    ok: true,
+    ready: false,
+    mode: "live",
+    uptimeSec: 12,
+    components: {
+      postgres: "failed",
+      source: "live",
+      objectStore: "minio",
+      models: { searchIntent: true, classifier: true, commercialReader: true },
+      mail: true,
+    },
+    degraded: ["PostgreSQL"],
+  });
+
+  it("names degraded capabilities while readiness is false and clears when ready", async () => {
+    const serviceHealth = vi.fn().mockResolvedValue(degradedHealth);
+    render(
+      <SpecialistApp
+        inbox={[]}
+        procurements={[card]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        serviceHealth={serviceHealth}
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(serviceHealth).toHaveBeenCalled();
+    expect(screen.getByText(/Сервис работает не полностью: PostgreSQL/)).toBeTruthy();
+
+    serviceHealth.mockResolvedValue(
+      SpecialistServiceHealth.parse({ ...degradedHealth, ready: true, degraded: [] }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(screen.queryByText(/Сервис работает не полностью/)).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import {
   SpecialistProfileListResponse,
   SpecialistSearchResponse,
   SpecialistSearchRun,
+  SpecialistServiceHealth,
   SpecialistWorkingProfile,
   type SpecialistInboxAction,
   type SpecialistInboxEntry,
@@ -16,6 +17,7 @@ import {
   type SpecialistProfileWrite,
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
   type SpecialistSearchRun as SpecialistSearchRunValue,
+  type SpecialistServiceHealth as SpecialistServiceHealthValue,
   type SpecialistTriageKind,
   type SpecialistProfileListResponse as SpecialistProfileListResponseValue,
   type SpecialistIngestProgress as SpecialistIngestProgressValue,
@@ -359,4 +361,16 @@ export async function searchFailureMessage(response: Response): Promise<string> 
     return "Не удалось выполнить поиск по профилю.";
   }
   return "Не удалось выполнить поиск по профилю.";
+}
+
+/**
+ * Readiness report (R42). A 503 still carries the parsed body — degraded
+ * components are data, not a request failure. Only a network/JSON failure
+ * throws; that case is already covered by the poll-stale banner.
+ */
+export async function fetchServiceHealth(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistServiceHealthValue> {
+  const response = await fetcher("/api/health", withCredentials());
+  return SpecialistServiceHealth.parse(await response.json());
 }

@@ -4766,3 +4766,89 @@ describe("durable jobs (R16)", () => {
     await app.close();
   });
 });
+
+describe("service health (R42)", () => {
+  it("liveness answers while readiness reports degraded dependencies", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+
+    const live = await app.inject({ method: "GET", url: "/api/live" });
+    expect(live.statusCode).toBe(200);
+    expect(JSON.parse(live.body)).toEqual({ ok: true });
+
+    // No serviceHealth wired: fixture mode, no models — not ready.
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(503);
+    const body = JSON.parse(health.body) as {
+      ready: boolean;
+      degraded: string[];
+      components: { postgres: string; source: string };
+    };
+    expect(body.ready).toBe(false);
+    expect(body.components.postgres).toBe("off");
+    expect(body.components.source).toBe("fixture");
+    expect(body.degraded).toContain("Модель: разбор запроса");
+
+    await app.close();
+  });
+
+  it("reports ready with the deployed sha when all capabilities are wired", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      postgres: true,
+      serviceHealth: {
+        sha: "9ef20ec",
+        mode: "live",
+        objectStore: "minio",
+        source: { background: true, interactive: true },
+        models: { searchIntent: true, classifier: true, commercialReader: true },
+        mail: true,
+        postgresConfigured: true,
+        postgresPing: async () => true,
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const body = JSON.parse(response.body) as {
+      ready: boolean;
+      sha?: string;
+      degraded: string[];
+      discovery?: { watchingCount: number };
+    };
+    expect(response.statusCode).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.sha).toBe("9ef20ec");
+    expect(body.degraded).toEqual([]);
+    expect(body.discovery?.watchingCount).toBe(0);
+
+    await app.close();
+  });
+
+  it("fails readiness when the configured PostgreSQL stops answering", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      postgres: true,
+      serviceHealth: {
+        mode: "live",
+        objectStore: "minio",
+        source: { background: true, interactive: true },
+        models: { searchIntent: true, classifier: true, commercialReader: true },
+        mail: true,
+        postgresConfigured: true,
+        postgresPing: async () => false,
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const body = JSON.parse(response.body) as {
+      ready: boolean;
+      degraded: string[];
+      components: { postgres: string };
+    };
+    expect(response.statusCode).toBe(503);
+    expect(body.ready).toBe(false);
+    expect(body.components.postgres).toBe("failed");
+    expect(body.degraded).toContain("PostgreSQL");
+
+    await app.close();
+  });
+});

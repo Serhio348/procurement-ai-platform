@@ -13,6 +13,7 @@ import {
   fetchProcurements,
   fetchProfiles,
   fetchSearchProgress,
+  fetchServiceHealth,
   purgeProcurement,
   emptyTrash,
   reindexProcurement,
@@ -163,6 +164,7 @@ function LiveConsole() {
       loadCard={fetchProcurement}
       searchProgress={fetchSearchProgress}
       cancelSearch={cancelSearch}
+      serviceHealth={fetchServiceHealth}
     />
   );
 }

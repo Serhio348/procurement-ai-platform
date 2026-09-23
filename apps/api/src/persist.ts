@@ -44,6 +44,10 @@ import path from "node:path";
 export interface SpecialistPersistence {
   workspace: SpecialistWorkspace;
   postgres: boolean;
+  /** DATABASE_URL was set — PostgreSQL is the required system of record. */
+  postgresConfigured: boolean;
+  /** Live reachability check: the boot flag alone lies after a later outage. */
+  ping: () => Promise<boolean>;
   authDirectory: AuthDirectory;
   cabinets: CabinetRegistry;
   hydrateCatalog: (catalog: SpecialistCatalog) => Promise<void>;
@@ -641,6 +645,16 @@ export async function openSpecialistPersistence(options: {
   return {
     workspace: fileWorkspace,
     postgres: store !== undefined,
+    postgresConfigured: configuredUrl.length > 0,
+    async ping() {
+      if (connected === undefined) return configuredUrl.length === 0;
+      try {
+        await connected.pool.query("select 1");
+        return true;
+      } catch {
+        return false;
+      }
+    },
     authDirectory:
       connected === undefined
         ? createMemoryAuthDirectory()

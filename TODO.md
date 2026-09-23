@@ -500,13 +500,15 @@
 
 **Исправлено (этап 89).** `evaluateSearch` повторяет production-конвейер: листинг (`selectRelevantSearchCards`) — только retrieval; не отброшенные строки оцениваются `scoreIntentCard` на синтетической `ProcedureCard` (`procedureCardFromEvalCase`) — тем же агрегатором лотов, что зовёт runtime после `procurement.get`. Plain discard карточки больше не становится финальным отказом: как в `scorePendingHits`, неразрешённая строка уходит на model/human шаг (`SearchEvalReviewer`, по умолчанию `needs_human` → «review»). `SearchEvalCase` получил `lots`; в корпус добавлены регрессии R07/R08/R61 (объект только в лоте, второй лот выигрывает, работы-предмет, «включая поставку»). Отчёт разделяет retrieval recall, шум до card-стадии и стадию решения (`stage=listing/card/model`) — 100% на одном корпусе больше не читается как качество всего поиска.
 
-### [ ] R41 · P2 · Обязательная проверка не покрывает реальную БД и браузерный end-to-end
+### [x] R41 · P2 · Обязательная проверка не покрывает реальную БД и браузерный end-to-end
 
 **Подтверждено запуском и структурой репозитория.** PostgreSQL-тесты пропущены без `TEST_DATABASE_URL`; компонентные UI-тесты не проверяют связку SPA→API→SQL. В репозитории не найден workflow `.github` для обязательных прогонов; внешние CI/branch protection не проверены.
 
 - Где: [vitest.config.ts:18–31](vitest.config.ts#L18), [db.integration.test.ts:11–20](packages/db/src/db.integration.test.ts#L11), [package.json:16–40](package.json#L16), [SpecialistApp.storage.test.tsx](apps/web/src/SpecialistApp.storage.test.tsx).
 - Исправление: CI с временной PostgreSQL и миграциями/RLS, smoke для Redis/MinIO, браузерные e2e для login→profile→search→reload→review→participate→restart, две вкладки и два пользователя.
 - Приёмка: обязательный pipeline не становится зелёным за счёт пропуска ключевой БД; браузерный тест воспроизводит и предотвращает R01/R03/R27.
+
+**Исправлено (этап 109).** `.github/workflows/ci.yml` — два job'а на push/PR. `verify`: сервис postgres:16 + redis:7, `npm run db:migrate`, `npm run verify` с `TEST_DATABASE_URL` — интеграционные тесты БД (включая R37-регрессию и R39 «последний админ») больше не скипаются. `e2e`: postgres + Playwright chromium — `playwright.config.ts` поднимает API (3199, fixture-режим, `AUTH_BOOTSTRAP_*`, `DATABASE_URL=$TEST_DATABASE_URL`) и vite dev (5199, прокси на E2E_API_URL); `e2e/specialist.spec.ts` гоняет реальный браузер: вход → имя/слово профиля → «Искать по профилю» → review-кандидат во входящих → «Открыть карточку» → «Отслеживать» → «Мои закупки» → reload — решение переживает перезагрузку, т.к. живёт в PostgreSQL. Локально без TEST_DATABASE_URL тот же сценарий идёт на durable disk store; выделенные порты исключают случайный reuse dev-сервера. `npm run test:e2e`. Restart-устойчивость покрыта vitest-уровнем (R01/R16 restore), e2e покрывает reload. Двухпользовательская изоляция — `cabinet-isolation.test.ts` на уровне API; расширение e2e при необходимости.
 
 ### [x] R42 · P2 · Health сообщает успех независимо от доступности основных функций
 

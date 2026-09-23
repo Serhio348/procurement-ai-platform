@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: procurement_test
+          POSTGRES_USER: procurement
+          POSTGRES_PASSWORD: procurement
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U procurement -d procurement_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://procurement:procurement@localhost:5432/procurement_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations to the service PostgreSQL
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+      # The whole suite, including TEST_DATABASE_URL-gated integration tests —
+      # a green run can no longer hide a broken PostgreSQL write path (R41).
+      - run: npm run verify
+      - run: npm run build && npm run build -w @procurement/web
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: procurement_e2e
+          POSTGRES_USER: procurement
+          POSTGRES_PASSWORD: procurement
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U procurement -d procurement_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://procurement:procurement@localhost:5432/procurement_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Apply migrations to the service PostgreSQL
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+      # The API needs workspace packages compiled before tsx can serve it.
+      - run: npm run build
+      - name: Browser e2e — SPA → API → PostgreSQL
+        run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

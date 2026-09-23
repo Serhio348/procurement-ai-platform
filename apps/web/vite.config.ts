@@ -21,7 +21,9 @@ export default defineConfig({
     allowedHosts: [".trycloudflare.com", ".ngrok-free.app", ".ngrok.io"],
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3001",
+        // E2E_API_URL lets playwright run the stack on dedicated ports so a
+        // dev server already on 3001/5173 is never reused by mistake (R41).
+        target: process.env["E2E_API_URL"] ?? "http://127.0.0.1:3001",
         timeout: 180_000,
         proxyTimeout: 180_000,
       },

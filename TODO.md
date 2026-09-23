@@ -414,13 +414,15 @@
 - Исполнено: «Тревога» взводится только по `urgent:true` записям — review-кандидаты без срочных событий показывают спокойную плашку «На проверку». Контракт `SpecialistInboxEntry` получил `profileNames` и `reviewReason`, `presentInbox` в API обогащает записи именами профилей и кодовым reason карточки; деталь review-строки показывает «Профиль» и блок «Почему на проверку». [STAGE-98](docs/architecture/STAGE-98.md)
 - Регрессии: `marks review candidates as needs-attention without raising the alarm`, `keeps the alarm when urgent changes sit next to review candidates` (InboxApp.test.tsx), `explains a review candidate with its profile name and relevance reason` (app.test.ts).
 
-### [ ] R35 · P2 · Длительный поиск блокирует выбор профиля и не имеет отмены
+### [x] R35 · P2 · Длительный поиск блокирует выбор профиля и не имеет отмены
 
 **По коду.** На `listing || scoring` отключены и кнопка поиска, и select профиля; backend cancel нет. Listing-процент искусственно растёт до 90%, а не показывает реально прочитанные термы/страницы.
 
 - Где: [ProcurementsApp.tsx:209–226, 393–428](apps/web/src/procurements/ProcurementsApp.tsx#L209), [app.ts:884–913](apps/api/src/app.ts#L884).
 - Исправление: отмена задания, переключение между независимыми профилями, реальный прогресс retrieval; уже найденные карточки сохранять.
 - Приёмка: долгий профиль A не запрещает работать с B; отмена действительно останавливает оставшуюся работу, а не только скрывает индикатор.
+- Исполнено: статус `cancelled` в `SpecialistSearchRunStatus`; `POST /api/procurements/search/cancel` — живой ран помечается, listing-in-flight ловится маркером `cancelledAhead` (TTL 60 с) и его `begin` ложится уже отменённым; терминальный статус иммутабелен — поздние `scored`/`finish` не воскрешают ран. `runAlive()` в цикле оценки обрывается на ближайшей проверке, найденные карточки сохранены (persistEach). UI: select профиля не блокируется чужим прогоном, кнопка «Остановить», listing показывает indeterminate-полосу вместо фейковых 90%, отменённый ответ listing отбрасывается по generation. [STAGE-100](docs/architecture/STAGE-100.md)
+- Регрессии: `cancel*` — 3 теста search-progress hub; `stops the remaining scoring on cancel and keeps what it already found` (app.test.ts); `keeps the profile select and a stop button live while the run is scoring`, `shows the keep-found notice when the run was cancelled` (ProcurementsApp.test.tsx).
 
 ### [x] R36 · P2 · Восстановление из корзины включает мониторинг без явного выбора
 

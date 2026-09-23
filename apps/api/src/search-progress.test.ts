@@ -79,4 +79,47 @@ describe("createSearchProgressHub", () => {
     expect(hub.snapshot(profileId)).toBeUndefined();
     expect(hub.isCurrent(profileId, runA)).toBe(false);
   });
+
+  it("cancels a live run and makes every later write a no-op (R35)", () => {
+    const hub = createSearchProgressHub();
+    hub.begin(run(runA));
+
+    hub.cancel(profileId);
+
+    expect(hub.snapshot(profileId)?.status).toBe("cancelled");
+    expect(hub.isCurrent(profileId, runA)).toBe(false);
+    // Late writes from the still-unwinding scoring loop cannot resurrect it.
+    hub.scored(profileId, runA, { scoredCount: 4, matchCount: 2 });
+    hub.skip(profileId, runA, {
+      sourceProcurementId: "auction/late",
+      title: "Поздняя запись",
+      reason: "no-op",
+      stage: "card",
+    });
+    hub.finish(profileId, runA, "done");
+    const snapshot = hub.snapshot(profileId);
+    expect(snapshot?.status).toBe("cancelled");
+    expect(snapshot?.scoredCount).toBe(0);
+    expect(snapshot?.skipped).toEqual([]);
+  });
+
+  it("lets a cancel issued mid-listing land on the run that begins after it", () => {
+    const hub = createSearchProgressHub();
+    // The listing phase holds no run yet — the marker waits for begin().
+    hub.cancel(profileId);
+    hub.begin(run(runA));
+
+    expect(hub.snapshot(profileId)?.status).toBe("cancelled");
+    expect(hub.isCurrent(profileId, runA)).toBe(false);
+  });
+
+  it("a fresh begin after a cancelled run works normally", () => {
+    const hub = createSearchProgressHub();
+    hub.begin(run(runA));
+    hub.cancel(profileId);
+    hub.begin(run(runB));
+
+    expect(hub.snapshot(profileId)).toMatchObject({ runId: runB, status: "retrieving" });
+    expect(hub.isCurrent(profileId, runB)).toBe(true);
+  });
 });

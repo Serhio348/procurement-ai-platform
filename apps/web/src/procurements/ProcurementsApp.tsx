@@ -186,6 +186,7 @@ export function ProcurementsApp({
   decide,
   ingestProgress,
   searchRun,
+  cancelSearch,
   fetchCase,
   onCardLoaded,
 }: {
@@ -197,6 +198,7 @@ export function ProcurementsApp({
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   searchRun?: SpecialistSearchRun;
+  cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
   fetchCase?: (id: string) => Promise<SpecialistProcurementCard>;
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
 }) {
@@ -213,21 +215,15 @@ export function ProcurementsApp({
   const [searchPct, setSearchPct] = useState(0);
   const scoring = searchRun?.status === "retrieving" || searchRun?.status === "scoring";
   const listing = busy && busyKind === undefined && !scoring;
+  // Listing is one platform call — nothing honest to count. The bar pulses
+  // instead of inventing a percentage; real numbers start once cards score.
   useEffect(() => {
-    if (listing) {
-      setSearchPct(0);
-      const timer = setInterval(() => {
-        setSearchPct((pct) =>
-          pct >= 90 ? pct : pct + Math.max(1, Math.round((90 - pct) * 0.08)),
-        );
-      }, 300);
-      return () => clearInterval(timer);
-    }
     if (searchRun !== undefined && searchRun.retrievedCount > 0) {
       const pct =
         searchRun.status === "done" ||
         searchRun.status === "failed" ||
-        searchRun.status === "interrupted"
+        searchRun.status === "interrupted" ||
+        searchRun.status === "cancelled"
           ? 100
           : Math.min(99, Math.round((searchRun.scoredCount / searchRun.retrievedCount) * 100));
       setSearchPct(pct);
@@ -237,7 +233,7 @@ export function ProcurementsApp({
       setSearchPct(0);
     }
     return undefined;
-  }, [searchRun, listing, scoring]);
+  }, [searchRun, scoring]);
   useEffect(() => {
     if (searchRun === undefined) return;
     if (searchRun.status === "failed") {
@@ -246,6 +242,12 @@ export function ProcurementsApp({
     }
     if (searchRun.status === "interrupted") {
       setNotice("Поиск прервался при перезапуске сервера — запустите его ещё раз.");
+      return;
+    }
+    if (searchRun.status === "cancelled") {
+      setNotice(
+        `Поиск по профилю «${searchRun.profileName}» остановлен — уже найденные карточки остались в списке.`,
+      );
       return;
     }
     if (searchRun.status === "retrieving" || searchRun.status === "scoring") {
@@ -327,14 +329,20 @@ export function ProcurementsApp({
       selected.paymentQuote !== undefined ||
       (selected.triage === "participate" && selected.documents.length > 0));
 
+  const searchGeneration = useRef(0);
+
   async function runSearch(offset = 0): Promise<void> {
     if (search === undefined || busy || chosenProfileId.length === 0) return;
+    const generation = ++searchGeneration.current;
     setBusy(true);
     try {
       if (selectProfile !== undefined) {
         await selectProfile(chosenProfileId);
       }
       const result = await search(chosenProfileId, offset);
+      // The specialist stopped the listing — its late response must not
+      // resurrect the list or the busy state (R35).
+      if (searchGeneration.current !== generation) return;
       showingSearch.current = true;
       setCatalogItems((current) => {
         const incoming = result.items.filter((item) =>
@@ -353,11 +361,28 @@ export function ProcurementsApp({
           : `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}, сомнительных во входящих ${String(result.ambiguousCount)}.`,
       );
     } catch (error) {
+      if (searchGeneration.current !== generation) return;
       setNotice(
         error instanceof Error ? error.message : "Не удалось выполнить поиск по профилю.",
       );
     } finally {
-      setBusy(false);
+      if (searchGeneration.current === generation) setBusy(false);
+    }
+  }
+
+  async function runCancelSearch(): Promise<void> {
+    searchGeneration.current += 1;
+    setBusy(false);
+    if (cancelSearch === undefined) return;
+    // The run names its own profile — cancel that one, not whichever the
+    // specialist happens to view after switching mid-run.
+    const profileId = searchRun?.profileId ?? chosenProfileId;
+    if (profileId.length === 0) return;
+    try {
+      await cancelSearch(profileId);
+      setNotice("Поиск остановлен — уже найденные карточки остались в списке.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Не удалось остановить поиск.");
     }
   }
 
@@ -438,7 +463,6 @@ export function ProcurementsApp({
                   <select
                     id="search-profile-select"
                     value={chosenProfileId}
-                    disabled={listing || scoring}
                     onChange={(event) => {
                       const id = event.target.value;
                       setChosenProfileId(id);
@@ -472,6 +496,17 @@ export function ProcurementsApp({
               >
                 {listing ? "Ищем…" : scoring ? "Дочитываем…" : "Искать по профилю"}
               </button>
+              {(listing || scoring) && cancelSearch !== undefined ? (
+                <button
+                  type="button"
+                  className="admin-danger"
+                  onClick={() => {
+                    void runCancelSearch();
+                  }}
+                >
+                  Остановить
+                </button>
+              ) : null}
               {hasMore && search !== undefined ? (
                 <button
                   type="button"
@@ -498,10 +533,17 @@ export function ProcurementsApp({
                           : ` ${String(searchRun.scoredCount)} из ${String(searchRun.retrievedCount)}`
                       }`}
                 </span>
-                <strong>{String(searchPct)}%</strong>
+                {listing ? null : <strong>{String(searchPct)}%</strong>}
               </div>
               <div className="search-read-progress-track">
-                <div className="search-read-progress-bar" style={{ width: `${String(searchPct)}%` }} />
+                <div
+                  className={
+                    listing
+                      ? "search-read-progress-bar is-indeterminate"
+                      : "search-read-progress-bar"
+                  }
+                  style={listing ? undefined : { width: `${String(searchPct)}%` }}
+                />
               </div>
             </div>
           ) : null}

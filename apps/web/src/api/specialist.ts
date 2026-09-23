@@ -108,6 +108,24 @@ export async function searchProcurements(
   return SpecialistSearchResponse.parse(await response.json());
 }
 
+export async function cancelSearch(
+  profileId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistSearchRunValue> {
+  const response = await fetcher(
+    "/api/procurements/search/cancel",
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profileId }),
+    }),
+  );
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось остановить поиск");
+  }
+  return SpecialistSearchRun.parse(await response.json());
+}
+
 export async function fetchSearchProgress(
   profileId: string,
   fetcher: typeof fetch = fetch,

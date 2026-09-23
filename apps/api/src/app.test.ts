@@ -510,6 +510,97 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("stops the remaining scoring on cancel and keeps what it already found", async () => {
+    const resolvers: Array<() => void> = [];
+    const review = vi.fn(
+      (reviewed: readonly SearchHit[]) =>
+        new Promise<ReviewOutcome[]>((resolve) => {
+          resolvers.push(() =>
+            resolve(
+              reviewed.map(
+                (): ReviewOutcome => ({
+                  verdict: "relevant",
+                  decidedBy: "card",
+                  reason: "В лотах есть КТП.",
+                  matchedTerms: ["КТП"],
+                  confidence: 1,
+                }),
+              ),
+            ),
+          );
+        }),
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/ktp-a",
+            url: "https://goszakupki.by/auction/view/ktp-a",
+            title: "Поставка КТП 10 кВ для школы",
+          }),
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/ktp-b",
+            url: "https://goszakupki.by/auction/view/ktp-b",
+            title: "Поставка КТП 25 кВ для больницы",
+          }),
+        ],
+      },
+      searchReview: { review },
+    });
+    const profileId = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileId}`,
+      payload: { name: "КТП", keywords: ["КТП"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId },
+    });
+
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+    resolvers[0]!();
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2));
+
+    const cancelled = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search/cancel",
+      payload: { profileId },
+    });
+    expect(JSON.parse(cancelled.body).status).toBe("cancelled");
+
+    // The in-flight review resolves — the loop must still break on the next
+    // liveness check instead of scoring the rest.
+    resolvers[1]!();
+    await vi.waitFor(async () => {
+      const progress = await app.inject({
+        method: "GET",
+        url: `/api/procurements/search/progress?profileId=${profileId}`,
+      });
+      expect(JSON.parse(progress.body).status).toBe("cancelled");
+    });
+    const progress = await app.inject({
+      method: "GET",
+      url: `/api/procurements/search/progress?profileId=${profileId}`,
+    });
+    const run = JSON.parse(progress.body) as { status: string; scoredCount: number };
+    const queue = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${profileId}`,
+    });
+    const items = JSON.parse(queue.body).items as Array<{ title: string }>;
+
+    expect(run.scoredCount).toBe(1);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.title).toContain("КТП");
+
+    await app.close();
+  });
+
   it("shows a watched case in My procurements even when live-only listing is on", async () => {
     const catalog = new SpecialistCatalog();
     const stored = SpecialistProcurementCard.parse({

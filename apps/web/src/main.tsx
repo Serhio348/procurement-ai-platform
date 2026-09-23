@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
   activateProfile,
+  cancelSearch,
   createProfile,
   decideProcurement,
   deleteProfile,
@@ -161,6 +162,7 @@ function LiveConsole() {
       listMine={fetchProcurements}
       loadCard={fetchProcurement}
       searchProgress={fetchSearchProgress}
+      cancelSearch={cancelSearch}
     />
   );
 }

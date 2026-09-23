@@ -457,6 +457,94 @@ describe("ProcurementsApp", () => {
     release();
   });
 
+  it("keeps the profile select and a stop button live while the run is scoring", async () => {
+    const user = userEvent.setup();
+    const cancelSearch = vi.fn(async () => ({
+      profileId: searchProfile.id,
+      profileName: "КТП",
+      status: "cancelled" as const,
+      retrievedCount: 80,
+      scoredCount: 16,
+      matchCount: 2,
+      discardedCount: 14,
+      reviewCount: 0,
+      listingDiscardedCount: 0,
+      skipped: [],
+    }));
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                profiles={[searchProfile]}
+                activeProfileId={searchProfile.id}
+                cancelSearch={cancelSearch}
+                searchRun={{
+                  profileId: searchProfile.id,
+                  profileName: "КТП",
+                  status: "scoring",
+                  retrievedCount: 80,
+                  scoredCount: 16,
+                  matchCount: 2,
+                  discardedCount: 14,
+                  reviewCount: 0,
+                  listingDiscardedCount: 0,
+                  skipped: [],
+                }}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // A long run on profile A must not block switching to profile B (R35).
+    expect(screen.getByRole("combobox", { name: "Профиль" })).toHaveProperty("disabled", false);
+
+    await user.click(screen.getByRole("button", { name: "Остановить" }));
+    expect(cancelSearch).toHaveBeenCalledWith(searchProfile.id);
+    expect(
+      await screen.findByText("Поиск остановлен — уже найденные карточки остались в списке."),
+    ).toBeTruthy();
+  });
+
+  it("shows the keep-found notice when the run was cancelled", () => {
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                searchRun={{
+                  profileId: searchProfile.id,
+                  profileName: "КТП",
+                  status: "cancelled",
+                  retrievedCount: 80,
+                  scoredCount: 40,
+                  matchCount: 3,
+                  discardedCount: 37,
+                  reviewCount: 0,
+                  listingDiscardedCount: 0,
+                  skipped: [],
+                }}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText(/Поиск по профилю «КТП» остановлен — уже найденные карточки остались в списке/),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Остановить" })).toBeNull();
+  });
+
   it("shows one row when the same procedure arrives under two ids", () => {
     const first = SpecialistProcurementCard.parse({
       id: "00000000-0000-4000-8000-000000000411",

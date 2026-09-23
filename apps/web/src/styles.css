@@ -444,6 +444,23 @@ h3 {
   background: #3a5d86;
 }
 
+.search-read-progress-bar.is-indeterminate {
+  width: 30%;
+  animation: search-read-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes search-read-indeterminate {
+  0% {
+    margin-left: 0;
+  }
+  50% {
+    margin-left: 70%;
+  }
+  100% {
+    margin-left: 0;
+  }
+}
+
 h3 {
   font-size: 14px;
   margin-top: 20px;

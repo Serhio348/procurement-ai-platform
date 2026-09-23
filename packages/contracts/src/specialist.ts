@@ -389,6 +389,8 @@ export const SpecialistSearchRunStatus = z.enum([
   "failed",
   /** The process stopped mid-run; the stored snapshot survives a restart (R16). */
   "interrupted",
+  /** The specialist stopped the run; cards already scored stay found (R35). */
+  "cancelled",
 ]);
 export type SpecialistSearchRunStatus = z.infer<typeof SpecialistSearchRunStatus>;
 

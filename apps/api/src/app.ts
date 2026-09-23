@@ -260,6 +260,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       searchRunsHub.finish(profileId, runId, status);
       mirrorSearchRun(profileId);
     },
+    cancel: (profileId) => {
+      searchRunsHub.cancel(profileId);
+      mirrorSearchRun(profileId);
+    },
     clear: (profileId) => {
       searchRunsHub.clear(profileId);
       workspace().forgetSearchRun(profileId);
@@ -2204,6 +2208,34 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount: 0,
       reviewCount: 0,
     });
+  });
+
+  // Stop the profile's live run; a still-in-flight listing lands cancelled
+  // on begin(), so the whole remaining work — not just the indicator —
+  // actually stops. Cards already scored stay found (R35).
+  app.post("/api/procurements/search/cancel", async (request, reply) => {
+    const parsed = SpecialistSearchProgressQuery.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const profile = workspace().findProfile(parsed.data.profileId);
+    if (profile === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    searchProgress.cancel(profile.id);
+    const run = searchProgress.snapshot(profile.id);
+    return SpecialistSearchRun.parse(
+      run ?? {
+        profileId: profile.id,
+        profileName: profileDisplayName(profile),
+        status: "done",
+        retrievedCount: 0,
+        scoredCount: 0,
+        matchCount: 0,
+        discardedCount: 0,
+        reviewCount: 0,
+      },
+    );
   });
 
   app.post("/api/procurements/:id/decision", async (request, reply) => {

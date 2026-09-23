@@ -77,6 +77,7 @@ export interface SpecialistAppProps {
   }) => Promise<SpecialistProcurementListResponse>;
   loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
   searchProgress?: (profileId: string) => Promise<SpecialistSearchRun>;
+  cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -199,6 +200,22 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             applyInboxItems(await refreshInbox());
           }
           return result;
+        };
+
+  const cancelSearch =
+    props.cancelSearch === undefined
+      ? undefined
+      : async (profileId: string) => {
+          const run = await props.cancelSearch!(profileId);
+          setSearchRun(run);
+          // Whatever the run scored before the stop stays found: refresh the
+          // profile's queue so the partial result is visible immediately.
+          void loadEntireList({ tab: "search", profileId })
+            .then((items) => {
+              setProcurements((current) => mergeSearchPane(current, items, profileId));
+            })
+            .catch(() => undefined);
+          return run;
         };
 
   const searchPaneItems = procurements.filter(
@@ -384,7 +401,8 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     if (
       searchRun.status === "done" ||
       searchRun.status === "failed" ||
-      searchRun.status === "interrupted"
+      searchRun.status === "interrupted" ||
+      searchRun.status === "cancelled"
     )
       return undefined;
     const timer = window.setInterval(() => {
@@ -400,7 +418,8 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
             if (
               next.status !== "done" &&
               next.status !== "failed" &&
-              next.status !== "interrupted"
+              next.status !== "interrupted" &&
+              next.status !== "cancelled"
             )
               return;
             void loadEntireList({ tab: "search", profileId: runProfileId })
@@ -595,6 +614,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                   })}
               {...(decide === undefined ? {} : { decide })}
               {...(searchRun === undefined ? {} : { searchRun })}
+              {...(cancelSearch === undefined ? {} : { cancelSearch })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
             />
           }
@@ -616,6 +636,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                   })}
               {...(decide === undefined ? {} : { decide })}
               {...(searchRun === undefined ? {} : { searchRun })}
+              {...(cancelSearch === undefined ? {} : { cancelSearch })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               {...(props.loadCard === undefined ? {} : { fetchCase: props.loadCard })}
               onCardLoaded={rememberCard}

@@ -325,6 +325,14 @@
 - Исправлено: `inboxOpenTarget` выбирает раздел по состоянию кейса — `reject` → `/trash/:id`, `monitor`/`participate`/`archived` → `/my-procurements/:id`, только неразобранные кандидаты → `/procurements/:id`.
 - Регрессии: `opens a watched case from the inbox inside Мои закупки` (SpecialistApp.storage.test.tsx). [STAGE-95](docs/architecture/STAGE-95.md)
 
+### [x] R49 · P1 · Открытая из inbox карточка показывала «Документы (0)»/«Лоты (0)»
+
+**Воспроизведено на VPS.** У «участвуемой» закупки со скачанными документами «Открыть карточку» из входящих открывал деталь без документов и лотов. Причина: resolve-ответ отдавал `slimListedCard` (`documents: []`, `sourceCard` с пустыми `lots`/`rawFields`/`parties`), `rememberCard` перезаписывал им полную кабинетную карточку в state, а деталь не догружает карточку, уже лежащую в `procurements`.
+
+- Где: [app.ts:2075–2082](apps/api/src/app.ts#L2075), [SpecialistApp.tsx](apps/web/src/SpecialistApp.tsx) `rememberCard`/`mergeProcurementCards`, [case-list.ts:105–128](packages/domain/src/specialist/case-list.ts#L105).
+- Исправлено: resolve возвращает полную карточку; `rememberCard` мержит через `mergeProcurementCards`; merge теперь сравнивает `sourceCard` по глубине (лоты/стороны/rawFields), а не по «определён ли» — полая проекция не затирает сохранённую.
+- Регрессии: `does not let a slimmed response hollow out the stored case` (SpecialistApp.merge.test.ts). [STAGE-96](docs/architecture/STAGE-96.md)
+
 ## C. Продукт и UI
 
 ### [x] R27 · P1 · Длинные списки обрезаются без доступной пагинации

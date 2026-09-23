@@ -2075,10 +2075,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return SpecialistInboxResolveResponse.parse({
       items: catalog().urgentInbox(),
       documents: action === "documents" ? inboxDocumentLinks(card) : [],
-      // The console only navigates by card.id; the detail page refetches the
-      // full case itself. Shipping the stored platform card here would double
-      // the payload of every inbox resolve.
-      ...(card === undefined ? {} : { card: slimListedCard(card) }),
+      // The opened card is written straight into the console's catalog, and
+      // the detail page renders it as-is without a refetch — a slimmed row
+      // would overwrite the stored case and show «Документы (0)», «Лоты (0)».
+      ...(card === undefined ? {} : { card }),
     });
   });
 

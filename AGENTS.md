@@ -102,6 +102,7 @@
 - [`docs/architecture/STAGE-93.md`](docs/architecture/STAGE-93.md) — guard несохранённых правок на навигацию по меню, форма профиля переинициализируется по `key={id}` (R30)
 - [`docs/architecture/STAGE-94.md`](docs/architecture/STAGE-94.md) — «Назначение» редактируется, `description` сохраняется — редактор больше не затирает поля review-контекста (R31)
 - [`docs/architecture/STAGE-95.md`](docs/architecture/STAGE-95.md) — «Открыть карточку» из inbox ведёт в раздел по состоянию кейса: «Мои закупки»/«Корзина»/«Закупки» (R48)
+- [`docs/architecture/STAGE-96.md`](docs/architecture/STAGE-96.md) — resolve возвращает полную карточку, merge выбирает `sourceCard` по глубине — полая проекция не затирает кейс (R49)
 
 ---
 

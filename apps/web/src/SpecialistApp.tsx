@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
+  ProcedureCard,
   ProcurementId,
   SpecialistInboxAction,
   SpecialistInboxEntry,
@@ -312,12 +313,9 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   );
 
   function rememberCard(card: SpecialistProcurementCard): void {
-    setProcurements((current) => {
-      if (current.some((item) => item.id === card.id)) {
-        return current.map((item) => (item.id === card.id ? card : item));
-      }
-      return [...current, card];
-    });
+    // A slimmer projection must not evict the stored case: merge keeps the
+    // richer documents/sourceCard when both sides carry the same id.
+    setProcurements((current) => mergeProcurementCards(current, [card]));
   }
 
   useEffect(() => {
@@ -830,7 +828,7 @@ export function mergeProcurementCards(
       ...previous,
       ...update,
       documents: update.documents.length > 0 ? update.documents : previous.documents,
-      sourceCard: update.sourceCard ?? previous.sourceCard,
+      sourceCard: richerSourceCard(previous.sourceCard, update.sourceCard),
       termsDetail: update.termsDetail ?? previous.termsDetail,
       paymentQuote: update.paymentQuote ?? previous.paymentQuote,
       watchSnapshot: update.watchSnapshot ?? previous.watchSnapshot,
@@ -849,4 +847,20 @@ export function mergeProcurementCards(
   return order
     .map((id) => byId.get(id))
     .filter((item): item is SpecialistProcurementCard => item !== undefined);
+}
+
+// A slimmed listing row keeps a sourceCard object but hollows lots/parties/
+// rawFields — defined is not enough, the deeper card wins.
+function richerSourceCard(
+  previous: ProcedureCard | undefined,
+  update: ProcedureCard | undefined,
+): ProcedureCard | undefined {
+  if (update === undefined) return previous;
+  if (previous === undefined) return update;
+  const depth = (card: ProcedureCard): number =>
+    card.lots.length +
+    card.parties.length +
+    card.externalIds.length +
+    Object.keys(card.rawFields).length;
+  return depth(update) >= depth(previous) ? update : previous;
 }

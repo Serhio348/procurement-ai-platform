@@ -105,6 +105,7 @@
 - [`docs/architecture/STAGE-96.md`](docs/architecture/STAGE-96.md) — resolve возвращает полную карточку, merge выбирает `sourceCard` по глубине — полая проекция не затирает кейс (R49)
 - [`docs/architecture/STAGE-97.md`](docs/architecture/STAGE-97.md) — «Вернуть» из корзины снимает отказ, а не создаёт «Слежу»; возврат в «Участвую» возобновляет ingest (R36)
 - [`docs/architecture/STAGE-98.md`](docs/architecture/STAGE-98.md) — «Тревога» только на срочные записи; review-кандидат показывает профиль и `reviewReason` (R34)
+- [`docs/architecture/STAGE-99.md`](docs/architecture/STAGE-99.md) — контент-проб документов: sha256-проб одного файла на кейс за проход, diff по `contentHash`, `document_updated` запускает ingest у «Участвую» (R24)
 
 ---
 

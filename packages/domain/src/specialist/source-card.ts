@@ -5,7 +5,7 @@ import {
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
 } from "@procurement/contracts";
 import { statusLabel, printedProcedureKindLabel } from "./case.js";
-import { cardSnapshot } from "./watch.js";
+import { cardSnapshot, mergeDocumentProbes } from "./watch.js";
 
 export interface NamedSourceField {
   label: string;
@@ -67,7 +67,18 @@ export function applySourceCard(
     ...(buyer === undefined ? {} : { buyerName: buyer }),
     ...(amount === undefined ? {} : { amountLabel: amount }),
     sourceCard: source,
-    watchSnapshot: cardSnapshot(source, now),
+    // Probe baselines live on the snapshot: carrying them by URL keeps a
+    // same-link content replacement comparable on the next pass (R24).
+    watchSnapshot: cardSnapshot(
+      {
+        ...source,
+        listedDocuments: mergeDocumentProbes(
+          card.watchSnapshot?.documents,
+          source.listedDocuments,
+        ),
+      },
+      now,
+    ),
   });
 }
 

@@ -64,9 +64,60 @@ export function listedAttachmentsForSnapshot(
   for (const item of items) {
     if (seen.has(item.sourceUrl)) continue;
     seen.add(item.sourceUrl);
-    unique.push({ name: item.name, sourceUrl: item.sourceUrl });
+    unique.push({
+      name: item.name,
+      sourceUrl: item.sourceUrl,
+      ...(item.contentHash === undefined ? {} : { contentHash: item.contentHash }),
+      ...(item.checkedAt === undefined ? {} : { checkedAt: item.checkedAt }),
+    });
   }
   return unique.sort((left, right) => left.sourceUrl.localeCompare(right.sourceUrl));
+}
+
+/**
+ * Carries probe baselines (`contentHash`/`checkedAt`) from the previous
+ * snapshot onto the freshly listed documents, matched by URL. Without this
+ * every re-listing would forget what content was last seen and a same-URL
+ * replacement could never be compared (R24). A value stamped onto the fresh
+ * entry wins over the carried one.
+ */
+export function mergeDocumentProbes(
+  previous: readonly ListedSourceAttachment[] | undefined,
+  current: readonly ListedSourceAttachment[],
+): ListedSourceAttachment[] {
+  if (previous === undefined || previous.length === 0) return [...current];
+  const baseline = new Map(previous.map((item) => [item.sourceUrl, item] as const));
+  return current.map((item) => {
+    const was = baseline.get(item.sourceUrl);
+    if (was === undefined) return { ...item };
+    return {
+      ...item,
+      contentHash: item.contentHash ?? was.contentHash,
+      checkedAt: item.checkedAt ?? was.checkedAt,
+    };
+  });
+}
+
+/**
+ * Which listed document the watch pass probes for content next: the one
+ * never checked, else the least recently checked — a fair round-robin so a
+ * long document list is covered over successive passes within the
+ * one-probe-per-case budget (R24).
+ */
+export function nextDocumentProbeTarget(
+  previous: readonly ListedSourceAttachment[] | undefined,
+  current: readonly ListedSourceAttachment[],
+): ListedSourceAttachment | undefined {
+  if (current.length === 0) return undefined;
+  const checked = new Map(
+    (previous ?? []).map((item) => [item.sourceUrl, item.checkedAt] as const),
+  );
+  const key = (item: ListedSourceAttachment): string =>
+    checked.get(item.sourceUrl) ?? "";
+  return [...current].sort((left, right) => {
+    const order = key(left).localeCompare(key(right));
+    return order !== 0 ? order : left.sourceUrl.localeCompare(right.sourceUrl);
+  })[0];
 }
 
 /**
@@ -143,12 +194,21 @@ function diffListedDocuments(
       });
       continue;
     }
-    if (was.name !== doc.name) {
+    const contentChanged =
+      was.contentHash !== undefined &&
+      doc.contentHash !== undefined &&
+      was.contentHash !== doc.contentHash;
+    if (was.name !== doc.name || contentChanged) {
       changes.push({
         kind: "document_updated",
         field: "documents",
         previous: was.name,
-        current: doc.name,
+        // Same name, different bytes: the platform replaced the file under
+        // an unchanged link — say so, or the row reads like nothing moved.
+        current:
+          contentChanged && was.name === doc.name
+            ? `${doc.name} (обновлено содержимое)`
+            : doc.name,
         dedupeKey: `${capturedAt}:${url}`,
       });
     }

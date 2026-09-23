@@ -265,13 +265,15 @@
 - Приёмка: циклические изменения и одинаковые названия разных файлов не теряются.
 - Исправлено (этап 87): у `WatchChange` появился `dedupeKey` — переходные diff'ы несут `capturedAt` нового снимка (документные — `capturedAt:url`), state-пуши дедлайна остаются без ключа и сохраняют стабильный id. `inboxItemFromWatchChange` включает ключ в event id: возврат к прежнему значению — новая строка, повторная доставка того же применения — дедуп. Регрессии в watch.test.ts: повторный переход к прежнему значению и два файла с одним именем дают разные события.
 
-### [ ] R24 · P2 · Мониторинг документов видит только URL/имя, а не изменение содержимого
+### [x] R24 · P2 · Мониторинг документов видит только URL/имя, а не изменение содержимого
 
 **По коду / известный долг.** Diff сопоставляет `sourceUrl` и `name`; замена файла по прежней ссылке незаметна. Автоматическая загрузка у «Участвовать» запускается лишь на `document_added`, но не `document_updated`.
 
 - Где: [watch.ts:112–147](packages/domain/src/specialist/watch.ts#L112), [app.ts:1097–1101](apps/api/src/app.ts#L1097), [AGENTS.md:274–275](AGENTS.md#L274).
 - Исправление: условное чтение по ETag/Last-Modified, периодическая hash-проверка с бюджетом, версии содержимого; отличать смену имени от смены файла.
 - Приёмка: заменённое ТЗ по тому же URL обнаруживается; для участия новая версия скачивается и переанализируется, старая сохраняется.
+- Исполнено: бюджетный контент-проб — один документ на кейс за watch-проход (round-robin по `checkedAt`). `ListedSourceAttachment` получил `contentHash`/`checkedAt`; `mergeDocumentProbes` несёт базовые хэши между перечитываниями, `nextDocumentProbeTarget` выбирает самый давно не проверенный файл; diff видит `contentHash`-смену при том же URL/имени → `document_updated` «(обновлено содержимое)». `document_updated` у «Участвую» запускает ingest — новая версия скачивается и индексируется, старый blob сохраняется (content-addressed). `SpecialistCardWatchPort.probeDocument` реализован через `procurement.download`. [STAGE-99](docs/architecture/STAGE-99.md)
+- Регрессии: `document content probes (R24)` — 4 теста в watch.test.ts; `detects a file replaced under the same URL via a budgeted content probe` (app.test.ts).
 
 ### [x] R25 · P1 · Ошибка скачивания из inbox всё равно закрывает сообщение
 

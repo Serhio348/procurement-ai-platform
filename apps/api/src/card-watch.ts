@@ -12,6 +12,13 @@ import { silentLogger, type Logger } from "@procurement/observability";
 /** Re-reads a decided case from the source. Absent: monitoring stays off. */
 export interface SpecialistCardWatchPort {
   read: (sourceProcurementId: string) => Promise<ProcedureCard | undefined>;
+  /**
+   * Downloads one listed document and returns its content hash — the only
+   * way to notice a file replaced under an unchanged URL (R24). Budgeted:
+   * the watch pass probes at most one document per case. Returns undefined
+   * when the file cannot be fetched; absent entirely in fixture mode.
+   */
+  probeDocument?: (sourceUrl: string) => Promise<string | undefined>;
 }
 
 export interface ProcurementCardWatchOptions {
@@ -33,7 +40,9 @@ export function createProcurementCardWatch(
   const sourceId = SourceId.parse(options.sourceId);
   const client = new ProcurementMcpClient({
     caller: options.caller,
-    policyGate: new ToolPolicyGate({ agentAllowedTools: ["procurement.get"] }),
+    policyGate: new ToolPolicyGate({
+      agentAllowedTools: ["procurement.get", "procurement.download"],
+    }),
     timeoutMs: options.timeoutMs ?? 60_000,
     logger,
   });
@@ -48,6 +57,21 @@ export function createProcurementCardWatch(
       } catch (error) {
         logger.warn("Card watch skipped a case", {
           sourceProcurementId,
+          err: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      }
+    },
+    async probeDocument(sourceUrl) {
+      try {
+        const downloaded = await client.download(
+          { sourceId, downloadUrl: sourceUrl },
+          RequestId.parse(randomUUID()),
+        );
+        return downloaded.hash;
+      } catch (error) {
+        logger.warn("Document content probe failed", {
+          sourceUrl,
           err: error instanceof Error ? error.message : String(error),
         });
         return undefined;

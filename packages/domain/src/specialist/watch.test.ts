@@ -5,6 +5,8 @@ import {
   diffCardSnapshots,
   inboxItemFromWatchChange,
   isWatchedTriage,
+  mergeDocumentProbes,
+  nextDocumentProbeTarget,
   normalizePriceKey,
   withWatchSnapshot,
 } from "./watch.js";
@@ -14,7 +16,12 @@ function sourceCard(input: {
   raw?: string;
   amount?: number;
   bidsDeadline?: unknown;
-  listedDocuments?: Array<{ name: string; sourceUrl: string }>;
+  listedDocuments?: Array<{
+    name: string;
+    sourceUrl: string;
+    contentHash?: string;
+    checkedAt?: string;
+  }>;
 }) {
   return ProcedureCard.parse({
     sourceId: "goszakupki_by",
@@ -233,5 +240,104 @@ describe("watch inbox item and card snapshot", () => {
     expect(isWatchedTriage(consoleCard("participate"))).toBe(true);
     expect(isWatchedTriage(consoleCard("reject"))).toBe(false);
     expect(isWatchedTriage(consoleCard())).toBe(false);
+  });
+});
+
+describe("document content probes (R24)", () => {
+  const HASH_A = "a".repeat(64);
+  const HASH_B = "b".repeat(64);
+  const URL_TZ = "https://goszakupki.by/files/tz";
+
+  it("reports a file replaced under an unchanged name and URL", () => {
+    const previous = cardSnapshot(
+      sourceCard({
+        listedDocuments: [
+          { name: "ТЗ.pdf", sourceUrl: URL_TZ, contentHash: HASH_A },
+        ],
+      }),
+      "2026-09-10T00:00:00.000Z",
+    );
+    const current = cardSnapshot(
+      sourceCard({
+        listedDocuments: [
+          { name: "ТЗ.pdf", sourceUrl: URL_TZ, contentHash: HASH_B },
+        ],
+      }),
+      "2026-09-11T00:00:00.000Z",
+    );
+
+    const changes = diffCardSnapshots(previous, current);
+
+    expect(changes).toEqual([
+      {
+        kind: "document_updated",
+        field: "documents",
+        previous: "ТЗ.pdf",
+        current: "ТЗ.pdf (обновлено содержимое)",
+        dedupeKey: `2026-09-11T00:00:00.000Z:${URL_TZ}`,
+      },
+    ]);
+  });
+
+  it("stays silent while the probed hash matches the baseline", () => {
+    const snap = (at: string) =>
+      cardSnapshot(
+        sourceCard({
+          listedDocuments: [
+            { name: "ТЗ.pdf", sourceUrl: URL_TZ, contentHash: HASH_A },
+          ],
+        }),
+        at,
+      );
+    expect(
+      diffCardSnapshots(
+        snap("2026-09-10T00:00:00.000Z"),
+        snap("2026-09-11T00:00:00.000Z"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("carries probe baselines across re-listings and lets fresh stamps win", () => {
+    const previous = [
+      { name: "ТЗ.pdf", sourceUrl: URL_TZ, contentHash: HASH_A, checkedAt: "2026-09-10T00:00:00.000Z" },
+    ];
+    const carried = mergeDocumentProbes(previous, [
+      { name: "ТЗ.pdf", sourceUrl: URL_TZ },
+      { name: "Смета.pdf", sourceUrl: "https://goszakupki.by/files/sm" },
+    ]);
+    expect(carried[0]?.contentHash).toBe(HASH_A);
+    expect(carried[0]?.checkedAt).toBe("2026-09-10T00:00:00.000Z");
+    expect(carried[1]?.contentHash).toBeUndefined();
+
+    const stamped = mergeDocumentProbes(previous, [
+      {
+        name: "ТЗ.pdf",
+        sourceUrl: URL_TZ,
+        contentHash: HASH_B,
+        checkedAt: "2026-09-11T00:00:00.000Z",
+      },
+    ]);
+    expect(stamped[0]?.contentHash).toBe(HASH_B);
+    expect(stamped[0]?.checkedAt).toBe("2026-09-11T00:00:00.000Z");
+  });
+
+  it("probes the never-checked document first, then the stalest", () => {
+    const urlB = "https://goszakupki.by/files/b";
+    const current = [
+      { name: "А.pdf", sourceUrl: URL_TZ },
+      { name: "Б.pdf", sourceUrl: urlB },
+    ];
+    expect(nextDocumentProbeTarget(undefined, current)?.sourceUrl).toBe(urlB);
+
+    const previous = [
+      { name: "А.pdf", sourceUrl: URL_TZ, checkedAt: "2026-09-10T00:00:00.000Z" },
+    ];
+    expect(nextDocumentProbeTarget(previous, current)?.sourceUrl).toBe(urlB);
+
+    const bothChecked = [
+      { name: "А.pdf", sourceUrl: URL_TZ, checkedAt: "2026-09-12T00:00:00.000Z" },
+      { name: "Б.pdf", sourceUrl: urlB, checkedAt: "2026-09-10T00:00:00.000Z" },
+    ];
+    expect(nextDocumentProbeTarget(bothChecked, current)?.sourceUrl).toBe(urlB);
   });
 });

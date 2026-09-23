@@ -3195,6 +3195,92 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("detects a file replaced under the same URL via a budgeted content probe", async () => {
+    const HASH_A = "a".repeat(64);
+    const HASH_B = "b".repeat(64);
+    const live = ProcedureCard.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/779",
+      url: "https://goszakupki.by/auction/view/auction-779",
+      title: "Поставка кабеля",
+      fetchedAt: "2026-09-10T00:00:00.000Z",
+      status: "accepting_bids",
+      listedDocuments: [
+        { name: "ТЗ.pdf", sourceUrl: "https://goszakupki.by/files/tz" },
+      ],
+    });
+    const read = vi.fn().mockResolvedValue(live);
+    const probeDocument = vi
+      .fn()
+      .mockResolvedValueOnce(HASH_A)
+      .mockResolvedValue(HASH_B);
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/779",
+            url: "https://goszakupki.by/auction/view/auction-779",
+            title: "Кабель",
+            status: "accepting_bids",
+          }),
+        ],
+      },
+      cardWatch: { read, probeDocument },
+      monitorWatch: { read, probeDocument },
+    });
+
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${await activeProfileId(app)}`,
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
+      payload: { watchNewProcurements: true },
+    });
+    const found = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const cardId = (JSON.parse(found.body).items as Array<{ id: string }>)[0]?.id;
+    const decided = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${cardId ?? ""}/decision`,
+      payload: { kind: "monitor" },
+    });
+    expect(decided.statusCode).toBe(200);
+    // The searches are done — the watch pass alone must keep probing.
+    await app.inject({
+      method: "POST",
+      url: `/api/profiles/${await activeProfileId(app)}/watch`,
+      payload: { watchNewProcurements: false },
+    });
+
+    // Pass 1 establishes the content baseline — a probe alone is not a change.
+    const first = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    // Pass 2 probes the same URL and finds different bytes.
+    const second = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const rows = JSON.parse(inbox.body).items as Array<{
+      topic: string;
+      summary: string;
+      detail: string;
+    }>;
+
+    expect(JSON.parse(first.body).changedCount).toBe(0);
+    expect(JSON.parse(second.body).changedCount).toBe(1);
+    expect(probeDocument).toHaveBeenCalledWith("https://goszakupki.by/files/tz");
+    expect(
+      rows.some(
+        (item) =>
+          item.topic === "documents" &&
+          item.summary.includes("обновлено содержимое"),
+      ),
+    ).toBe(true);
+
+    await app.close();
+  });
+
   it("routes the watch pass to monitorWatch and interactive reads to cardWatch", async () => {
     const live = ProcedureCard.parse({
       sourceId: "goszakupki_by",

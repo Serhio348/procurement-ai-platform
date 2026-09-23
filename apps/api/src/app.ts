@@ -46,6 +46,7 @@ import {
   inboxDocumentLinks,
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
+  nextDocumentProbeTarget,
   inboxTopic,
   watchTransitionKey,
   extraPlatformSearchTerms,
@@ -1379,7 +1380,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     if (
       next.triage === "participate" &&
-      changes.some((item) => item.kind === "document_added")
+      changes.some(
+        (item) =>
+          item.kind === "document_added" || item.kind === "document_updated",
+      )
     ) {
       startParticipateIngest(next);
     }
@@ -1411,9 +1415,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const fresh = await watchReader.read(card.sourceProcurementId);
       if (fresh === undefined) continue;
       monitoredCount += 1;
+      // A renamed link is not the only way a file changes: the platform can
+      // replace bytes under the same URL. Budgeted to one download per case
+      // per pass, round-robin across the listing (R24).
+      const probed =
+        watchReader.probeDocument === undefined || fresh.listedDocuments.length === 0
+          ? fresh
+          : await probeWatchedDocument(card, fresh, now, watchReader.probeDocument);
       let applied: { next: SpecialistProcurementCardValue; changes: WatchChange[] };
       try {
-        applied = applyFreshSourceCard(card, fresh, now);
+        applied = applyFreshSourceCard(card, probed, now);
       } catch (error) {
         logger.error("Specialist watched case could not store the source card", error, {
           sourceProcurementId: card.sourceProcurementId,
@@ -1429,6 +1440,40 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
     }
     return { monitoredCount, changedCount };
+  }
+
+  /**
+   * Downloads one listed document of a watched case and stamps the result
+   * onto the fresh card: the content hash enters the new snapshot, so the
+   * diff can compare it against the carried baseline (R24). The
+   * least-recently-checked URL is probed; `checkedAt` is stamped even on a
+   * failed download so a broken link does not monopolize the probe budget.
+   */
+  async function probeWatchedDocument(
+    card: SpecialistProcurementCardValue,
+    fresh: ProcedureCard,
+    now: string,
+    probe: (sourceUrl: string) => Promise<string | undefined>,
+  ): Promise<ProcedureCard> {
+    const target = nextDocumentProbeTarget(
+      card.watchSnapshot?.documents,
+      fresh.listedDocuments,
+    );
+    if (target === undefined) return fresh;
+    await discoveryController.beforeRequest(new Date());
+    const hash = await probe(target.sourceUrl);
+    return {
+      ...fresh,
+      listedDocuments: fresh.listedDocuments.map((doc) =>
+        doc.sourceUrl === target.sourceUrl
+          ? {
+              ...doc,
+              checkedAt: now,
+              ...(hash === undefined ? {} : { contentHash: hash }),
+            }
+          : doc,
+      ),
+    };
   }
 
   /**

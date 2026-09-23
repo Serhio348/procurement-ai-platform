@@ -140,6 +140,14 @@ export type Lot = z.infer<typeof Lot>;
 export const ListedSourceAttachment = z.object({
   name: z.string().min(1),
   sourceUrl: z.string().url(),
+  /**
+   * Hash of the content the last probe downloaded from this URL. Set only
+   * inside watch snapshots: it detects a file silently replaced under an
+   * unchanged name and link (R24).
+   */
+  contentHash: Sha256.optional(),
+  /** When a content probe last ran for this URL — rotation cursor. */
+  checkedAt: IsoDateTime.optional(),
 });
 export type ListedSourceAttachment = z.infer<typeof ListedSourceAttachment>;
 

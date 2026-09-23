@@ -9,6 +9,7 @@ import {
   SpecialistDiscoveryHealthResponse,
   SpecialistDiscoveryResponse,
   SpecialistIngestProgress,
+  SpecialistInboxEntry,
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
   SpecialistInboxResolveWrite,
@@ -1935,9 +1936,27 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
   });
 
-  app.get("/api/inbox", async () =>
-    SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() }),
-  );
+  // Inbox rows carry the profile names and the code-written reason so a
+  // review candidate explains itself without digging through logs (R34).
+  const presentInbox = () =>
+    SpecialistInboxListResponse.parse({
+      items: catalog().urgentInbox().map((entry) => {
+        const card = catalog().procurement(entry.procurementId);
+        const profileNames = (card?.profileIds ?? [])
+          .map((id) => workspace().findProfile(id))
+          .filter((item): item is SpecialistWorkingProfileValue => item !== undefined)
+          .map(profileDisplayName);
+        return SpecialistInboxEntry.parse({
+          ...entry,
+          profileNames,
+          ...(card?.relevanceReason === undefined
+            ? {}
+            : { reviewReason: card.relevanceReason }),
+        });
+      }),
+    });
+
+  app.get("/api/inbox", async () => presentInbox());
 
   app.post("/api/inbox/events", async (request, reply) => {
     const parsed = InboxFixtureItem.safeParse(request.body);
@@ -1952,9 +1971,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     // 201 means durable: the event must reach the store before the response,
     // otherwise a restart silently loses an acknowledged change (R18).
     await persist();
-    return reply.code(recorded.duplicate ? 200 : 201).send(
-      SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() }),
-    );
+    return reply.code(recorded.duplicate ? 200 : 201).send(presentInbox());
   });
 
   app.delete("/api/inbox/:id", async (request, reply) => {
@@ -1964,7 +1981,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
-    return SpecialistInboxListResponse.parse({ items: catalog().urgentInbox() });
+    return presentInbox();
   });
 
   app.post("/api/inbox/:id/resolve", async (request, reply) => {
@@ -2073,7 +2090,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       topic,
     });
     return SpecialistInboxResolveResponse.parse({
-      items: catalog().urgentInbox(),
+      items: presentInbox().items,
       documents: action === "documents" ? inboxDocumentLinks(card) : [],
       // The opened card is written straight into the console's catalog, and
       // the detail page renders it as-is without a refetch — a slimmed row

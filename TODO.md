@@ -402,13 +402,15 @@
 - Исправление: полноценное поведение dialog для клавиатуры/скринридера; безопасный initial focus и возврат после закрытия.
 - Приёмка: Tab/Shift+Tab не попадает в скрытые фоновые действия; Escape закрывает; фокус возвращается в логичное место.
 
-### [ ] R34 · P2 · Review по-прежнему вызывает «Тревогу», но не объясняет, что проверять
+### [x] R34 · P2 · Review по-прежнему вызывает «Тревогу», но не объясняет, что проверять
 
 **По коду.** Любое количество inbox entries, даже только `urgent:false`, вызывает тревожную плашку. Строка кандидата содержит название, но не профиль, reason проверки и источник вердикта. Доступны «Открыть» и «Удалить», а не предметный разбор кандидата.
 
 - Где: [InboxPage.tsx:18–21, 83–132](apps/web/src/inbox/InboxPage.tsx#L18), [inbox-action.ts:35–57](packages/domain/src/specialist/inbox-action.ts#L35), [catalog.ts:175–193](packages/domain/src/specialist/catalog.ts#L175).
 - Исправление: разделить срочные изменения и очередь review; показать профиль/причину/лот/проверку модели, дать фильтр по профилю и явные review-действия (совместно с R02).
 - Приёмка: неопределённый кандидат не выглядит срочной подтверждённой закупкой; специалист понимает причину попадания без поиска в server logs.
+- Исполнено: «Тревога» взводится только по `urgent:true` записям — review-кандидаты без срочных событий показывают спокойную плашку «На проверку». Контракт `SpecialistInboxEntry` получил `profileNames` и `reviewReason`, `presentInbox` в API обогащает записи именами профилей и кодовым reason карточки; деталь review-строки показывает «Профиль» и блок «Почему на проверку». [STAGE-98](docs/architecture/STAGE-98.md)
+- Регрессии: `marks review candidates as needs-attention without raising the alarm`, `keeps the alarm when urgent changes sit next to review candidates` (InboxApp.test.tsx), `explains a review candidate with its profile name and relevance reason` (app.test.ts).
 
 ### [ ] R35 · P2 · Длительный поиск блокирует выбор профиля и не имеет отмены
 

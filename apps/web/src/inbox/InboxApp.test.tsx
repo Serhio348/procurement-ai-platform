@@ -28,7 +28,9 @@ describe("InboxApp", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Тревога: есть сообщения, которые нужно разобрать")).toBeTruthy();
+    expect(
+      screen.getByText("Тревога: есть срочные изменения в отслеживаемых закупках"),
+    ).toBeTruthy();
     expect(document.querySelector(".nav-badge")?.textContent).toBe("2");
     expect(screen.getByText("Карточка")).toBeTruthy();
     expect(screen.getByText("Документы")).toBeTruthy();
@@ -109,6 +111,88 @@ describe("InboxApp", () => {
     expect(within(watchedGroup).queryByRole("button", { name: /КТПБ 630/ })).toBeNull();
   });
 
+  it("marks review candidates as needs-attention without raising the alarm", async () => {
+    const catalog = SpecialistCatalog.parse({ items: [] });
+    catalog.upsertCase({
+      id: "00000000-0000-4000-8000-000000000501",
+      title: "БКТПВ 1000 для микрорайона",
+      status: "accepting_bids",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/501",
+      sourceProcurementId: "auction/501",
+      foundAs: "review",
+    });
+    const { inboxItemFromFoundCard } = await import("@procurement/domain");
+    catalog.record(
+      inboxItemFromFoundCard(catalog.procurements()[0]!, "2026-09-06T12:00:00.000Z"),
+    );
+    const entries = catalog.urgentInbox().map((entry) => ({
+      ...entry,
+      profileNames: ["КТП и сети"],
+      reviewReason: "Термин «КТП» совпал частично; тип объекта не подтверждён",
+    }));
+
+    render(
+      <MemoryRouter>
+        <InboxApp entries={entries} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText(/Тревога:/)).toBeNull();
+    expect(screen.getByText(/На проверку: система не уверена/)).toBeTruthy();
+    expect(screen.getByText("На проверку")).toBeTruthy();
+    expect(screen.getByText("Почему на проверку")).toBeTruthy();
+    expect(
+      screen.getByText("Термин «КТП» совпал частично; тип объекта не подтверждён"),
+    ).toBeTruthy();
+    expect(screen.getByText("КТП и сети")).toBeTruthy();
+  });
+
+  it("keeps the alarm when urgent changes sit next to review candidates", async () => {
+    const catalog = SpecialistCatalog.parse({ items: [] });
+    catalog.upsertCase({
+      id: "00000000-0000-4000-8000-000000000502",
+      title: "БКТПВ 1000 для микрорайона",
+      status: "accepting_bids",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/502",
+      sourceProcurementId: "auction/502",
+      foundAs: "review",
+    });
+    const { inboxItemFromFoundCard } = await import("@procurement/domain");
+    catalog.record(
+      inboxItemFromFoundCard(catalog.procurements()[0]!, "2026-09-06T12:00:00.000Z"),
+    );
+    catalog.record({
+      procurement: {
+        title: "Поставка КТПБ",
+        status: "cancelled",
+        url: "https://goszakupki.by/auction/view/503",
+        sourceProcurementId: "auction/503",
+      },
+      change: {
+        id: "00000000-0000-4000-8000-000000000503",
+        procurementId: "00000000-0000-4000-8000-000000000503",
+        kind: "status_changed",
+        previous: "accepting_bids",
+        current: "cancelled",
+        detectedAt: "2026-09-06T13:00:00.000Z",
+        urgent: true,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <InboxApp entries={catalog.urgentInbox()} />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText("Тревога: есть срочные изменения в отслеживаемых закупках"),
+    ).toBeTruthy();
+    expect(screen.getByText("На проверку")).toBeTruthy();
+  });
+
   it("shows a quiet empty state and keeps the tasks section disabled", () => {
     render(
       <MemoryRouter>
@@ -116,7 +200,7 @@ describe("InboxApp", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.queryByText("Тревога: есть сообщения, которые нужно разобрать")).toBeNull();
+    expect(screen.queryByText(/Тревога:/)).toBeNull();
     expect(screen.getAllByText("Новых изменений нет").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Профили" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Корзина" })).toBeTruthy();

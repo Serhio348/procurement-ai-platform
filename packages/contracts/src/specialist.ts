@@ -115,6 +115,10 @@ export const SpecialistInboxEntry = z.object({
   kind: ChangeKind,
   topic: SpecialistInboxTopic,
   topicLabel: z.string().min(1),
+  /** Directions whose search produced this case — explains a review row. */
+  profileNames: z.array(z.string().min(1)).default([]),
+  /** Code-written why for the score — what the specialist should verify. */
+  reviewReason: z.string().optional(),
 });
 export type SpecialistInboxEntry = z.infer<typeof SpecialistInboxEntry>;
 

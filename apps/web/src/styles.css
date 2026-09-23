@@ -218,6 +218,24 @@ a {
   font-weight: 650;
 }
 
+.inbox-review-note {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: #6b4e12;
+  background: #f7efdc;
+  border: 1px solid #d9c391;
+  border-radius: 4px;
+}
+
+.review-reason {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #f7efdc;
+  border: 1px solid #d9c391;
+  border-radius: 4px;
+  line-height: 1.45;
+}
+
 .inbox-topic {
   flex: none;
   font-size: 11px;

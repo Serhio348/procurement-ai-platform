@@ -28,9 +28,14 @@ export function InboxPage(props: InboxPageProps) {
   return (
     <main className="workspace">
       <section className="inbox" aria-labelledby="inbox-heading">
-        {props.entries.length > 0 ? (
+        {props.entries.some((entry) => entry.urgent) ? (
           <p className="inbox-alarm" role="status">
-            Тревога: есть сообщения, которые нужно разобрать
+            Тревога: есть срочные изменения в отслеживаемых закупках
+          </p>
+        ) : props.entries.length > 0 ? (
+          <p className="inbox-review-note" role="status">
+            На проверку: система не уверена в релевантности кандидатов — решение
+            за вами
           </p>
         ) : null}
         <h1 id="inbox-heading">Входящие</h1>
@@ -103,7 +108,22 @@ export function InboxPage(props: InboxPageProps) {
                   </a>
                 </dd>
               </div>
+              {selected.profileNames.length > 0 ? (
+                <div>
+                  <dt>Профиль</dt>
+                  <dd>{selected.profileNames.join(", ")}</dd>
+                </div>
+              ) : null}
             </dl>
+            {selected.topic === "review" ? (
+              <>
+                <h3>Почему на проверку</h3>
+                <p className="review-reason">
+                  {selected.reviewReason ??
+                    "Система не смогла уверенно определить релевантность — проверьте карточку вручную."}
+                </p>
+              </>
+            ) : null}
             <h3>Изменение</h3>
             <pre className="change-body">{selected.detail}</pre>
             <div className="inbox-actions">

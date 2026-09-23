@@ -15,6 +15,7 @@ import {
   SpecialistCatalog,
   SpecialistWorkspace,
   cardSnapshot,
+  inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   inferSearchIntentPlan,
   scoreSearchIntentFromProcedure,
@@ -103,6 +104,45 @@ describe("specialist API", () => {
     expect(JSON.parse(listed.body).items).toHaveLength(1);
     expect(JSON.parse(listed.body).items[0]?.title).toBe("Поставка КТПБ");
     expect(duplicate.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it("explains a review candidate with its profile name and relevance reason", async () => {
+    const catalog = new SpecialistCatalog();
+    const app = await buildSpecialistApi({ catalog });
+    const profileId = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileId}`,
+      payload: { name: "КТП и сети", keywords: ["КТП"] },
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000501",
+      title: "БКТПВ 1000 для микрорайона",
+      status: "accepting_bids",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/501",
+      sourceProcurementId: "auction/501",
+      foundAs: "review",
+      relevanceReason: "Термин «КТП» совпал частично; тип объекта не подтверждён",
+      profileIds: [profileId],
+    });
+    catalog.upsertCase(card);
+    catalog.record(inboxItemFromFoundCard(card, "2026-09-06T12:00:00.000Z"));
+
+    const listed = await app.inject({ method: "GET", url: "/api/inbox" });
+    const item = (
+      JSON.parse(listed.body) as { items: Array<Record<string, unknown>> }
+    ).items[0];
+
+    expect(listed.statusCode).toBe(200);
+    expect(item?.topic).toBe("review");
+    expect(item?.urgent).toBe(false);
+    expect(item?.profileNames).toEqual(["КТП и сети"]);
+    expect(item?.reviewReason).toBe(
+      "Термин «КТП» совпал частично; тип объекта не подтверждён",
+    );
 
     await app.close();
   });

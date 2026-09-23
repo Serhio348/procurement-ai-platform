@@ -7,6 +7,7 @@ import type {
 } from "@procurement/contracts";
 import { profileDisplayName } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
+import { useUnsavedChanges } from "../shell/UnsavedGuard.js";
 import { profileCreatedToast } from "./ProfileList.js";
 
 const TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -130,6 +131,7 @@ export function ProfileApp({
   }
 
   const dirty = !sameWrite(currentWrite(), profile);
+  useUnsavedChanges(dirty, UNSAVED_PROMPT);
 
   useEffect(() => {
     if (!dirty) return undefined;

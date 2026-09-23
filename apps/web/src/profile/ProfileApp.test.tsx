@@ -2,12 +2,15 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Link, Route, Routes } from "react-router-dom";
 import { ProfileApp } from "./ProfileApp.js";
 import { ProfileList } from "./ProfileList.js";
+import { UnsavedGuardProvider } from "../shell/UnsavedGuard.js";
+import { ProfileEditorRoute } from "../SpecialistApp.js";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 const profileId = "00000000-0000-4000-8000-000000000901";
@@ -32,6 +35,7 @@ function renderProfile(
 ) {
   return render(
     <MemoryRouter initialEntries={[`/profiles/${current.id}`]}>
+      <UnsavedGuardProvider>
       <Routes>
         <Route
           path="/profiles"
@@ -42,6 +46,7 @@ function renderProfile(
           element={<ProfileApp profile={current} save={save} setWatch={setWatch} />}
         />
       </Routes>
+      </UnsavedGuardProvider>
     </MemoryRouter>,
   );
 }
@@ -333,5 +338,68 @@ describe("ProfileApp", () => {
         }),
       }),
     );
+  });
+
+  it("asks before leaving through the shell menu while the form is dirty", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    renderProfile(profile(), vi.fn(async () => profile()));
+
+    await user.type(screen.getByLabelText("Название"), "Черновик");
+    await user.click(screen.getByRole("link", { name: "Входящие" }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("не сохранены"));
+    expect(screen.getByText("Профиль направления")).toBeTruthy();
+
+    confirm.mockReturnValue(true);
+    await user.click(screen.getByRole("link", { name: "Входящие" }));
+    expect(screen.queryByText("Профиль направления")).toBeNull();
+  });
+
+  it("leaves through the shell menu without asking when nothing changed", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm");
+
+    renderProfile(profile(), vi.fn(async () => profile()));
+
+    await user.click(screen.getByRole("link", { name: "Входящие" }));
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByText("Профиль направления")).toBeNull();
+  });
+
+  it("shows the fields of the profile the route switched to", async () => {
+    const user = userEvent.setup();
+    const first = profile({ name: "Профиль A" });
+    const second = profile({
+      id: "00000000-0000-4000-8000-000000000902",
+      name: "Профиль B",
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/profiles/${first.id}`]}>
+        <UnsavedGuardProvider>
+          <Link to={`/profiles/${second.id}`}>К профилю B</Link>
+          <Routes>
+            <Route
+              path="/profiles/:id"
+              element={
+                <ProfileEditorRoute
+                  profiles={[first, second]}
+                  save={vi.fn(async () => second)}
+                  setWatch={vi.fn(async () => second)}
+                />
+              }
+            />
+          </Routes>
+        </UnsavedGuardProvider>
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText("Название"), " — черновик A");
+    await user.click(screen.getByRole("link", { name: "К профилю B" }));
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Профиль B");
   });
 });

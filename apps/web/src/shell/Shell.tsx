@@ -4,6 +4,7 @@ import { useAuthSession } from "../auth/AuthSession.js";
 import { roleLabel } from "../auth/labels.js";
 import { useInboxAlertCount } from "../inbox/InboxAlert.js";
 import { BrandMark } from "./BrandMark.js";
+import { useGuardedClick } from "./UnsavedGuard.js";
 
 export function Shell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuthSession();
@@ -11,6 +12,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const errors = user?.errorEventCount ?? 0;
   const inboxAlert = useInboxAlertCount();
   const atAdmin = useLocation().pathname.startsWith("/admin");
+  const guardedClick = useGuardedClick();
 
   return (
     <div className="shell">
@@ -25,30 +27,39 @@ export function Shell({ children }: { children: ReactNode }) {
           </span>
         </p>
         <nav aria-label="Разделы">
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}>
+          <NavLink
+            to="/"
+            end
+            onClick={guardedClick}
+            className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
+          >
             Входящие
             {inboxAlert > 0 ? <span className="nav-badge">{inboxAlert}</span> : null}
           </NavLink>
           <NavLink
             to="/procurements"
+            onClick={guardedClick}
             className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
           >
             Закупки
           </NavLink>
           <NavLink
             to="/my-procurements"
+            onClick={guardedClick}
             className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
           >
             Мои закупки
           </NavLink>
           <NavLink
             to="/trash"
+            onClick={guardedClick}
             className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
           >
             Корзина
           </NavLink>
           <NavLink
             to="/profiles"
+            onClick={guardedClick}
             className={({ isActive }) => (isActive ? "nav-current" : "nav-link")}
           >
             Профили
@@ -56,6 +67,7 @@ export function Shell({ children }: { children: ReactNode }) {
           {user?.role === "admin" ? (
             <NavLink
               to="/admin/access"
+              onClick={guardedClick}
               className={() => (atAdmin ? "nav-current" : "nav-link")}
             >
               Администрирование

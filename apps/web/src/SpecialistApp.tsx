@@ -30,6 +30,7 @@ import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
 import { ProfileList } from "./profile/ProfileList.js";
 import { NoticeStack, type InboxNotice } from "./shell/NoticeToast.js";
+import { UnsavedGuardProvider } from "./shell/UnsavedGuard.js";
 
 const LIST_PAGE_LIMIT = 500;
 const POLL_FAILURE_LIMIT = 3;
@@ -476,6 +477,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   return (
     <InboxAlertProvider count={inbox.length}>
     <BrowserRouter>
+      <UnsavedGuardProvider>
       {pollStale.size === 0 ? null : (
         <p className="connection-stale" role="status">
           Нет связи с сервером — показанные данные могут быть устаревшими.
@@ -685,6 +687,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
         />
         <Route path="/admin/:pane?/:userId?" element={<AdminApp />} />
       </Routes>
+      </UnsavedGuardProvider>
       <NoticeStack notices={notices} onDismiss={dismissNotice} />
     </BrowserRouter>
     </InboxAlertProvider>
@@ -741,7 +744,7 @@ function ProfileListRoute({
   );
 }
 
-function ProfileEditorRoute({
+export function ProfileEditorRoute({
   profiles,
   activate,
   save,
@@ -762,6 +765,7 @@ function ProfileEditorRoute({
   }
   return (
     <ProfileApp
+      key={profile.id}
       profile={profile}
       {...(activate === undefined ? {} : { activate })}
       save={(next) => save(profile.id, next)}

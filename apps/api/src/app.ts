@@ -2114,6 +2114,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       // The job flagged the stored case «ingesting» — return that flag so
       // the console shows the running download right away.
       card = catalog().procurement(card.id) ?? card;
+      // The ingest downloads the whole listed pack, so every pending
+      // document row of this case is covered by the one click — sibling
+      // rows would otherwise report stale news after the download.
+      catalog().dismissDocumentChanges(card.id);
     }
 
     catalog().dismiss(params.id);

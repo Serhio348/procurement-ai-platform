@@ -6,9 +6,9 @@ import {
   ProcedureCard,
   SearchHit,
   SearchIntentPlan,
+  InboxFixtureItem,
   SpecialistProcurementCard,
   electricalEquipmentSeedV1,
-  type InboxFixtureItem,
 } from "@procurement/contracts";
 import {
   LISTING_PENDING_REASON,
@@ -3755,8 +3755,47 @@ describe("specialist API", () => {
       await gate;
       return card;
     });
+    const catalog = await loadFixtureCatalog();
+    // A second document row plus an unrelated status row on the same case:
+    // the whole-pack download covers every pending document change, while
+    // the status change is a different concern and must survive.
+    const sameCaseId = "00000000-0000-4000-8000-000000000021";
+    const stub = {
+      title: "КТП для жилого строительства",
+      status: "accepting_bids",
+      url: "https://goszakupki.by/auction/view/21",
+      sourceProcurementId: "auction/21",
+    };
+    catalog.record(
+      InboxFixtureItem.parse({
+        procurement: stub,
+        change: {
+          id: "00000000-0000-4000-8000-000000000111",
+          procurementId: sameCaseId,
+          kind: "document_added",
+          previous: null,
+          current: "Спецификация.pdf",
+          detectedAt: "2026-09-06T12:00:00.000Z",
+          urgent: true,
+        },
+      }),
+    );
+    catalog.record(
+      InboxFixtureItem.parse({
+        procurement: stub,
+        change: {
+          id: "00000000-0000-4000-8000-000000000112",
+          procurementId: sameCaseId,
+          kind: "status_changed",
+          previous: "приём предложений",
+          current: "отменена",
+          detectedAt: "2026-09-06T13:00:00.000Z",
+          urgent: true,
+        },
+      }),
+    );
     const app = await buildSpecialistApi({
-      catalog: await loadFixtureCatalog(),
+      catalog,
       documentIngest: { ingest },
     });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
@@ -3772,10 +3811,16 @@ describe("specialist API", () => {
     // The response returns while the ingest promise is still pending.
     expect(resolved.statusCode).toBe(200);
     const body = JSON.parse(resolved.body) as {
-      items: Array<{ id: string }>;
+      items: Array<{ id: string; topic: string }>;
       card?: { ingesting?: string };
     };
     expect(body.items.some((item) => item.id === row?.id)).toBe(false);
+    // Every document row of the same case went too — the download covers
+    // the whole pack; the unrelated status row stays.
+    expect(body.items.filter((item) => item.topic === "documents")).toHaveLength(0);
+    expect(body.items.some((item) => item.id === "00000000-0000-4000-8000-000000000112")).toBe(
+      true,
+    );
     expect(body.card?.ingesting).toBe("ingest");
 
     // The background job eventually runs the real ingest.

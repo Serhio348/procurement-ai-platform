@@ -100,6 +100,23 @@ export class SpecialistCatalog {
     }
   }
 
+  /**
+   * All pending document-change rows of the case. «Скачать документы»
+   * ingests the whole listed pack, so sibling document rows describe the
+   * same resolved state — keeping them would report stale news. Rows for
+   * other topics (status, price) stay.
+   */
+  dismissDocumentChanges(procurementId: string): void {
+    for (const item of this.#order) {
+      if (
+        item.change.procurementId === procurementId &&
+        inboxTopic(item.change.kind) === "documents"
+      ) {
+        this.#dismissed.add(item.change.id);
+      }
+    }
+  }
+
   dismissedIds(): string[] {
     return [...this.#dismissed];
   }

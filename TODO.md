@@ -524,9 +524,9 @@
 
 **Частично исправлено (этапы 77–78).** Интерактивные чтения получили собственный MCP-процесс: `cardWatch` (открытие карточки, hydrate при решении, reindex) живёт на линии `interactive`, а поиск/discovery/watch/ingest — на `background`. Открытие карточки больше не ждет очередь фоновых вызовов. Этап 78 убрал и само повторное чтение: `ReviewOutcome` несёт уже скачанную `ProcedureCard`, `scorePendingHits` сохраняет её на кейс через `applySourceCard`, и `GET /card`/`hydrateSourceCard` отдают сохранённое без `procurement.get`; живое чтение остаётся только у `?fresh=1`, reindex и watch-прохода. Одиночные действия (`resolve`, `decision`, `archive`, `restore`, `GET /card`, `reindex`) перешли с `persist()` на `persistProgress([id])`. Остаётся: allowlist env для дочернего процесса и явные бюджеты очередей. Регрессии: `routes the watch pass to monitorWatch and interactive reads to cardWatch`, `serves the platform card fetched during review on open and refetches only on fresh` в app.test.ts.
 
-### [ ] R44 · P3 · Описание текущего поведения противоречиво
+### [x] R44 · P3 · Описание текущего поведения противоречиво
 
-**Подтверждено документами.** STAGE-66 одновременно обещает замену очереди при новом поиске и добавление без замены. STAGE-64 одновременно описывает запись matches в SQL и отсутствие такой записи. STAGE-63 утверждает, что новый `procedure_candidate` парсится старой схемой, хотя старый enum его не содержит, и обещает merge «никогда не сужает» вопреки R09.
+**Исправлено (STAGE-107).** STAGE-66 одновременно обещает замену очереди при новом поиске и добавление без замены. STAGE-64 одновременно описывает запись matches в SQL и отсутствие такой записи. STAGE-63 утверждает, что новый `procedure_candidate` парсится старой схемой, хотя старый enum его не содержит, и обещает merge «никогда не сужает» вопреки R09.
 
 - Где: [STAGE-66.md:16–17, 49–50](docs/architecture/STAGE-66.md#L16), [STAGE-64.md:3–6, 42–49](docs/architecture/STAGE-64.md#L42), [STAGE-63.md](docs/architecture/STAGE-63.md), [AGENTS.md](AGENTS.md).
 - Исправление: единая актуальная спецификация состояния поиска/очередей и совместимости контрактов; этапные документы явно пометить как исторические там, где поведение изменилось.

@@ -352,6 +352,14 @@
 - Изменение семантики: строка resolve'ится при принятии задачи, а не после успешного скачивания — сбой ingest виден в прогрессе и журнале (как у «Участвовать»), а не 502 + висящей строкой.
 - Регрессии: `resolves the documents row immediately while ingest runs in the background` (app.test.ts — ответ 200 при pending-ingest, карточка с флагом, ingest вызван в фоне), `starts a background document download and lands on the watched case` (SpecialistApp.storage.test.tsx — переход на кейс + нотис). [STAGE-102](docs/architecture/STAGE-102.md)
 
+### [x] R52 · P1 · Архивы RAR/7z не распаковывались; HTML-заглушка выглядела пустым архивом
+
+**Воспроизведено на VPS.** Документ `.rar`/`.7z` скачивался, но формат `unknown` → экстракция `failed`, файлы внутри недоступны. Ответ HTML-страницей (превью/сессия) по имени `.zip` уходил в распаковку → родитель «архив с 0 файлов». Windows-ZIP с CP1251-именами давал кракозябры. Ссылка «скачать всё архивом» в панели документов могла быть JS-триггером без `href`.
+
+- Где: [file-format.ts](packages/domain/src/documents/file-format.ts), [unpack-archive.ts](mcp/documents/src/unpack-archive.ts), [zip-entries.ts](mcp/documents/src/zip-entries.ts), [document-ingest.ts](apps/api/src/document-ingest.ts), [goszakupki-by-parser.ts](mcp/procurement/src/goszakupki-by-parser.ts).
+- Исправлено: форматы `rar`/`7z` (magic + имя + MIME); `unpackArchive` — ZIP нативно, RAR/7z через 7-Zip WASM (`7z-wasm`, без системных бинарей на VPS), stderr 7zz → честный `error` вместо «пустого архива»; CP1251-fallback для имён ZIP без UTF-8-флага; `looksLikeHtmlPage` — HTML вместо бинаря → `download_failed` с причиной; панель документов собирает `a[data-url]`/`a[data-href]`/`a[onclick]` (location.href/window.open) — ссылка «одним архивом» становится обычным документом и распаковывается.
+- Регрессии: `unpack-archive.test.ts` (RAR4 stored, 7z, CP1251, битый контейнер), `file-format.test.ts` (магия + HTML-гард), `document-ingest.test.ts` (rar→docx внутри, HTML→download_failed), `goszakupki-by-parser.test.ts` (data-url/onclick архив-линк). [STAGE-103](docs/architecture/STAGE-103.md)
+
 ## C. Продукт и UI
 
 ### [x] R27 · P1 · Длинные списки обрезаются без доступной пагинации

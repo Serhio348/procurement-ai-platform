@@ -543,9 +543,11 @@ function parseDocuments(
 
   $("#print-area .panel-heading").each((_index, heading) => {
     if (!text($(heading)).toLocaleLowerCase("ru-RU").includes("документ")) return;
+    // «Скачать всё архивом» is often a JS trigger (data-url / onclick)
+    // rather than a plain href, so the panel scan picks up both.
     $(heading)
       .closest(".panel")
-      .find("a[href]")
+      .find("a[href], a[data-url], a[data-href], a[onclick]")
       .each((_linkIndex, element) => {
         const parsed = documentFromAnchor($(element), cardUrl, discoveredAt);
         if (parsed !== undefined) add(parsed);
@@ -583,7 +585,7 @@ function documentFromAnchor(
   cardUrl: string,
   discoveredAt: IsoDateTime,
 ): SourceDocument | undefined {
-  const href = link.attr("href");
+  const href = anchorTarget(link);
   if (href === undefined) return undefined;
   let absolute: URL;
   try {
@@ -620,6 +622,21 @@ function documentFromAnchor(
     mimeType: mimeTypeFromName(name),
     discoveredAt,
   });
+}
+
+/**
+ * Plain `href` first; a JS-driven «скачать архивом» trigger keeps its URL
+ * in a data attribute or a `location.href`/`window.open` onclick.
+ */
+function anchorTarget(link: Cheerio<AnyNode>): string | undefined {
+  const direct = link.attr("href") ?? link.attr("data-url") ?? link.attr("data-href");
+  if (direct !== undefined && !direct.startsWith("javascript:")) return direct;
+  const onclick = link.attr("onclick");
+  if (onclick === undefined) return direct;
+  return (
+    /(?:location\.href\s*=|window\.open\s*\()\s*['"]([^'"]+)['"]/.exec(onclick)?.[1] ??
+    direct
+  );
 }
 
 function parseHistory($: CheerioAPI, cardUrl: string) {

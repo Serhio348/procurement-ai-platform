@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { RequestId, SourceId, SpecialistProcurementCard } from "@procurement/contracts";
 import type { McpToolCaller } from "@procurement/mcp-client";
-import { zipEntries } from "@procurement/mcp-documents";
+import { rarEntries, zipEntries } from "@procurement/mcp-documents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { putBlob } from "./blobs.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
@@ -157,6 +157,128 @@ describe("createProcurementDocumentIngest", () => {
     expect(next.documents[0]?.extraction?.kind).toBe("archive");
     expect(next.documents[1]?.extraction?.kind).toBe("office_text");
     expect(next.documents[1]?.extraction?.textPreview).toContain("30 календарных дней");
+  });
+
+  it("unpacks a downloaded rar and reads the Word file inside", async () => {
+    const inner = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>оплата в течение 45 календарных дней</w:t></w:r></w:p></w:document>',
+    });
+    const pack = rarEntries({ "ТЗ.docx": inner });
+    const hash = createHash("sha256").update(pack).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-rar-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, hash, pack);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "Комплект.rar",
+                sourceUrl: "https://goszakupki.by/files/2",
+                downloadUrl: "https://goszakupki.by/files/2?download=1",
+                mimeType: "application/vnd.rar",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        return {
+          structuredContent: {
+            hash,
+            storageKey: `blobs/${hash}`,
+            sizeBytes: pack.byteLength,
+            contentType: "application/vnd.rar",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    expect(next.documents.map((item) => item.name)).toEqual([
+      "Комплект.rar",
+      "Комплект.rar / ТЗ.docx",
+    ]);
+    expect(next.documents[0]?.extraction?.kind).toBe("archive");
+    expect(next.documents[1]?.extraction?.kind).toBe("office_text");
+    expect(next.documents[1]?.extraction?.textPreview).toContain("45 календарных дней");
+  });
+
+  it("fails a download that returned an HTML page instead of the file", async () => {
+    const page = new TextEncoder().encode(
+      '<!DOCTYPE html><html><body><p>Сессия истекла</p></body></html>',
+    );
+    const hash = createHash("sha256").update(page).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-html-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, hash, page);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "Комплект.zip",
+                sourceUrl: "https://goszakupki.by/files/3",
+                downloadUrl: "https://goszakupki.by/files/3?download=1",
+                mimeType: "application/zip",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        return {
+          structuredContent: {
+            hash,
+            storageKey: `blobs/${hash}`,
+            sizeBytes: page.byteLength,
+            contentType: "application/zip",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    // An HTML stub must not reach the archive unpacker — the document is
+    // honestly marked failed instead of becoming an «empty archive».
+    expect(next.documents).toHaveLength(1);
+    expect(next.documents[0]?.status).toBe("download_failed");
+    expect(next.documents[0]?.note).toContain("HTML");
   });
 
   it("reindexes hashed blobs without listing or downloading from the platform", async () => {

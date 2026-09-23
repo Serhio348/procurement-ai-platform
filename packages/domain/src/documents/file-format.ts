@@ -11,6 +11,8 @@ export const DOCUMENT_FILE_FORMATS = [
   "tiff",
   "rtf",
   "zip",
+  "rar",
+  "7z",
   "unknown",
 ] as const;
 
@@ -19,6 +21,8 @@ export type DocumentFileFormat = (typeof DOCUMENT_FILE_FORMATS)[number];
 export type DocumentContainer =
   | "pdf"
   | "zip"
+  | "rar"
+  | "7z"
   | "ole"
   | "jpeg"
   | "png"
@@ -48,6 +52,28 @@ export function sniffDocumentContainer(bytes: Uint8Array): DocumentContainer {
     return "tiff";
   }
   if (bytes.length >= 5 && ascii(bytes, 0, 5) === "{\\rtf") return "rtf";
+  // RAR4 «Rar!\x1A\x07\x00» and RAR5 «Rar!\x1A\x07\x01\x00».
+  if (
+    bytes.length >= 7 &&
+    ascii(bytes, 0, 4) === "Rar!" &&
+    bytes[4] === 0x1a &&
+    bytes[5] === 0x07 &&
+    (bytes[6] === 0x00 || bytes[6] === 0x01)
+  ) {
+    return "rar";
+  }
+  // 7z magic «7z\xBC\xAF\x27\x1C».
+  if (
+    bytes.length >= 6 &&
+    bytes[0] === 0x37 &&
+    bytes[1] === 0x7a &&
+    bytes[2] === 0xbc &&
+    bytes[3] === 0xaf &&
+    bytes[4] === 0x27 &&
+    bytes[5] === 0x1c
+  ) {
+    return "7z";
+  }
   return "unknown";
 }
 
@@ -71,6 +97,8 @@ export function formatFromFileName(name: string): DocumentFileFormat | undefined
     tiff: "tiff",
     rtf: "rtf",
     zip: "zip",
+    rar: "rar",
+    "7z": "7z",
   };
   return mapped[extension];
 }
@@ -89,6 +117,8 @@ export function formatFromContentType(contentType: string): DocumentFileFormat |
   if (type === "image/tiff") return "tiff";
   if (type === "application/rtf" || type === "text/rtf") return "rtf";
   if (type === "application/zip" || type === "application/x-zip-compressed") return "zip";
+  if (type === "application/vnd.rar" || type === "application/x-rar-compressed") return "rar";
+  if (type === "application/x-7z-compressed") return "7z";
   return undefined;
 }
 
@@ -108,6 +138,8 @@ export function detectDocumentFormat(input: DetectDocumentFormatInput): Document
     const named = namedOfficeXml(input);
     return named ?? "zip";
   }
+  if (container === "rar") return "rar";
+  if (container === "7z") return "7z";
   if (container === "ole") {
     const named = formatFromFileName(input.name ?? "") ?? formatFromContentType(input.contentType ?? "");
     if (named === "doc" || named === "xls" || named === "ppt") return named;
@@ -118,6 +150,30 @@ export function detectDocumentFormat(input: DetectDocumentFormatInput): Document
     formatFromContentType(input.contentType ?? "") ??
     "unknown"
   );
+}
+
+/**
+ * A download endpoint answered with an HTML page (preview stub, expired
+ * session, anti-bot) instead of the binary file. A listed .html document
+ * is real content, not a stub, so the name is consulted first.
+ */
+export function looksLikeHtmlPage(
+  bytes: Uint8Array,
+  contentType: string,
+  name = "",
+): boolean {
+  const base = name.split(/[?#]/)[0] ?? "";
+  const extension = base.split(".").at(-1)?.toLowerCase() ?? "";
+  if (extension === "html" || extension === "htm") return false;
+  const type = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (type === "text/html") return true;
+  // Skip a UTF-8 BOM before reading the page head.
+  const start =
+    bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  const head = ascii(bytes, start, Math.min(bytes.length - start, 512))
+    .trimStart()
+    .toLowerCase();
+  return head.startsWith("<!doctype") || head.startsWith("<html");
 }
 
 export function formatNeedsRasterScan(format: DocumentFileFormat): boolean {

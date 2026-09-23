@@ -17,6 +17,7 @@ import {
   archiveMemberSourceUrl,
   ingestFileFinishState,
   isArchiveMemberSourceUrl,
+  looksLikeHtmlPage,
   keepTrustedClaims,
   MAX_ARCHIVE_UNPACK_DEPTH,
   missingCommercialKeys,
@@ -36,7 +37,7 @@ import {
   recognizeSpecialistDocument,
   resolveDocumentFormat,
   RoutingDocumentExtractor,
-  unpackZipArchive,
+  unpackArchive,
 } from "@procurement/mcp-documents";
 import { silentLogger, type Logger } from "@procurement/observability";
 import { contentTypeForName, getBlob, putBlob } from "./blobs.js";
@@ -347,6 +348,26 @@ async function ingestOne(input: {
     if (input.blobStore !== undefined) {
       await input.blobStore.put(downloaded.hash, bytes);
     }
+    // The endpoint sometimes answers a preview stub or an expired-session
+    // page instead of the binary — do not feed that to the extractors.
+    if (looksLikeHtmlPage(bytes, downloaded.contentType, input.name)) {
+      input.logger.error(
+        "Participate document download returned an HTML page",
+        new Error("html_instead_of_file"),
+        { name: input.name, sourceUrl: input.sourceUrl },
+      );
+      return [
+        finish(
+          SpecialistCaseDocument.parse({
+            ...listed,
+            hash: downloaded.hash,
+            sizeBytes: downloaded.sizeBytes,
+            status: "download_failed",
+            note: "Площадка вернула HTML-страницу вместо файла.",
+          }),
+        ),
+      ];
+    }
     input.progress?.fileIndexing(input.procurementId, input.sourceUrl, 0, downloaded.hash);
     return indexStoredFile({
       name: input.name,
@@ -444,8 +465,9 @@ async function indexStoredFile(input: {
   depth: number;
 }): Promise<SpecialistCaseDocumentValue[]> {
   const format = resolveDocumentFormat(input.bytes, input.name, input.contentType);
-  if (format === "zip" && input.depth < MAX_ARCHIVE_UNPACK_DEPTH) {
-    const members = unpackZipArchive(input.bytes);
+  const isArchive = format === "zip" || format === "rar" || format === "7z";
+  if (isArchive && input.depth < MAX_ARCHIVE_UNPACK_DEPTH) {
+    const unpacked = await unpackArchive(format, input.bytes);
     const parent = finishIndexed(
       input,
       SpecialistCaseDocument.parse({
@@ -454,9 +476,13 @@ async function indexStoredFile(input: {
         ...(input.sizeBytes === undefined ? {} : { sizeBytes: input.sizeBytes }),
         status: "hashed",
         note: input.contentType,
-        extraction: archiveContainerExtraction(members.length),
+        extraction: archiveContainerExtraction(
+          unpacked.members.length,
+          unpacked.error,
+        ),
       }),
     );
+    const members = unpacked.members;
     const children: SpecialistCaseDocumentValue[] = [];
     for (const member of members) {
       const memberHash = Sha256.parse(createHash("sha256").update(member.bytes).digest("hex"));

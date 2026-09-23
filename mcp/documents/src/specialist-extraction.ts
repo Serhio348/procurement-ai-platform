@@ -50,6 +50,7 @@ export function toSpecialistExtraction(
 
 export function archiveContainerExtraction(
   memberCount: number,
+  error?: string,
 ): ReturnType<typeof SpecialistDocumentExtraction.parse> {
   return SpecialistDocumentExtraction.parse({
     status: "extracted",
@@ -61,9 +62,11 @@ export function archiveContainerExtraction(
     textPreview: "",
     pages: [],
     notes: [
-      memberCount === 0
-        ? "ZIP-архив скачан, внутри не удалось разобрать файлы."
-        : `Архив: внутри ${String(memberCount)} файл(ов), разобраны отдельно.`,
+      error !== undefined
+        ? `Архив скачан, но не открылся: ${error}`
+        : memberCount === 0
+          ? "Архив скачан, внутри не удалось разобрать файлы."
+          : `Архив: внутри ${String(memberCount)} файл(ов), разобраны отдельно.`,
     ],
   });
 }

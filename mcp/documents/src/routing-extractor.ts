@@ -132,8 +132,8 @@ export function unsupportedFormatNote(format: DocumentFileFormat): string {
   if (format === "unknown") {
     return "Формат файла не опознан — подходящий инструмент не выбран.";
   }
-  if (format === "zip") {
-    return "ZIP-архив: файлы внутри разбираются отдельно.";
+  if (format === "zip" || format === "rar" || format === "7z") {
+    return "Архив: файлы внутри разбираются отдельно.";
   }
   return `Формат ${format} этим конвейером не читается.`;
 }

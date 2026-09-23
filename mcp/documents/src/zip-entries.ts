@@ -106,9 +106,17 @@ function findEocdOffset(view: DataView, length: number): number | undefined {
   return undefined;
 }
 
+/**
+ * Flag 0x800 marks a UTF-8 name. Without it Windows-made contest zips carry
+ * CP1251 Cyrillic — a strict UTF-8 try decides which decoder applies.
+ */
 function decodeZipName(bytes: Uint8Array, flags: number): string {
-  void flags;
-  return decoder.decode(bytes);
+  if ((flags & 0x0800) !== 0) return decoder.decode(bytes);
+  try {
+    return strictUtf8.decode(bytes);
+  } catch {
+    return cp1251.decode(bytes);
+  }
 }
 
 export function zipEntries(files: Readonly<Record<string, string | Uint8Array>>): Uint8Array {
@@ -172,6 +180,8 @@ export function zipEntries(files: Readonly<Record<string, string | Uint8Array>>)
 }
 
 const decoder = new TextDecoder("utf-8");
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+const cp1251 = new TextDecoder("windows-1251");
 
 function crc32(data: Uint8Array): number {
   let crc = 0xffffffff;

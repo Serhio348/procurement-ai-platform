@@ -3,6 +3,7 @@ import {
   detectDocumentFormat,
   formatHasNativeText,
   formatNeedsRasterScan,
+  looksLikeHtmlPage,
   sniffDocumentContainer,
 } from "./file-format.js";
 
@@ -36,5 +37,37 @@ describe("detectDocumentFormat", () => {
     expect(formatNeedsRasterScan("docx")).toBe(false);
     expect(formatNeedsRasterScan("pdf")).toBe(true);
     expect(formatNeedsRasterScan("jpeg")).toBe(true);
+  });
+
+  it("detects RAR4/RAR5 and 7z by magic bytes and by name", () => {
+    const rar4 = new Uint8Array([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00]);
+    const rar5 = new Uint8Array([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]);
+    const sevenZ = new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]);
+    expect(sniffDocumentContainer(rar4)).toBe("rar");
+    expect(sniffDocumentContainer(rar5)).toBe("rar");
+    expect(sniffDocumentContainer(sevenZ)).toBe("7z");
+    expect(detectDocumentFormat({ bytes: rar4, name: "pack.bin" })).toBe("rar");
+    expect(detectDocumentFormat({ bytes: sevenZ, name: "pack.bin" })).toBe("7z");
+    // No magic — filename and Content-Type still identify the container.
+    const stub = new Uint8Array([1, 2, 3]);
+    expect(detectDocumentFormat({ bytes: stub, name: "docs.rar" })).toBe("rar");
+    expect(
+      detectDocumentFormat({ bytes: stub, contentType: "application/x-7z-compressed" }),
+    ).toBe("7z");
+  });
+});
+
+describe("looksLikeHtmlPage", () => {
+  it("flags a page answered instead of a binary file", () => {
+    const page = new TextEncoder().encode("  <!DOCTYPE html><html><body></body></html>");
+    expect(looksLikeHtmlPage(page, "application/zip", "pack.zip")).toBe(true);
+    expect(looksLikeHtmlPage(new Uint8Array([1, 2]), "text/html", "pack.zip")).toBe(true);
+  });
+
+  it("lets a real file and a listed html document through", () => {
+    const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    expect(looksLikeHtmlPage(zip, "application/zip", "pack.zip")).toBe(false);
+    const html = new TextEncoder().encode("<html><body>doc</body></html>");
+    expect(looksLikeHtmlPage(html, "text/html", "instructions.html")).toBe(false);
   });
 });

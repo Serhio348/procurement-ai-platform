@@ -308,6 +308,35 @@ describe("parseGoszakupkiCard", () => {
     ]);
   });
 
+  it("picks up a «download all» archive link from the documents panel", () => {
+    const parsed = parseGoszakupkiCard({
+      html: `
+        <div id="print-area">
+          <div class="page-header"><h1>Карточка auc0009000097</h1></div>
+          <div class="panel">
+            <div class="panel-heading">Общая информация</div>
+            <table><tr><th>Название</th><td>Поставка щита</td></tr></table>
+          </div>
+          <div class="panel panel-default">
+            <div class="panel-heading"><b>Документы</b></div>
+            <table class="table">
+              <tr><td><a class="modal-link" href="/auction/get-file/97?c=detail&amp;f=0">ТЗ.pdf</a></td></tr>
+              <tr><td><a data-url="/auction/get-archive/97">Скачать документы одним архивом</a></td></tr>
+              <tr><td><a onclick="location.href='/auction/get-archive-zip/97'">Архив ZIP</a></td></tr>
+            </table>
+          </div>
+        </div>`,
+      url: "https://goszakupki.by/auction/view/9000097",
+      fetchedAt,
+    });
+
+    const urls = parsed.documents.map((item) => item.sourceUrl);
+    expect(urls).toContain("https://goszakupki.by/auction/get-archive/97");
+    expect(urls).toContain("https://goszakupki.by/auction/get-archive-zip/97");
+    const pack = parsed.documents.find((item) => item.sourceUrl.includes("get-archive"));
+    expect(pack?.downloadUrl).toContain("download=1");
+  });
+
   it("maps buying-organisation labels and an indicative amount", async () => {
     const html = await readFile(
       fileURLToPath(new URL("request-buying-org.html", fixtureDirectory)),

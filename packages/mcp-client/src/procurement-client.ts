@@ -34,6 +34,8 @@ export interface ProcurementMcpClientOptions {
   caller: McpToolCaller;
   policyGate: ToolPolicyGate;
   timeoutMs?: number;
+  /** "high" jumps the shared queue ahead of bulk background work (R43). */
+  priority?: "high" | "normal";
   logger?: Logger;
 }
 
@@ -41,12 +43,14 @@ export class ProcurementMcpClient {
   readonly #caller: McpToolCaller;
   readonly #policyGate: ToolPolicyGate;
   readonly #timeoutMs: number;
+  readonly #priority?: "high" | "normal" | undefined;
   readonly #logger: Logger;
 
   constructor(options: ProcurementMcpClientOptions) {
     this.#caller = options.caller;
     this.#policyGate = options.policyGate;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
+    this.#priority = options.priority;
     this.#logger = options.logger ?? silentLogger;
   }
 
@@ -178,6 +182,7 @@ export class ProcurementMcpClient {
       policyGate: this.#policyGate,
       requestId,
       timeoutMs: this.#timeoutMs,
+      ...(this.#priority === undefined ? {} : { priority: this.#priority }),
       logger: this.#logger,
     });
   }

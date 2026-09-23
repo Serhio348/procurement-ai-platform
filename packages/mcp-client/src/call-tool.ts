@@ -21,24 +21,73 @@ export interface McpToolCaller {
   callTool(
     toolName: McpToolName,
     argumentsValue: Record<string, unknown>,
-    options: { requestId: RequestId; timeoutMs: number },
+    options: { requestId: RequestId; timeoutMs: number; priority?: "high" | "normal" },
   ): Promise<McpCallResult>;
 }
 
 /**
  * Stdio MCP is one request at a time: overlapping get + get_documents
  * cross on the pipe and both answers are lost. Queue calls instead.
+ *
+ * `timeoutMs` is the whole budget — queue wait plus execution (R43): a call
+ * that outlives its deadline while waiting fails instead of holding the
+ * pipe's turn indefinitely. "high" priority entries jump ahead of queued
+ * "normal" ones so a single card re-read does not sit behind a bulk
+ * download batch from another job; FIFO is kept within a level.
  */
 export function serializeMcpToolCaller(inner: McpToolCaller): McpToolCaller {
-  let tail: Promise<void> = Promise.resolve();
+  interface QueuedCall {
+    priority: number;
+    run(): Promise<void>;
+  }
+  const queue: QueuedCall[] = [];
+  let running = false;
+  const pump = (): void => {
+    if (running) return;
+    const next = queue.shift();
+    if (next === undefined) return;
+    running = true;
+    void next.run().finally(() => {
+      running = false;
+      pump();
+    });
+  };
   return {
     callTool(toolName, argumentsValue, options) {
-      const run = tail.then(() => inner.callTool(toolName, argumentsValue, options));
-      tail = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      return run;
+      const deadline = Date.now() + options.timeoutMs;
+      const result = new Promise<McpCallResult>((resolve, reject) => {
+        const entry: QueuedCall = {
+          priority: options.priority === "high" ? 0 : 1,
+          run: async () => {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+              reject(
+                new McpToolCallError(
+                  "timeout",
+                  toolName,
+                  `MCP tool ${toolName} timed out waiting in the queue`,
+                ),
+              );
+              return;
+            }
+            try {
+              resolve(
+                await inner.callTool(toolName, argumentsValue, {
+                  ...options,
+                  timeoutMs: remaining,
+                }),
+              );
+            } catch (error) {
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          },
+        };
+        const later = queue.findIndex((item) => item.priority > entry.priority);
+        if (later === -1) queue.push(entry);
+        else queue.splice(later, 0, entry);
+      });
+      pump();
+      return result;
     },
   };
 }
@@ -105,6 +154,8 @@ export interface ValidatedToolCallOptions<Input extends Record<string, unknown>,
   policyGate: ToolPolicyGate;
   requestId: RequestId;
   timeoutMs: number;
+  /** "high" jumps the shared queue ahead of bulk background work (R43). */
+  priority?: "high" | "normal";
   logger?: Logger;
 }
 
@@ -127,6 +178,7 @@ export async function callValidatedTool<Input extends Record<string, unknown>, O
       {
         requestId: options.requestId,
         timeoutMs: options.timeoutMs,
+        ...(options.priority === undefined ? {} : { priority: options.priority }),
       },
     );
 

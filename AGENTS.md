@@ -112,6 +112,7 @@
 - [`docs/architecture/STAGE-103.md`](docs/architecture/STAGE-103.md) — архивы RAR/7z через 7z-wasm, CP1251-имена в ZIP, HTML-вместо-файла → `download_failed`, «скачать всё архивом» по data-url/onclick (R52)
 - [`docs/architecture/STAGE-104.md`](docs/architecture/STAGE-104.md) — модальное подтверждение: focus trap на Tab/Shift+Tab, возврат фокуса открывшей кнопке (R33)
 - [`docs/architecture/STAGE-105.md`](docs/architecture/STAGE-105.md) — liveness `/api/live` vs readiness `/api/health`: живой ping PostgreSQL, sha деплоя, `degraded`-список, баннер в UI (R42)
+- [`docs/architecture/STAGE-106.md`](docs/architecture/STAGE-106.md) — env-allowlist для дочернего MCP и очередь с дедлайном на ожидание + приоритетом (R43)
 
 ---
 

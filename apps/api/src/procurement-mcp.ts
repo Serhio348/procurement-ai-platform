@@ -18,6 +18,56 @@ export interface ProcurementMcpProcess {
  * Spawns Procurement MCP over stdio. The API must not import mcp/ source;
  * the child process owns the goszakupki.by adapter.
  */
+/**
+ * The child sees only what the source adapter needs (R43): source, blob,
+ * fixture and logging knobs plus OS essentials to spawn/find CA bundles.
+ * API secrets (DATABASE_URL, AUTH_*, SMTP_*, model keys, INTERNAL_API_TOKEN)
+ * never cross into the MCP process.
+ */
+const MCP_ENV_EXACT = new Set([
+  "LIVE_CASE_SOURCE_ID",
+  "LOG_LEVEL",
+  "NODE_EXTRA_CA_CERTS",
+  "SEARCH_PAGES",
+  "GOSZAKUPKI_TLS_INSECURE",
+  "REFRESH_LIVE_OFFICE",
+  "PATH",
+  "PATHEXT",
+  "COMSPEC",
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "WINDIR",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "SHELL",
+  "TERM",
+  "USER",
+  "LOGNAME",
+]);
+const MCP_ENV_PREFIXES = ["GOSZAKUPKI_BY_", "DOCUMENT_", "PROCUREMENT_", "LC_", "XDG_"];
+
+export function mcpChildEnv(parent: NodeJS.ProcessEnv): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parent)) {
+    if (value === undefined) continue;
+    if (MCP_ENV_EXACT.has(key) || MCP_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
 export async function connectProcurementMcp(options: {
   mode: "live" | "fixture";
   logger: Logger;
@@ -30,10 +80,7 @@ export async function connectProcurementMcp(options: {
     new URL("../../../mcp/procurement/src/main.ts", import.meta.url),
   );
   const tsxCli = fileURLToPath(new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url));
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
-  }
+  const env = mcpChildEnv(process.env);
   env["PROCUREMENT_SOURCE_MODE"] = options.mode;
   if (options.blobDirectory !== undefined) {
     env["DOCUMENT_BLOB_DIR"] = options.blobDirectory;

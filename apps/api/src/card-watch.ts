@@ -44,6 +44,9 @@ export function createProcurementCardWatch(
       agentAllowedTools: ["procurement.get", "procurement.download"],
     }),
     timeoutMs: options.timeoutMs ?? 60_000,
+    // A watch read is short and latency-sensitive: on the shared background
+    // lane it jumps ahead of queued bulk downloads from ingest jobs (R43).
+    priority: "high",
     logger,
   });
 

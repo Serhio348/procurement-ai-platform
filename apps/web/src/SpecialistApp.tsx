@@ -522,10 +522,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                       const result = await resolveInbox(id, action);
                       applyInboxItems(result.items);
                       if (result.card !== undefined) showInSearchPane(result.card);
-                      if (action === "documents") {
-                        for (const document of result.documents) {
-                          window.open(document.url, "_blank", "noopener,noreferrer");
-                        }
+                      if (action === "documents" && result.card !== undefined) {
+                        // The download runs as a background ingest job: the
+                        // progress poll tracks it and the detail page shows
+                        // the running phase instead of the click hanging.
+                        ingestingIds.current.add(result.card.id);
+                        pushNotice(
+                          "Документы скачиваются",
+                          "Прогресс скачивания и сами файлы — на карточке закупки",
+                        );
                       }
                       return result;
                     },
@@ -747,7 +752,12 @@ function InboxRoute({
         : {
             onResolve: async (id, action) => {
               const result = await resolve(id, action);
-              if (result.card !== undefined && action === "open") {
+              // «Скачать документы» lands on the case too: the background
+              // ingest progress is visible there while files download.
+              if (
+                result.card !== undefined &&
+                (action === "open" || action === "documents")
+              ) {
                 void navigate(inboxOpenTarget(result.card));
               }
             },

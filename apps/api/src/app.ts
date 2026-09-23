@@ -43,7 +43,6 @@ import {
   deadlineWithin,
   diffCardSnapshots,
   discoveryPublishedFrom,
-  inboxDocumentLinks,
   inboxItemFromFoundCard,
   inboxItemFromWatchChange,
   nextDocumentProbeTarget,
@@ -2105,29 +2104,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         }
       }
     }
-    if (action === "documents" && card !== undefined && documentIngest !== undefined) {
-      const workspaceId = currentCabinet().workspaceId;
-      ingestProgress.begin(workspaceId, card.id);
-      try {
-        card = withTriage(await documentIngest.ingest(card, workspaceId), workspace());
-        ingestProgress.done(workspaceId, card.id);
-        catalog().upsertCase(card);
-      } catch (error) {
-        ingestProgress.fail(workspaceId, card.id);
-        logger.error("Specialist inbox document ingest failed", error, {
-          sourceProcurementId: card.sourceProcurementId,
-        });
-        await recordJournal(journal, {
-          kind: "documents",
-          level: "error",
-          message: `Не удалось скачать документы: ${card.sourceProcurementId}`,
-          sourceProcurementId: card.sourceProcurementId,
-        });
-        // The row stays in the inbox: the specialist sees the failure and
-        // can retry instead of losing the notification to a silent
-        // dismiss (R25).
-        return reply.code(502).send({ error: "ingest_failed" });
-      }
+    // Downloads run in the same background job «Участвовать» uses: a
+    // synchronous ingest would hold this request for minutes (rate-limited
+    // platform downloads + OCR) and freeze the console. The job is deduped
+    // per case, flagged durable on the card and reports via ingestProgress;
+    // a failure lands in the journal like a participate ingest failure.
+    if (action === "documents" && card !== undefined) {
+      startParticipateIngest(card);
+      // The job flagged the stored case «ingesting» — return that flag so
+      // the console shows the running download right away.
+      card = catalog().procurement(card.id) ?? card;
     }
 
     catalog().dismiss(params.id);
@@ -2140,7 +2126,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
     return SpecialistInboxResolveResponse.parse({
       items: presentInbox().items,
-      documents: action === "documents" ? inboxDocumentLinks(card) : [],
+      documents: [],
       // The opened card is written straight into the console's catalog, and
       // the detail page renders it as-is without a refetch — a slimmed row
       // would overwrite the stored case and show «Документы (0)», «Лоты (0)».

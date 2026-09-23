@@ -82,15 +82,3 @@ export function applyInboxChangeToCard(
   return SpecialistProcurementCard.parse(next);
 }
 
-export function inboxDocumentLinks(
-  card: SpecialistProcurementCardValue | undefined,
-): { name: string; url: string }[] {
-  if (card === undefined) return [];
-  return card.documents
-    .map((document) => {
-      const url = document.downloadUrl ?? document.sourceUrl;
-      return { name: document.name, url };
-    })
-    .filter((document) => document.url.length > 0);
-}
-

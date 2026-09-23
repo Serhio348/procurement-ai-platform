@@ -3744,14 +3744,20 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("keeps the inbox row when the document download fails", async () => {
+  it("resolves the documents row immediately while ingest runs in the background", async () => {
+    // The download must not hold the HTTP request: platform downloads are
+    // rate-limited and a synchronous ingest froze the console for minutes.
+    let releaseIngest: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseIngest = resolve;
+    });
+    const ingest = vi.fn(async (card: SpecialistProcurementCard) => {
+      await gate;
+      return card;
+    });
     const app = await buildSpecialistApi({
       catalog: await loadFixtureCatalog(),
-      documentIngest: {
-        ingest: async () => {
-          throw new Error("storage down");
-        },
-      },
+      documentIngest: { ingest },
     });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const row = (JSON.parse(inbox.body).items as Array<{ id: string; topic: string }>).find(
@@ -3763,11 +3769,18 @@ describe("specialist API", () => {
       url: `/api/inbox/${row?.id ?? ""}/resolve`,
       payload: { action: "documents" },
     });
-    expect(resolved.statusCode).toBe(502);
-    const after = await app.inject({ method: "GET", url: "/api/inbox" });
-    expect(
-      (JSON.parse(after.body).items as Array<{ id: string }>).some((item) => item.id === row?.id),
-    ).toBe(true);
+    // The response returns while the ingest promise is still pending.
+    expect(resolved.statusCode).toBe(200);
+    const body = JSON.parse(resolved.body) as {
+      items: Array<{ id: string }>;
+      card?: { ingesting?: string };
+    };
+    expect(body.items.some((item) => item.id === row?.id)).toBe(false);
+    expect(body.card?.ingesting).toBe("ingest");
+
+    // The background job eventually runs the real ingest.
+    await vi.waitFor(() => expect(ingest).toHaveBeenCalled());
+    releaseIngest?.();
 
     await app.close();
   });

@@ -343,6 +343,15 @@
 - Исправлено: деталь всегда догружает полную карточку через `fetchCase` (плитка — плейсхолдер), `stored = fetched ?? fromList`, мутации обновляют `fetched`. Тосты через `NoticeStack`: «Участвовать»/«Отслеживать» → «Мои закупки», «Не нужно»/«Убрать» → «Корзина», «Вернуть» → «Мои закупки», «Удалить» → удалена безвозвратно, архив/возврат из архива, очистка корзины — в ProcurementsApp, ProcurementDetailApp, MyProcurementsApp.
 - Регрессии: `fetches the full case when the list tile carries no documents`, `announces where the card went when the specialist participates` (ProcurementDetailApp.test.tsx). [STAGE-101](docs/architecture/STAGE-101.md)
 
+### [x] R51 · P1 · «Скачать документы» во входящих вешал консоль
+
+**Воспроизведено на VPS.** По строке «добавлены/изменены документы» кнопка «Скачать документы» визуально ничего не делала и консоль «зависала». Две причины: (1) `action: "documents"` в `POST /api/inbox/:id/resolve` синхронно гонял `documentIngest.ingest()` внутри запроса — rate-limited скачивания + OCR держали POST минутами; (2) после ответа UI делал `window.open` на каждый документ — браузер молча блокировал пачку всплывающих окон.
+
+- Где: [app.ts](apps/api/src/app.ts) (`/api/inbox/:id/resolve`), [SpecialistApp.tsx](apps/web/src/SpecialistApp.tsx) (`resolve`-обёртка, `InboxRoute`).
+- Исправлено: `documents` запускает тот же durable background-job, что и «Участвовать» (`startParticipateIngest` — dedup по кейсу, persist `ingesting` до старта, прогресс через `ingestProgress`, ошибка в журнал). Ответ возвращается сразу с карточкой `ingesting:"ingest"`, строка разрешается после принятия задачи. UI: `window.open`-цикл убран — клик трекает ingest (`ingestingIds`), показывает нотис «Документы скачиваются» и ведёт на карточку, где виден прогресс; `inboxDocumentLinks` удалён как мёртвый код.
+- Изменение семантики: строка resolve'ится при принятии задачи, а не после успешного скачивания — сбой ingest виден в прогрессе и журнале (как у «Участвовать»), а не 502 + висящей строкой.
+- Регрессии: `resolves the documents row immediately while ingest runs in the background` (app.test.ts — ответ 200 при pending-ingest, карточка с флагом, ingest вызван в фоне), `starts a background document download and lands on the watched case` (SpecialistApp.storage.test.tsx — переход на кейс + нотис). [STAGE-102](docs/architecture/STAGE-102.md)
+
 ## C. Продукт и UI
 
 ### [x] R27 · P1 · Длинные списки обрезаются без доступной пагинации

@@ -1,6 +1,10 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
+import {
+  InboxFixtureItem,
+  SpecialistProcurementCard,
+  SpecialistWorkingProfile,
+} from "@procurement/contracts";
 import { inboxItemFromFoundCard, SpecialistCatalog } from "@procurement/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpecialistApp } from "./SpecialistApp.js";
@@ -253,6 +257,64 @@ describe("SpecialistApp search list", () => {
     expect(await screen.findByRole("button", { name: /Со второй страницы очереди/ })).toBeTruthy();
     expect(listMine.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(listMine.mock.calls[1]?.[0]?.offset).toBe(1);
+  });
+
+  it("starts a background document download and lands on the watched case", async () => {
+    window.history.pushState({}, "", "/");
+    const user = userEvent.setup();
+    const watched = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000404",
+      title: "Отслеживаемая с новым документом",
+      status: "accepting_bids",
+      statusLabel: "идёт приём",
+      url: "https://goszakupki.by/auction/view/404",
+      sourceProcurementId: "auction/404",
+      triage: "monitor",
+      profileIds: [profile.id],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(watched);
+    catalog.record(
+      InboxFixtureItem.parse({
+        procurement: {
+          title: watched.title,
+          status: watched.status,
+          url: watched.url,
+          sourceProcurementId: watched.sourceProcurementId,
+        },
+        change: {
+          id: "00000000-0000-4000-8000-000000000411",
+          procurementId: watched.id,
+          kind: "document_added",
+          previous: null,
+          current: "ТЗ.pdf",
+          detectedAt: "2026-09-06T12:00:00.000Z",
+          urgent: true,
+        },
+      }),
+    );
+
+    const ingesting = SpecialistProcurementCard.parse({ ...watched, ingesting: "ingest" });
+    render(
+      <SpecialistApp
+        inbox={catalog.urgentInbox()}
+        procurements={[watched]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        resolveInbox={async () => ({ items: [], card: ingesting, documents: [] })}
+      />,
+    );
+
+    // The click resolves as soon as the background ingest is accepted —
+    // the request does not hang on platform downloads, and no popup batch
+    // is attempted (browsers blocked the old window.open loop silently).
+    await user.click(screen.getByRole("button", { name: "Скачать документы" }));
+    await vi.waitFor(() => {
+      expect(screen.getByRole("link", { name: "Мои закупки" }).className).toContain(
+        "nav-current",
+      );
+    });
+    expect(screen.getByText("Документы скачиваются")).toBeTruthy();
   });
 
   it("resumes polling a still-running search after a page reload", async () => {

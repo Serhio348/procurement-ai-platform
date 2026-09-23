@@ -101,6 +101,7 @@
 - [`docs/architecture/STAGE-92.md`](docs/architecture/STAGE-92.md) — pending-фраза «Добавить слово» входит в сохранение и `dirty`, локальный ввод синхронизируется с ответом сервера (R29)
 - [`docs/architecture/STAGE-93.md`](docs/architecture/STAGE-93.md) — guard несохранённых правок на навигацию по меню, форма профиля переинициализируется по `key={id}` (R30)
 - [`docs/architecture/STAGE-94.md`](docs/architecture/STAGE-94.md) — «Назначение» редактируется, `description` сохраняется — редактор больше не затирает поля review-контекста (R31)
+- [`docs/architecture/STAGE-95.md`](docs/architecture/STAGE-95.md) — «Открыть карточку» из inbox ведёт в раздел по состоянию кейса: «Мои закупки»/«Корзина»/«Закупки» (R48)
 
 ---
 

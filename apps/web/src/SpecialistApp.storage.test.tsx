@@ -122,6 +122,44 @@ describe("SpecialistApp search list", () => {
     expect(screen.getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
   });
 
+  it("opens a watched case from the inbox inside Мои закупки", async () => {
+    window.history.pushState({}, "", "/");
+    const user = userEvent.setup();
+    const watched = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000403",
+      title: "Отслеживаемая с новым документом",
+      status: "accepting_bids",
+      statusLabel: "идёт приём",
+      url: "https://goszakupki.by/auction/view/403",
+      sourceProcurementId: "auction/403",
+      triage: "monitor",
+      profileIds: [profile.id],
+    });
+    const catalog = new SpecialistCatalog();
+    catalog.upsertCase(watched);
+    catalog.record(inboxItemFromFoundCard(watched, "2026-09-06T12:00:00.000Z"));
+
+    render(
+      <SpecialistApp
+        inbox={catalog.urgentInbox()}
+        procurements={[found]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        resolveInbox={async () => ({ items: [], card: watched, documents: [] })}
+        decide={async () => [watched]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
+
+    await vi.waitFor(() => {
+      expect(
+        screen.getByRole("link", { name: "Мои закупки" }).className,
+      ).toContain("nav-current");
+    });
+    expect(screen.getByRole("link", { name: "Закупки" }).className).not.toContain("nav-current");
+  });
+
   it("opening a foreign profile's inbox case does not claim it for the active profile", async () => {
     window.history.pushState({}, "", "/");
     const user = userEvent.setup();

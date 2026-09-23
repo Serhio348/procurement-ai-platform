@@ -714,12 +714,21 @@ function InboxRoute({
             onResolve: async (id, action) => {
               const result = await resolve(id, action);
               if (result.card !== undefined && action === "open") {
-                void navigate(`/procurements/${result.card.id}`);
+                void navigate(inboxOpenTarget(result.card));
               }
             },
           })}
     />
   );
+}
+
+// An inbox row opens where the case actually lives: watched cases carry their
+// full stored card in «Мои закупки», rejected ones in «Корзина»; only
+// undecided candidates belong to the search tab.
+function inboxOpenTarget(card: SpecialistProcurementCard): string {
+  if (isRejectedTriage(card.triage)) return `/trash/${card.id}`;
+  if (isWatchedTriage(card) || card.archived) return `/my-procurements/${card.id}`;
+  return `/procurements/${card.id}`;
 }
 
 function ProfileListRoute({

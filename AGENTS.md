@@ -114,6 +114,7 @@
 - [`docs/architecture/STAGE-105.md`](docs/architecture/STAGE-105.md) — liveness `/api/live` vs readiness `/api/health`: живой ping PostgreSQL, sha деплоя, `degraded`-список, баннер в UI (R42)
 - [`docs/architecture/STAGE-106.md`](docs/architecture/STAGE-106.md) — env-allowlist для дочернего MCP и очередь с дедлайном на ожидание + приоритетом (R43)
 - [`docs/architecture/STAGE-107.md`](docs/architecture/STAGE-107.md) — единая актуальная спецификация очередей поиска и совместимости контрактов; STAGE-63/64/66 помечены историческими (R44)
+- [`docs/architecture/STAGE-108.md`](docs/architecture/STAGE-108.md) — инкрементальный persist: skip неизменённых карточек/профилей/verdicts/inbox по canonicalJson-сравнению, `loadCasesByIds` вместо N+1 в tab=search, ограниченный кэш источника (R37)
 
 ---
 

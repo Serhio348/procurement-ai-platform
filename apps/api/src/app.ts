@@ -519,9 +519,23 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (tab === "search") {
       const items: SpecialistProcurementCardValue[] = [];
       const seen = new Set<string>();
-      // The caller (GET /api/procurements) requires profileId for this tab.
-      for (const id of workspace().searchIds(query.profileId ?? "")) {
-        const stored = catalog().procurement(id) ?? (await resolveCase(id));
+      const queueIds = workspace().searchIds(query.profileId ?? "");
+      // Bulk fetch: one query for the whole queue instead of one getCase per
+      // id — the tab's cost must follow the page, not the cabinet size (R37).
+      const missing = queueIds.filter((id) => catalog().procurement(id) === undefined);
+      const fromStore =
+        missing.length === 0
+          ? new Map<string, SpecialistProcurementCardValue>()
+          : await cabinets.loadCasesByIds(currentCabinet().workspaceId, missing);
+      for (const id of queueIds) {
+        const inCatalog = catalog().procurement(id);
+        const fromSql = fromStore.get(id);
+        const stored =
+          inCatalog !== undefined
+            ? inCatalog
+            : fromSql === undefined
+              ? undefined
+              : withTriage(fromSql, workspace());
         if (stored === undefined) continue;
         // The queue belongs to a profile: it shows that profile's own
         // verdict, not another direction's (R04).

@@ -407,9 +407,10 @@ export function createSpecialistStore(db: Database) {
           ? state.activeProfileId
           : profiles[0]!.id;
         const existingProfiles = await tx
-          .select({ id: workspaceProfiles.id })
+          .select()
           .from(workspaceProfiles)
           .where(eq(workspaceProfiles.workspaceId, workspaceId));
+        const existingProfileById = new Map(existingProfiles.map((row) => [row.id, row]));
         const nextIds = new Set(profiles.map((item) => item.id));
         const removed = [
           ...new Set([
@@ -429,6 +430,11 @@ export function createSpecialistStore(db: Database) {
           await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
         }
         for (const profile of profiles) {
+          // Persist runs after every case action; profiles change rarely.
+          // Rewriting all of them each time cost one upsert per profile per
+          // action — write only when a field actually differs (R37).
+          const current = existingProfileById.get(profile.id);
+          if (current !== undefined && profileRowMatches(profile, current)) continue;
           const columns = workspaceProfileColumns(profile, workspaceId, now);
           await tx
             .insert(workspaceProfiles)
@@ -581,6 +587,33 @@ export function createSpecialistStore(db: Database) {
           )
           .limit(1);
         return rows[0] === undefined ? undefined : parseCaseRow(rows[0]);
+      });
+    },
+
+    /**
+     * Bulk fetch by case id (queue reads must not run one query per id, R37).
+     */
+    async loadCasesByIds(
+      workspaceId: string,
+      ids: readonly string[],
+    ): Promise<Map<string, SpecialistProcurementCardValue>> {
+      const found = new Map<string, SpecialistProcurementCardValue>();
+      if (ids.length === 0) return found;
+      return withWorkspace(db, workspaceId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(workspaceProcurements)
+          .where(
+            and(
+              eq(workspaceProcurements.workspaceId, workspaceId),
+              caseIdentityMatch([...ids]),
+            ),
+          );
+        for (const row of rows) {
+          const parsed = parseCaseRow(row);
+          if (parsed !== undefined) found.set(parsed.id, parsed);
+        }
+        return found;
       });
     },
 
@@ -829,8 +862,27 @@ export function createSpecialistStore(db: Database) {
       const now = new Date().toISOString();
       await withWorkspaceWrite(db, workspaceId, async (tx) => {
         await writeWorkspaceState(tx, workspaceId, state, now);
+        // saveWorkspaceCase unconditionally upserts the canonical row and
+        // rewrites profile links — running it for every persistable card made
+        // each single-card action rewrite the whole cabinet (R37). One select
+        // decides which cards actually changed; the rest are skipped.
+        const existingCards = new Map(
+          (
+            await tx
+              .select({
+                sourceProcurementId: workspaceProcurements.sourceProcurementId,
+                card: workspaceProcurements.card,
+              })
+              .from(workspaceProcurements)
+              .where(eq(workspaceProcurements.workspaceId, workspaceId))
+          ).map((row) => [row.sourceProcurementId, comparableCardJson(row.card)]),
+        );
         for (const card of uniqueBySource(cards)) {
-          await saveWorkspaceCase(tx, workspaceId, card);
+          const parsed = SpecialistProcurementCard.parse(jsonbSafe(card));
+          if (existingCards.get(parsed.sourceProcurementId) === comparableCardJson(parsed)) {
+            continue;
+          }
+          await saveWorkspaceCase(tx, workspaceId, parsed);
         }
         await writeInboxState(tx, workspaceId, items, state.dismissedInboxIds, now);
       });
@@ -994,6 +1046,53 @@ function optionalLastDiscoveryAt(value: string | Date | null): { lastDiscoveryAt
   }
 }
 
+/** jsonb reorders keys, so field equality needs a canonical form (R37). */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Stored card rows embed `canonicalProcurementId`, which the caller's card
+ * may not carry yet — it is derived from sourceProcurementId, so strip it on
+ * both sides when deciding whether the card changed (R37).
+ */
+export function comparableCardJson(card: unknown): string {
+  if (typeof card !== "object" || card === null || Array.isArray(card)) {
+    return canonicalJson(card);
+  }
+  const rest = { ...(card as Record<string, unknown>) };
+  delete rest["canonicalProcurementId"];
+  return canonicalJson(rest);
+}
+
+/** A profile row needs a write only when a persisted field differs. */
+export function profileRowMatches(
+  profile: SpecialistWorkingProfileValue,
+  row: typeof workspaceProfiles.$inferSelect,
+): boolean {
+  const rowDiscoveryAt =
+    row.lastDiscoveryAt === null ? undefined : toIsoDateTime(row.lastDiscoveryAt);
+  return (
+    row.name === profile.name &&
+    row.purpose === profile.purpose &&
+    row.description === profile.description &&
+    canonicalJson(row.keywords) === canonicalJson(profile.keywords) &&
+    canonicalJson(row.excludeKeywords) === canonicalJson(profile.excludeKeywords) &&
+    canonicalJson(row.statuses) === canonicalJson(profile.statuses) &&
+    row.excludeSingleSource === profile.excludeSingleSource &&
+    canonicalJson(row.filters) === canonicalJson(profile.filters) &&
+    row.watchNewProcurements === profile.watchNewProcurements &&
+    rowDiscoveryAt === profile.lastDiscoveryAt
+  );
+}
+
 function workspaceProfileColumns(
   profile: SpecialistWorkingProfileValue,
   workspaceId: string,
@@ -1042,9 +1141,10 @@ async function writeWorkspaceState(
     ? state.activeProfileId
     : profiles[0]!.id;
   const existingProfiles = await tx
-    .select({ id: workspaceProfiles.id })
+    .select()
     .from(workspaceProfiles)
     .where(eq(workspaceProfiles.workspaceId, workspaceId));
+  const existingProfileById = new Map(existingProfiles.map((row) => [row.id, row]));
   const nextIds = new Set(profiles.map((item) => item.id));
   const removed = [
     ...new Set([
@@ -1064,6 +1164,8 @@ async function writeWorkspaceState(
     await tx.delete(workspaceProfiles).where(inArray(workspaceProfiles.id, removed));
   }
   for (const profile of profiles) {
+    const current = existingProfileById.get(profile.id);
+    if (current !== undefined && profileRowMatches(profile, current)) continue;
     const columns = workspaceProfileColumns(profile, workspaceId, now);
     await tx
       .insert(workspaceProfiles)
@@ -1105,7 +1207,35 @@ async function writeWorkspaceState(
       },
     });
 
-  for (const verdict of dedupeReviewVerdicts(state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId)))) {
+  // Verdicts are append-mostly: rewriting every row on each persist made the
+  // cost grow with review history (R37). One select decides which rows are
+  // actually fresh; the same select drives orphan cleanup.
+  const wantedVerdicts = dedupeReviewVerdicts(
+    state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId)),
+  );
+  const existingVerdicts = await tx
+    .select({
+      profileId: workspaceReviewVerdicts.profileId,
+      sourceProcurementId: workspaceReviewVerdicts.sourceProcurementId,
+      decidedAt: workspaceReviewVerdicts.decidedAt,
+      algorithmVersion: workspaceReviewVerdicts.algorithmVersion,
+    })
+    .from(workspaceReviewVerdicts)
+    .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+  const existingVerdictByKey = new Map(
+    existingVerdicts.map((row) => [`${row.profileId}\0${row.sourceProcurementId}`, row]),
+  );
+  for (const verdict of wantedVerdicts) {
+    const current = existingVerdictByKey.get(
+      `${verdict.profileId}\0${verdict.sourceProcurementId}`,
+    );
+    if (
+      current !== undefined &&
+      toIsoDateTime(current.decidedAt) === verdict.decidedAt &&
+      current.algorithmVersion === verdict.algorithmVersion
+    ) {
+      continue;
+    }
     await tx
       .insert(workspaceReviewVerdicts)
       .values({
@@ -1128,17 +1258,8 @@ async function writeWorkspaceState(
       });
   }
   const nextVerdictKeys = new Set(
-    dedupeReviewVerdicts(state.reviewedIrrelevant.filter((item) => !deletedProfileIds.includes(item.profileId))).map(
-      (item) => `${item.profileId}\0${item.sourceProcurementId}`,
-    ),
+    wantedVerdicts.map((item) => `${item.profileId}\0${item.sourceProcurementId}`),
   );
-  const existingVerdicts = await tx
-    .select({
-      profileId: workspaceReviewVerdicts.profileId,
-      sourceProcurementId: workspaceReviewVerdicts.sourceProcurementId,
-    })
-    .from(workspaceReviewVerdicts)
-    .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
   const orphanVerdictIds = existingVerdicts.filter(
     (row) => !nextVerdictKeys.has(`${row.profileId}\0${row.sourceProcurementId}`),
   );
@@ -1223,14 +1344,40 @@ async function writeInboxState(
   const bySource = new Map(cases.map((row) => [row.sourceProcurementId, row.id]));
   const byId = new Set(cases.map((row) => row.id));
   const dismissed = new Set(dismissedChangeIds);
+  // Inbox is append-mostly: upserting every historical row on each persist
+  // made the cost grow with inbox size (R37). One select decides which rows
+  // actually changed; the same rows drive out-of-batch dismissals.
+  const existingRows = await tx
+    .select({
+      id: workspaceInbox.id,
+      eventKey: workspaceInbox.eventKey,
+      state: workspaceInbox.state,
+      workspaceProcurementId: workspaceInbox.workspaceProcurementId,
+      item: workspaceInbox.item,
+    })
+    .from(workspaceInbox)
+    .where(eq(workspaceInbox.workspaceId, workspaceId));
+  const existingByEventKey = new Map(existingRows.map((row) => [row.eventKey, row]));
+  const managedChangeIds = new Set<string>();
   for (const raw of items) {
     const item = InboxFixtureItem.parse(jsonbSafe(raw));
+    managedChangeIds.add(item.change.id);
     const resolvedId = byId.has(item.change.procurementId)
       ? item.change.procurementId
       : bySource.get(item.procurement.sourceProcurementId);
     // Never point inbox at a missing case row (FK / race with removeCases).
     const workspaceProcurementId = resolvedId;
     const closed = dismissed.has(item.change.id);
+    const desiredState = closed ? "dismissed" : "open";
+    const existing = existingByEventKey.get(item.change.id);
+    if (
+      existing !== undefined &&
+      existing.state === desiredState &&
+      (existing.workspaceProcurementId ?? undefined) === workspaceProcurementId &&
+      canonicalJson(existing.item) === canonicalJson(item)
+    ) {
+      continue;
+    }
     await tx
       .insert(workspaceInbox)
       .values({
@@ -1239,7 +1386,7 @@ async function writeInboxState(
         workspaceProcurementId,
         eventKey: item.change.id,
         item,
-        state: closed ? "dismissed" : "open",
+        state: desiredState,
         detectedAt: item.change.detectedAt,
         resolvedAt: closed ? now : null,
         updatedAt: now,
@@ -1249,7 +1396,7 @@ async function writeInboxState(
         set: {
           workspaceProcurementId,
           item,
-          state: closed ? "dismissed" : "open",
+          state: desiredState,
           resolvedAt: closed ? now : null,
           updatedAt: now,
         },
@@ -1257,13 +1404,11 @@ async function writeInboxState(
   }
   // Apply dismissals to rows that are already in SQL but not in this batch.
   if (dismissed.size > 0) {
-    const inboxRows = await tx
-      .select({ id: workspaceInbox.id, eventKey: workspaceInbox.eventKey, item: workspaceInbox.item })
-      .from(workspaceInbox)
-      .where(eq(workspaceInbox.workspaceId, workspaceId));
-    for (const row of inboxRows) {
+    for (const row of existingRows) {
+      if (row.state !== "open") continue;
       const parsed = InboxFixtureItem.safeParse(row.item);
       const changeId = parsed.success ? parsed.data.change.id : row.eventKey;
+      if (managedChangeIds.has(changeId)) continue;
       if (!dismissed.has(changeId)) continue;
       await tx
         .update(workspaceInbox)
@@ -1406,11 +1551,6 @@ async function saveWorkspaceCase(
 ): Promise<void> {
   const parsed = SpecialistProcurementCard.parse(jsonbSafe(card));
   const now = new Date().toISOString();
-  const canonicalId = await upsertCanonicalProcurement(tx, parsed, now);
-  const stored = SpecialistProcurementCard.parse({
-    ...parsed,
-    canonicalProcurementId: canonicalId,
-  });
   const existing = await tx
     .select({
       id: workspaceProcurements.id,
@@ -1418,16 +1558,28 @@ async function saveWorkspaceCase(
       archived: workspaceProcurements.archived,
       foundAs: workspaceProcurements.foundAs,
       updatedAt: workspaceProcurements.updatedAt,
+      card: workspaceProcurements.card,
     })
     .from(workspaceProcurements)
     .where(
       and(
         eq(workspaceProcurements.workspaceId, workspaceId),
-        eq(workspaceProcurements.sourceProcurementId, stored.sourceProcurementId),
+        eq(workspaceProcurements.sourceProcurementId, parsed.sourceProcurementId),
       ),
     )
     .limit(1);
   const previous = existing[0];
+  // Unchanged card: skip the canonical upsert, the row update, and the
+  // profile-link delete/reinsert — persist must cost the change, not the
+  // whole cabinet (R37).
+  if (previous !== undefined && comparableCardJson(previous.card) === comparableCardJson(parsed)) {
+    return;
+  }
+  const canonicalId = await upsertCanonicalProcurement(tx, parsed, now);
+  const stored = SpecialistProcurementCard.parse({
+    ...parsed,
+    canonicalProcurementId: canonicalId,
+  });
   const updatedAt =
     previous === undefined || caseListTimeShouldBump(previous, stored)
       ? now

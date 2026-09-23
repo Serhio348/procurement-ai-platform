@@ -75,6 +75,11 @@ export interface CabinetRegistry {
     workspaceId: string,
     sourceProcurementId: string,
   ) => Promise<SpecialistProcurementCardValue | undefined>;
+  /** Bulk fetch by case id — queue reads must not go one query per id (R37). */
+  loadCasesByIds: (
+    workspaceId: string,
+    ids: readonly string[],
+  ) => Promise<Map<string, SpecialistProcurementCardValue>>;
   loadCasesBySources: (
     workspaceId: string,
     sourceIds: readonly string[],
@@ -190,6 +195,14 @@ export function createMemoryCabinetRegistry(options: {
     },
     async findCaseBySource(workspaceId, sourceProcurementId) {
       return casesOf(workspaceId).find((item) => item.sourceProcurementId === sourceProcurementId);
+    },
+    async loadCasesByIds(workspaceId, ids) {
+      const wanted = new Set(ids);
+      const found = new Map<string, SpecialistProcurementCardValue>();
+      for (const card of casesOf(workspaceId)) {
+        if (wanted.has(card.id)) found.set(card.id, card);
+      }
+      return found;
     },
     async loadCasesBySources(workspaceId, sourceIds) {
       const wanted = new Set(sourceIds);

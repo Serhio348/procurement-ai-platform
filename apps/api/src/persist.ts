@@ -561,6 +561,16 @@ export async function openSpecialistPersistence(options: {
         .procurements()
         .find((item) => item.sourceProcurementId === sourceProcurementId);
     },
+    async loadCasesByIds(workspaceId, ids) {
+      if (store !== undefined) return store.loadCasesByIds(workspaceId, ids);
+      const wanted = new Set(ids);
+      const found = new Map<string, SpecialistProcurementCardValue>();
+      const cabinet = await openCabinet(workspaceId);
+      for (const card of cabinet.catalog.procurements()) {
+        if (wanted.has(card.id)) found.set(card.id, card);
+      }
+      return found;
+    },
     async loadCasesBySources(workspaceId, sourceIds) {
       if (store !== undefined) return store.loadCasesBySources(workspaceId, sourceIds);
       const wanted = new Set(sourceIds);

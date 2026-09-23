@@ -32,6 +32,8 @@ import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.
 export interface GoszakupkiBySourceOptions {
   client: GoszakupkiPageClient;
   cacheTtlMs?: number;
+  /** Bound on cached card entries — expired keys are swept, then oldest (R37). */
+  cacheMaxEntries?: number;
   now?: () => Date;
   publicFetch?: PublicDocumentationFetch;
   logger?: Logger;
@@ -49,6 +51,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   readonly sourceId = SourceId.parse("goszakupki_by");
   readonly #client: GoszakupkiPageClient;
   readonly #cacheTtlMs: number;
+  readonly #cacheMaxEntries: number;
   readonly #now: () => Date;
   readonly #publicFetch: PublicDocumentationFetch;
   readonly #logger: Logger;
@@ -58,6 +61,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
   constructor(options: GoszakupkiBySourceOptions) {
     this.#client = options.client;
     this.#cacheTtlMs = options.cacheTtlMs ?? 30_000;
+    this.#cacheMaxEntries = options.cacheMaxEntries ?? 512;
     this.#now = options.now ?? (() => new Date());
     this.#publicFetch = options.publicFetch ?? fetch;
     this.#logger = options.logger ?? silentLogger;
@@ -293,7 +297,22 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
       expiresAt: now.getTime() + this.#cacheTtlMs,
       parsed,
     });
+    this.#evictCache(now.getTime());
     return parsed;
+  }
+
+  /** Expired entries never left the map — memory grew with uptime (R37). */
+  #evictCache(nowMs: number): void {
+    if (this.#cache.size <= this.#cacheMaxEntries) return;
+    for (const [key, entry] of this.#cache) {
+      if (this.#cache.size <= this.#cacheMaxEntries) return;
+      if (entry.expiresAt <= nowMs) this.#cache.delete(key);
+    }
+    // Still over the bound: Map iterates in insertion order — drop oldest.
+    for (const key of this.#cache.keys()) {
+      if (this.#cache.size <= this.#cacheMaxEntries) return;
+      this.#cache.delete(key);
+    }
   }
 }
 

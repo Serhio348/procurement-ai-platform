@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   blobStorageKey,
+  canonicalJson,
   caseListTimeShouldBump,
+  comparableCardJson,
   jsonbSafe,
   postgresErrorMessage,
+  profileRowMatches,
   toIsoDateTime,
   uniqueBySource,
   dedupeReviewVerdicts,
   workspaceDecisionKey,
 } from "./specialist-store.js";
-import { SpecialistProcurementCard } from "@procurement/contracts";
+import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procurement/contracts";
+import type { workspaceProfiles } from "./schema.js";
 
 describe("blobStorageKey", () => {
   it("keeps the sha256 as the object name so PostgreSQL stores the hash, not the bytes", () => {
@@ -157,5 +161,77 @@ describe("dedupeReviewVerdicts", () => {
       decidedAt: "2026-09-02T00:00:00.000Z",
     };
     expect(dedupeReviewVerdicts([older, newer, older])).toEqual([newer]);
+  });
+});
+
+describe("canonicalJson", () => {
+  it("ignores object key order so a jsonb round-trip still compares equal (R37)", () => {
+    expect(canonicalJson({ b: 1, a: { d: [2], c: "x" } })).toBe(
+      canonicalJson({ a: { c: "x", d: [2] }, b: 1 }),
+    );
+    expect(canonicalJson(["а", "б"])).not.toBe(canonicalJson(["б", "а"]));
+  });
+});
+
+describe("comparableCardJson", () => {
+  it("treats a stored canonicalProcurementId as no change (R37)", () => {
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      title: "Карточка",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/1",
+      sourceProcurementId: "auction/1",
+      triage: "monitor",
+    });
+    const stored = { ...card, canonicalProcurementId: "00000000-0000-4000-8000-0000000000ff" };
+    expect(comparableCardJson(stored)).toBe(comparableCardJson(card));
+    expect(comparableCardJson({ ...card, title: "Другая" })).not.toBe(
+      comparableCardJson(stored),
+    );
+  });
+});
+
+describe("profileRowMatches", () => {
+  const profile = SpecialistWorkingProfile.parse({
+    id: "00000000-0000-4000-8000-0000000000a1",
+    name: "КТПБ",
+    purpose: "подстанции",
+    description: "описание",
+    keywords: ["КТПБ", "КТП"],
+    excludeKeywords: ["б/у"],
+    statuses: ["accepting_bids"],
+    excludeSingleSource: true,
+    filters: { buyerUnp: "123456789" },
+    watchNewProcurements: true,
+    lastDiscoveryAt: "2026-09-09T10:00:00.000Z",
+  });
+  const row: typeof workspaceProfiles.$inferSelect = {
+    id: profile.id,
+    workspaceId: "00000000-0000-4000-8000-000000000010",
+    name: "КТПБ",
+    purpose: "подстанции",
+    description: "описание",
+    keywords: ["КТПБ", "КТП"],
+    excludeKeywords: ["б/у"],
+    statuses: ["accepting_bids"],
+    excludeSingleSource: true,
+    filters: { buyerUnp: "123456789" },
+    watchNewProcurements: true,
+    lastDiscoveryAt: "2026-09-09 10:00:00+00",
+    createdAt: "2026-01-01 00:00:00+00",
+    updatedAt: "2026-01-01 00:00:00+00",
+  };
+
+  it("matches a round-tripped row despite jsonb order and timestamptz format (R37)", () => {
+    expect(profileRowMatches(profile, { ...row, filters: { buyerUnp: "123456789" } })).toBe(true);
+  });
+
+  it("detects any persisted field difference", () => {
+    expect(profileRowMatches(profile, { ...row, name: "Другое" })).toBe(false);
+    expect(profileRowMatches(profile, { ...row, keywords: ["КТП"] })).toBe(false);
+    expect(profileRowMatches(profile, { ...row, filters: {} })).toBe(false);
+    expect(profileRowMatches(profile, { ...row, lastDiscoveryAt: null })).toBe(false);
+    expect(profileRowMatches(profile, { ...row, watchNewProcurements: false })).toBe(false);
   });
 });

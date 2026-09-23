@@ -5,7 +5,15 @@ import { applyBootstrap } from "./bootstrap.js";
 import { createDatabase, type Database } from "./client.js";
 import { migrateDatabase } from "./migrate.js";
 import { createRepositories } from "./repositories.js";
-import { documentVersions, domainProfiles, procurements, seedRuns } from "./schema.js";
+import {
+  documentVersions,
+  domainProfiles,
+  procurements,
+  seedRuns,
+  workspaceInbox,
+  workspaceProcurements,
+  workspaceProfiles,
+} from "./schema.js";
 import { blobStorageKey, createSpecialistStore } from "./specialist-store.js";
 
 const testDatabaseUrl = process.env["TEST_DATABASE_URL"];
@@ -359,6 +367,141 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(loadedB?.foundAs).toBe("match");
     expect(await store.getCase(workspaceA, card.id)).toBeUndefined();
     expect((await store.getCase(workspaceB, card.id))?.foundAs).toBe("match");
+  });
+
+  it("rewrites only changed rows when the cabinet is saved again (R37)", async () => {
+    const store = createSpecialistStore(db);
+    const userId = "00000000-0000-4000-8000-000000000950";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values (${userId}, 'r37@test.local', 'R37', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceId = await store.ensurePersonalWorkspace(userId, "R37");
+    const profileId = "00000000-0000-4000-8000-000000000951";
+    const state = {
+      profiles: [
+        {
+          id: profileId,
+          name: "R37",
+          purpose: "",
+          description: "",
+          keywords: ["кабель"],
+          excludeKeywords: [],
+          statuses: ["accepting_bids" as const],
+          excludeSingleSource: false,
+          filters: {},
+          watchNewProcurements: false,
+        },
+      ],
+      activeProfileId: profileId,
+      decisions: [],
+      dismissedInboxIds: [],
+      reviewedIrrelevant: [
+        {
+          profileId,
+          sourceProcurementId: "auction/r37-reviewed",
+          decidedAt: "2026-09-09T10:00:00.000Z",
+          algorithmVersion: "search-review-v2",
+        },
+      ],
+      archivedSourceIds: [],
+      searchIdsByProfile: {},
+      searchRuns: {},
+    };
+    const card = (n: number) =>
+      SpecialistProcurementCard.parse({
+        id: `00000000-0000-4000-8000-00000000095${n}`,
+        title: `Карточка ${n}`,
+        status: "accepting_bids",
+        statusLabel: "приём",
+        url: `https://goszakupki.by/auction/view/r37-${n}`,
+        sourceProcurementId: `auction/r37-${n}`,
+        live: true,
+        triage: "monitor",
+      });
+    const cardA = card(2);
+    const cardB = card(3);
+    const inboxItem = (n: number) =>
+      InboxFixtureItem.parse({
+        procurement: {
+          title: `Карточка ${n}`,
+          status: "accepting_bids",
+          url: `https://goszakupki.by/auction/view/r37-${n}`,
+          sourceProcurementId: `auction/r37-${n}`,
+        },
+        change: {
+          id: `00000000-0000-4000-8000-00000000096${n}`,
+          procurementId: `00000000-0000-4000-8000-00000000095${n}`,
+          kind: "procedure_found",
+          previous: null,
+          current: `Карточка ${n}`,
+          detectedAt: "2026-09-01T10:00:00.000Z",
+        },
+      });
+
+    await store.saveCabinet(state, [cardA, cardB], [inboxItem(4)], workspaceId);
+    const stamps = async () => {
+      const inbox = await db
+        .select({ key: workspaceInbox.eventKey, at: workspaceInbox.updatedAt })
+        .from(workspaceInbox)
+        .where(eq(workspaceInbox.workspaceId, workspaceId));
+      const profiles = await db
+        .select({ id: workspaceProfiles.id, at: workspaceProfiles.updatedAt })
+        .from(workspaceProfiles)
+        .where(eq(workspaceProfiles.workspaceId, workspaceId));
+      const cases = await db
+        .select({
+          src: workspaceProcurements.sourceProcurementId,
+          at: workspaceProcurements.updatedAt,
+        })
+        .from(workspaceProcurements)
+        .where(eq(workspaceProcurements.workspaceId, workspaceId));
+      const canonical = await db
+        .select({ src: procurements.sourceRecordId, at: procurements.updatedAt })
+        .from(procurements)
+        .where(sql`${procurements.sourceRecordId} like 'auction/r37-%'`);
+      const by = <T extends { at: unknown }, K extends keyof T>(rows: T[], key: K) =>
+        new Map(rows.map((row) => [String(row[key]), String(row.at)]));
+      return {
+        inbox: by(inbox, "key"),
+        profiles: by(profiles, "id"),
+        cases: by(cases, "src"),
+        canonical: by(canonical, "src"),
+      };
+    };
+    const before = await stamps();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Same cabinet plus one new inbox row and one changed card.
+    const changedB = SpecialistProcurementCard.parse({ ...cardB, title: "Изменённая" });
+    await store.saveCabinet(
+      state,
+      [cardA, changedB],
+      [inboxItem(4), inboxItem(5)],
+      workspaceId,
+    );
+    const after = await stamps();
+
+    // Unchanged inbox row, unchanged profile and unchanged case row were not
+    // rewritten — their updated_at must be identical to the first save.
+    expect(after.inbox.get("00000000-0000-4000-8000-000000000964")).toBe(
+      before.inbox.get("00000000-0000-4000-8000-000000000964"),
+    );
+    expect(after.inbox.has("00000000-0000-4000-8000-000000000965")).toBe(true);
+    expect(after.profiles.get(profileId)).toBe(before.profiles.get(profileId));
+    expect(after.cases.get(cardA.sourceProcurementId)).toBe(
+      before.cases.get(cardA.sourceProcurementId),
+    );
+    // The canonical row of an unchanged card is not re-upserted.
+    expect(after.canonical.get(cardA.sourceProcurementId)).toBe(
+      before.canonical.get(cardA.sourceProcurementId),
+    );
+    // The changed card really was written.
+    expect(after.canonical.get(cardB.sourceProcurementId)).not.toBe(
+      before.canonical.get(cardB.sourceProcurementId),
+    );
+    expect((await store.getCase(workspaceId, cardB.id))?.title).toBe("Изменённая");
   });
 
   it("rejects a fact that is committed without evidence", async () => {

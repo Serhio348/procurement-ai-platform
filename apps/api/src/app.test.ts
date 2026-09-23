@@ -26,7 +26,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAdminJournal } from "./admin/journal.js";
 import { buildSpecialistApi } from "./app.js";
 import { putBlob } from "./blobs.js";
-import { createMemoryCabinetRegistry } from "./cabinets.js";
+import {
+  createMemoryCabinetRegistry,
+  TEST_WORKSPACE_ID,
+  type CabinetRegistry,
+} from "./cabinets.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
 import { createProcurementSearchReview } from "./search-review.js";
 
@@ -4848,6 +4852,75 @@ describe("service health (R42)", () => {
     expect(body.ready).toBe(false);
     expect(body.components.postgres).toBe("failed");
     expect(body.degraded).toContain("PostgreSQL");
+
+    await app.close();
+  });
+});
+
+describe("cabinet scale (R37)", () => {
+  it("serves tab=search with one bulk fetch, not a query per queued id", async () => {
+    const catalog = new SpecialistCatalog();
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profiles()[0]?.id;
+    if (profileId === undefined) throw new Error("workspace profile missing");
+    const card = (n: number) =>
+      SpecialistProcurementCard.parse({
+        id: `00000000-0000-4000-8000-00000000070${n}`,
+        title: `Закупка ${n}`,
+        status: "accepting_bids",
+        statusLabel: "приём",
+        url: `https://goszakupki.by/auction/view/r37-${n}`,
+        sourceProcurementId: `auction/r37-${n}`,
+        foundAs: "match",
+      });
+    const inCatalog = [card(1), card(2)];
+    for (const item of inCatalog) catalog.upsertCase(item);
+    // Queued ids whose cards are absent from the hydrated catalog: previously
+    // each one cost a getCase query; now one loadCasesByIds covers them (R37).
+    const storeOnly = new Map<string, SpecialistProcurementCard>(
+      [card(3), card(4), card(5)].map((item) => [item.id, item]),
+    );
+    workspace.replaceSearchIds(profileId, [
+      ...inCatalog.map((item) => item.id),
+      ...storeOnly.keys(),
+    ]);
+
+    const registry = createMemoryCabinetRegistry({
+      defaultCabinet: { workspaceId: TEST_WORKSPACE_ID, catalog, workspace },
+      singleton: true,
+    });
+    const counters = { getCase: 0, loadCasesByIds: 0, requestedIds: [] as string[] };
+    const cabinets: CabinetRegistry = {
+      ...registry,
+      getCase: async (workspaceId, id) => {
+        counters.getCase += 1;
+        return registry.getCase(workspaceId, id);
+      },
+      loadCasesByIds: async (workspaceId, ids) => {
+        counters.loadCasesByIds += 1;
+        counters.requestedIds = [...ids];
+        const found = await registry.loadCasesByIds(workspaceId, ids);
+        for (const id of ids) {
+          const extra = storeOnly.get(id);
+          if (extra !== undefined && !found.has(id)) found.set(id, extra);
+        }
+        return found;
+      },
+    };
+    const app = await buildSpecialistApi({ catalog, workspace, cabinets });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${profileId}`,
+    });
+    const body = JSON.parse(response.body) as { items: Array<{ id: string }>; total: number };
+
+    expect(response.statusCode).toBe(200);
+    expect(body.items).toHaveLength(5);
+    expect(body.total).toBe(5);
+    expect(counters.getCase).toBe(0);
+    expect(counters.loadCasesByIds).toBe(1);
+    expect(counters.requestedIds).toEqual([...storeOnly.keys()]);
 
     await app.close();
   });

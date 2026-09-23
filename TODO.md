@@ -460,13 +460,15 @@
 
 ## D. Техническая надёжность, безопасность и сопровождение
 
-### [ ] R37 · P2 · Стоимость работы растёт со всем накопленным кабинетом, а не с изменением
+### [x] R37 · P2 · Стоимость работы растёт со всем накопленным кабинетом, а не с изменением
 
 **По коду / риск производительности.** После каждой проверенной карточки пишется весь workspace, весь in-memory набор сохраняемых cards и весь inbox, включая dismissed. `saveWorkspace` пересоздаёт review verdicts и обновляет все inbox rows. `tab=search` сначала поочерёдно разрешает все ID и лишь затем делает slice; `procurement()` пересобирает проекцию всего каталога. Maps прогресса/карточек не очищаются по TTL (source cache проверяет TTL, но не удаляет неиспользуемые ключи).
 
 - Где: [app.ts:360–376, 869–871](apps/api/src/app.ts#L360), [persist.ts:252–259](apps/api/src/persist.ts#L252), [specialist-store.ts:283–285, 329–358, 378–395, 606–621, 690–732](packages/db/src/specialist-store.ts#L283), [catalog.ts:107–109, 156–171](packages/domain/src/specialist/catalog.ts#L156), [goszakupki-by-source.ts:235–265](mcp/procurement/src/goszakupki-by-source.ts#L235).
 - Исправление: инкрементальные команды/dirty set, SQL-пагинация очередей, retention inbox/jobs, ограниченные кэши, batch чтение. Устранить N+1 и лишний polling до изменения интервалов наугад.
 - Приёмка: нагрузочный тест на большой кабинет фиксирует SQL count/latency/memory; сохранение одной карточки не переписывает всю историю.
+
+**Исправлено (этап 108).** Запись стала инкрементальной по всем трём семействам. `saveWorkspaceCase` читает существующую строку и при равном `card` (канонический jsonb, без `canonicalProcurementId`) выходит без canonical upsert, update и пересоздания связей; `saveCabinet` предвыбирает `source→card` и пропускает неизменённые карточки. `writeWorkspaceState`: профили — upsert только при отличающемся поле (`profileRowMatches`, canonicalJson для jsonb, toIsoDateTime для timestamptz); verdicts — один select решает, какие строки свежие, и тот же select гонит orphan-свип (без перезаписи оставшихся). `writeInboxState`: один select `eventKey/state/wpId/item` — upsert только новых/изменившихся, dismissals применяются только к `state='open'` и только к реально отмеченным. `tab=search`: `cabinets.loadCasesByIds` (один `IN`-запрос) вместо `getCase` на каждый id очереди. Кэш карточек источника ограничен `cacheMaxEntries` (512): eviction протухших, затем старейших. Регрессии: `specialist-store.test.ts` (canonicalJson/comparableCardJson/profileRowMatches), `app.test.ts` «one bulk fetch» — `getCase` не вызывается, `loadCasesByIds` ровно один раз; `db.integration.test.ts` (под `TEST_DATABASE_URL`) — повторный save не трогает `updated_at` неизменённых строк inbox/profiles/cases/canonical, а изменённая карточка записывается.
 
 ### [x] R38 · P1 · У публичной авторизации нет явной защиты от перебора и массовых запросов
 

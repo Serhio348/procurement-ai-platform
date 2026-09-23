@@ -189,6 +189,7 @@ export function ProcurementsApp({
   cancelSearch,
   fetchCase,
   onCardLoaded,
+  notice: pushNotice,
 }: {
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
@@ -201,6 +202,7 @@ export function ProcurementsApp({
   cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
   fetchCase?: (id: string) => Promise<SpecialistProcurementCard>;
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
+  notice?: (title: string, message: string) => void;
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -407,19 +409,24 @@ export function ProcurementsApp({
         : undefined;
     if (kind === "participate") pullProgress();
     try {
-      const next = await decide(procurementId, kind);
-      const updated = next.find((item) => item.id === procurementId);
+      await decide(procurementId, kind);
       if (kind === "reject" || kind === "monitor" || kind === "participate") {
         const without = catalogItems.filter((item) => item.id !== procurementId);
         setCatalogItems(without);
         if (kind === "reject") {
           setNotice("Перемещено в корзину. Вернуть можно в разделе «Корзина».");
-        } else if (kind === "participate" && updated !== undefined) {
+          pushNotice?.("Корзина", `«${selected.title}» — перемещена в корзину.`);
+        } else if (kind === "participate") {
           setNotice(
             "Участвуем. Карточка в «Мои закупки». Документы скачиваются — можно открыть другой раздел.",
           );
+          pushNotice?.(
+            "Мои закупки",
+            `«${selected.title}» — участвуем, документы скачиваются.`,
+          );
         } else {
           setNotice("Отслеживаем. Карточка в «Мои закупки».");
+          pushNotice?.("Мои закупки", `«${selected.title}» — отслеживаем изменения.`);
         }
         const remaining = procurementsForProfile(
           without.filter(isSearchQueueCard),

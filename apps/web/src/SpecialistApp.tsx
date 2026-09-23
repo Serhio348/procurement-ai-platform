@@ -126,6 +126,15 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     setNotices((current) => current.filter((item) => item.id !== id));
   }, []);
 
+  // Actions that move a card out of the current list (participate, trash,
+  // archive) would otherwise look like the card disappeared.
+  const noticeSeq = useRef(0);
+  const pushNotice = useCallback((title: string, message: string) => {
+    noticeSeq.current += 1;
+    const id = `action-${String(noticeSeq.current)}`;
+    setNotices((current) => [...current, { id, title, message }]);
+  }, []);
+
   // Poll health (R28): three consecutive failures per channel raise a shared
   // connection note; the next successful poll clears it. Shown data stays.
   const pollFailures = useRef<Record<PollChannel, number>>({ inbox: 0, run: 0 });
@@ -616,6 +625,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(searchRun === undefined ? {} : { searchRun })}
               {...(cancelSearch === undefined ? {} : { cancelSearch })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
+              notice={pushNotice}
             />
           }
         />
@@ -640,6 +650,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               {...(props.loadCard === undefined ? {} : { fetchCase: props.loadCard })}
               onCardLoaded={rememberCard}
+              notice={pushNotice}
             />
           }
         />
@@ -655,6 +666,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 : { onRemove: async (id: string) => void decide(id, "reject") })}
               {...(props.listMine === undefined ? {} : { load: loadList })}
               activeIngest={ingestById}
+              notice={pushNotice}
             />
           }
         />
@@ -669,6 +681,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(purge === undefined ? {} : { onPurge: purge })}
               {...(emptyTrash === undefined ? {} : { onEmptyTrash: emptyTrash })}
               {...(props.listMine === undefined ? {} : { load: loadList })}
+              notice={pushNotice}
             />
           }
         />
@@ -685,6 +698,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               activeIngest={ingestById}
               {...(reindex === undefined ? {} : { reindex })}
+              notice={pushNotice}
             />
           }
         />
@@ -701,6 +715,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               activeIngest={ingestById}
               {...(reindex === undefined ? {} : { reindex })}
+              notice={pushNotice}
             />
           }
         />

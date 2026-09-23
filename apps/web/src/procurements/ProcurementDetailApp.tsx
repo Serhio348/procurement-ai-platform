@@ -35,6 +35,7 @@ export function ProcurementDetailApp({
   ingestProgress,
   activeIngest = {},
   reindex,
+  notice,
 }: {
   procurements: readonly SpecialistProcurementCard[];
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
@@ -45,13 +46,17 @@ export function ProcurementDetailApp({
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   activeIngest?: Record<string, SpecialistIngestProgress>;
   reindex?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
+  notice?: (title: string, message: string) => void;
 }): ReactElement {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const fromList = procurements.find((item) => item.id === id);
   const [fetched, setFetched] = useState<SpecialistProcurementCard | undefined>(undefined);
   const [missing, setMissing] = useState(false);
-  const stored = fromList ?? fetched;
+  // The full case wins over the list tile: tiles come from a slim SQL
+  // projection without documents/actions, so `fromList` alone would show
+  // «Документы (0)» forever on a case that actually has files (R50).
+  const stored = fetched ?? fromList;
   const [live, setLive] = useState<ProcedureCard | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -73,28 +78,22 @@ export function ProcurementDetailApp({
 
   useEffect(() => {
     setMissing(false);
-    if (id === undefined || fromList !== undefined || fetchCase === undefined) {
-      if (fromList !== undefined) setFetched(undefined);
-      return undefined;
-    }
-    let cancelled = false;
     setFetched(undefined);
-    void fetchCase(id)
+    if (id === undefined || fetchCaseRef.current === undefined) return undefined;
+    let cancelled = false;
+    void fetchCaseRef.current(id)
       .then((card) => {
         if (cancelled) return;
         setFetched(card);
-        onCardLoaded?.(card);
+        onCardLoadedRef.current?.(card);
       })
       .catch(() => {
-        if (!cancelled) {
-          setFetched(undefined);
-          setMissing(true);
-        }
+        if (!cancelled) setMissing(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [id, fromList, fetchCase, onCardLoaded]);
+  }, [id]);
 
   useEffect(() => {
     setLive(undefined);
@@ -151,6 +150,9 @@ export function ProcurementDetailApp({
       if (stored !== undefined && onCardLoaded !== undefined) {
         onCardLoaded({ ...stored, sourceCard: next });
       }
+      setFetched((current) =>
+        current === undefined ? current : { ...current, sourceCard: next },
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить карточку");
     } finally {
@@ -204,7 +206,19 @@ export function ProcurementDetailApp({
     try {
       const next = await decide(stored.id, kind);
       const updated = next.find((item) => item.id === stored.id);
-      if (updated !== undefined) onCardLoaded?.(updated);
+      if (updated !== undefined) {
+        setFetched(updated);
+        onCardLoaded?.(updated);
+      }
+      // A decided card leaves the search pane — say where it went instead
+      // of letting it vanish silently.
+      if (kind === "participate") {
+        notice?.("Мои закупки", `«${stored.title}» — участвуем, документы скачиваются.`);
+      } else if (kind === "monitor") {
+        notice?.("Мои закупки", `«${stored.title}» — отслеживаем изменения.`);
+      } else if (kind === "reject") {
+        notice?.("Корзина", `«${stored.title}» — перемещена в корзину.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить решение");
     } finally {
@@ -222,6 +236,7 @@ export function ProcurementDetailApp({
       const next = await restore(stored.id);
       const updated = next.find((item) => item.id === stored.id);
       if (updated !== undefined) onCardLoaded?.(updated);
+      notice?.("Мои закупки", `«${stored.title}» — возвращена из корзины.`);
       navigate(`/my-procurements/${stored.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось вернуть закупку");
@@ -235,6 +250,7 @@ export function ProcurementDetailApp({
     setTrashBusy("purge");
     try {
       await purge(stored.id);
+      notice?.("Корзина", `«${stored.title}» — удалена безвозвратно.`);
       navigate("/trash");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить закупку");

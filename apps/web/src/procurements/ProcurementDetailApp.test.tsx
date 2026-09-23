@@ -114,6 +114,58 @@ describe("ProcurementDetailApp", () => {
     });
   });
 
+  it("fetches the full case when the list tile carries no documents", async () => {
+    // Tile rows come from a slim SQL projection: documents/actions are
+    // stripped, so the detail must always pull the full case (R50).
+    const tile = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000402",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "participate",
+    });
+    const full = SpecialistProcurementCard.parse({
+      ...tile,
+      sourceCard: source,
+      documents: [
+        {
+          name: "ТЗ.docx",
+          sourceUrl: "https://goszakupki.by/files/1",
+          hash: "a".repeat(64),
+          status: "hashed",
+        },
+      ],
+    });
+    const fetchCase = vi.fn(async () => full);
+    const onCardLoaded = vi.fn();
+
+    render(
+      <MemoryRouter initialEntries={[`/my-procurements/${tile.id}`]}>
+        <Routes>
+          <Route
+            path="/my-procurements/:id"
+            element={
+              <ProcurementDetailApp
+                procurements={[tile]}
+                fetchCase={fetchCase}
+                onCardLoaded={onCardLoaded}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(fetchCase).toHaveBeenCalledWith(tile.id);
+    });
+    expect(await screen.findByText("Документы (1)")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "ТЗ.docx" })).toBeTruthy();
+    expect(onCardLoaded).toHaveBeenCalledWith(full);
+  });
+
   it("loads a case by id when the local list is empty", async () => {
     const card = SpecialistProcurementCard.parse({
       id: "92b439f2-0000-4000-8000-000000000402",
@@ -187,6 +239,44 @@ describe("ProcurementDetailApp", () => {
     );
     await user.click(screen.getByRole("button", { name: "Участвовать" }));
     expect(decide).toHaveBeenCalledWith(watching.id, "participate");
+  });
+
+  it("announces where the card went when the specialist participates", async () => {
+    const user = userEvent.setup();
+    const watching = SpecialistProcurementCard.parse({
+      id: "92b439f2-0000-4000-8000-000000000403",
+      title: "Реконструкция ВЛ-0,4 кВ от КТП-129",
+      status: "accepting_bids",
+      statusLabel: "Рассмотрение документов/сведений",
+      url: "https://goszakupki.by/request/view/3545600",
+      sourceProcurementId: "request/3545600",
+      triage: "monitor",
+      sourceCard: source,
+    });
+    const decide = vi.fn(async () => [{ ...watching, triage: "participate" as const }]);
+    const notice = vi.fn();
+
+    render(
+      <MemoryRouter initialEntries={[`/my-procurements/${watching.id}`]}>
+        <Routes>
+          <Route
+            path="/my-procurements/:id"
+            element={
+              <ProcurementDetailApp
+                procurements={[watching]}
+                decide={decide}
+                notice={notice}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Участвовать" }));
+    await waitFor(() => {
+      expect(notice).toHaveBeenCalledWith("Мои закупки", expect.stringContaining("участвуем"));
+    });
   });
 
   it("restores a trashed card back into Мои закупки", async () => {

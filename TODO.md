@@ -335,6 +335,14 @@
 - Исправлено: resolve возвращает полную карточку; `rememberCard` мержит через `mergeProcurementCards`; merge теперь сравнивает `sourceCard` по глубине (лоты/стороны/rawFields), а не по «определён ли» — полая проекция не затирает сохранённую.
 - Регрессии: `does not let a slimmed response hollow out the stored case` (SpecialistApp.merge.test.ts). [STAGE-96](docs/architecture/STAGE-96.md)
 
+### [x] R50 · P1 · Деталь «Моих закупок» показывала «Документы (0)» до ручного «Обновить»; действия с карточкой проходили молча
+
+**Воспроизведено на VPS.** «Участвовать» → индексация проходит → «Мои закупки» → деталь — документов 0; «Обновить» — появляются. Причина: список кабинета отдаёт slim-плитки (`tileCardExpression` вырезает `documents`), а `ProcurementDetailApp` брал `stored = fromList ?? fetched` и не запрашивал полную карточку, если плитка уже есть в state. Плюс «Участвовать»/«Убрать»/архив убирали карточку из списка без объяснения, куда она делась.
+
+- Где: [ProcurementDetailApp.tsx](apps/web/src/procurements/ProcurementDetailApp.tsx), [specialist-store.ts:900](packages/db/src/specialist-store.ts#L900).
+- Исправлено: деталь всегда догружает полную карточку через `fetchCase` (плитка — плейсхолдер), `stored = fetched ?? fromList`, мутации обновляют `fetched`. Тосты через `NoticeStack`: «Участвовать»/«Отслеживать» → «Мои закупки», «Не нужно»/«Убрать» → «Корзина», «Вернуть» → «Мои закупки», «Удалить» → удалена безвозвратно, архив/возврат из архива, очистка корзины — в ProcurementsApp, ProcurementDetailApp, MyProcurementsApp.
+- Регрессии: `fetches the full case when the list tile carries no documents`, `announces where the card went when the specialist participates` (ProcurementDetailApp.test.tsx). [STAGE-101](docs/architecture/STAGE-101.md)
+
 ## C. Продукт и UI
 
 ### [x] R27 · P1 · Длинные списки обрезаются без доступной пагинации

@@ -107,6 +107,7 @@
 - [`docs/architecture/STAGE-98.md`](docs/architecture/STAGE-98.md) — «Тревога» только на срочные записи; review-кандидат показывает профиль и `reviewReason` (R34)
 - [`docs/architecture/STAGE-99.md`](docs/architecture/STAGE-99.md) — контент-проб документов: sha256-проб одного файла на кейс за проход, diff по `contentHash`, `document_updated` запускает ingest у «Участвую» (R24)
 - [`docs/architecture/STAGE-100.md`](docs/architecture/STAGE-100.md) — отмена поиска: статус `cancelled`, `POST /api/procurements/search/cancel`, маркер для listing-in-flight; select профиля не блокируется, честный прогресс (R35)
+- [`docs/architecture/STAGE-101.md`](docs/architecture/STAGE-101.md) — деталь догружает полную карточку поверх slim-плитки («Документы (0)» исправлено); тосты «куда ушла карточка» на все перемещения (R50)
 
 ---
 

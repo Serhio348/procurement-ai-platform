@@ -179,6 +179,7 @@ export function MyProcurementsApp({
   now = () => new Date(),
   activeIngest = {},
   pageSize = MY_PROCUREMENTS_PAGE_SIZE,
+  notice,
 }: {
   procurements: readonly SpecialistProcurementCard[];
   section?: MyProcurementsSection;
@@ -192,6 +193,7 @@ export function MyProcurementsApp({
   now?: () => Date;
   activeIngest?: Record<string, SpecialistIngestProgress>;
   pageSize?: number;
+  notice?: (title: string, message: string) => void;
 }): ReactElement {
   const navigate = useNavigate();
   const today = now();
@@ -391,6 +393,22 @@ export function MyProcurementsApp({
     try {
       await action();
       setActionError(undefined);
+      // A removed/archived card vanishes from this list — the toast says
+      // where it went so the action never looks like data loss.
+      if (op === "remove") {
+        notice?.("Корзина", `«${item.title}» — перемещена в корзину.`);
+      } else if (op === "restore") {
+        notice?.("Мои закупки", `«${item.title}» — возвращена из корзины.`);
+      } else if (op === "purge") {
+        notice?.("Корзина", `«${item.title}» — удалена безвозвратно.`);
+      } else if (op === "archive") {
+        notice?.(
+          item.archived === true ? "Мои закупки" : "Архив",
+          item.archived === true
+            ? `«${item.title}» — возвращена из архива.`
+            : `«${item.title}» — перемещена в архив.`,
+        );
+      }
       if (!dropFromList && hasLoad) {
         patchItems((items) =>
           items.map((card) =>
@@ -414,6 +432,7 @@ export function MyProcurementsApp({
     try {
       await onEmptyTrash();
       setActionError(undefined);
+      notice?.("Корзина", "Корзина очищена — записи удалены безвозвратно.");
     } catch (error) {
       restoreItems("trash", snapshot);
       setActionError(errorText(error, "Не удалось очистить корзину."));

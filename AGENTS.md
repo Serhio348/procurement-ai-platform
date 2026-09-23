@@ -110,6 +110,7 @@
 - [`docs/architecture/STAGE-101.md`](docs/architecture/STAGE-101.md) — деталь догружает полную карточку поверх slim-плитки («Документы (0)» исправлено); тосты «куда ушла карточка» на все перемещения (R50)
 - [`docs/architecture/STAGE-102.md`](docs/architecture/STAGE-102.md) — «Скачать документы» во входящих: фоновый ingest вместо синхронного в POST, переход на карточку вместо `window.open`-пачки (R51)
 - [`docs/architecture/STAGE-103.md`](docs/architecture/STAGE-103.md) — архивы RAR/7z через 7z-wasm, CP1251-имена в ZIP, HTML-вместо-файла → `download_failed`, «скачать всё архивом» по data-url/onclick (R52)
+- [`docs/architecture/STAGE-104.md`](docs/architecture/STAGE-104.md) — модальное подтверждение: focus trap на Tab/Shift+Tab, возврат фокуса открывшей кнопке (R33)
 
 ---
 

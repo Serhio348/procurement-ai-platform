@@ -319,14 +319,19 @@ export class SpecialistWorkspace {
     return undefined;
   }
 
-  /** Kind to restore after «Убрать»: last Слежу/Участвую, otherwise Слежу. */
-  lastWorkingKind(sourceProcurementId: string): "monitor" | "participate" {
+  /**
+   * «Вернуть» из корзины снимает отказ, а не создаёт новое решение:
+   * кейс с прошлым monitor/participate всплывает со своим прежним этапом,
+   * отклонённый прямо из поиска кандидат возвращается неразобранным —
+   * слежение без явного выбора не включается (R36).
+   */
+  clearRejections(sourceProcurementId: string): void {
     for (let index = this.#decisions.length - 1; index >= 0; index -= 1) {
       const decision = this.#decisions[index];
-      if (decision?.sourceProcurementId !== sourceProcurementId) continue;
-      if (decision.kind === "monitor" || decision.kind === "participate") return decision.kind;
+      if (decision?.sourceProcurementId === sourceProcurementId && decision.kind === "reject") {
+        this.#decisions.splice(index, 1);
+      }
     }
-    return "monitor";
   }
 
   rejectedSourceIds(): Set<string> {

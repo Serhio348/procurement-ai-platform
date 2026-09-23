@@ -3996,6 +3996,61 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("restores a never-watched reject as an undecided candidate, not as monitor", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/trash-candidate",
+            url: "https://goszakupki.by/auction/view/trash-candidate",
+            title: "Кабель отклонённый кандидат",
+          }),
+        ],
+      },
+    });
+    const profileId = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileId}`,
+      payload: { name: "Кабель", keywords: ["кабель"] },
+    });
+    const searched = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId },
+    });
+    const id = (JSON.parse(searched.body).items as Array<{ id: string }>)[0]?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/decision`,
+      payload: { kind: "reject" },
+    });
+
+    const restored = await app.inject({
+      method: "POST",
+      url: `/api/procurements/${id}/restore`,
+    });
+    const restoredItem = (
+      JSON.parse(restored.body).items as Array<{ id: string; triage?: string }>
+    ).find((item) => item.id === id);
+    expect(restoredItem?.triage).toBeUndefined();
+
+    const mine = await app.inject({ method: "GET", url: "/api/procurements?tab=monitor" });
+    expect(JSON.parse(mine.body).items).toEqual([]);
+
+    const queue = await app.inject({
+      method: "GET",
+      url: `/api/procurements?tab=search&profileId=${profileId}`,
+    });
+    expect(
+      (JSON.parse(queue.body).items as Array<{ id: string }>).map((item) => item.id),
+    ).toContain(id);
+
+    await app.close();
+  });
+
   it("empties every rejected case from trash and keeps them out of search", async () => {
     const hits = [
       SearchHit.parse({

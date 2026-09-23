@@ -201,18 +201,22 @@ describe("search queue ids", () => {
   });
 });
 
-describe("lastWorkingKind", () => {
-  it("restores the last Слежу/Участвую after «Убрать», otherwise Слежу", () => {
+describe("clearRejections", () => {
+  it("resurfaces the earlier working decision, none means undecided", () => {
     const workspace = new SpecialistWorkspace();
-    expect(workspace.lastWorkingKind("auction/1")).toBe("monitor");
+    workspace.recordDecision("auction/1", "reject", "2026-09-09T10:00:00.000Z");
+    workspace.clearRejections("auction/1");
+    expect(workspace.latestKind("auction/1")).toBeUndefined();
 
     workspace.recordDecision("auction/1", "participate", "2026-09-10T10:00:00.000Z");
     workspace.recordDecision("auction/1", "reject", "2026-09-11T10:00:00.000Z");
-    expect(workspace.lastWorkingKind("auction/1")).toBe("participate");
+    workspace.clearRejections("auction/1");
+    expect(workspace.latestKind("auction/1")).toBe("participate");
 
     workspace.recordDecision("auction/1", "monitor", "2026-09-12T10:00:00.000Z");
     workspace.recordDecision("auction/1", "reject", "2026-09-13T10:00:00.000Z");
-    expect(workspace.lastWorkingKind("auction/1")).toBe("monitor");
+    workspace.clearRejections("auction/1");
+    expect(workspace.latestKind("auction/1")).toBe("monitor");
   });
 });
 

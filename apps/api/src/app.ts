@@ -2221,15 +2221,38 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card.triage !== "reject") {
       return reply.code(400).send({ error: "not_in_trash" });
     }
-    const kind = workspace().lastWorkingKind(card.sourceProcurementId);
-    workspace().recordDecision(card.sourceProcurementId, kind, clock());
+    // «Вернуть» снимает отказ, не создавая решения: прежний monitor/participate
+    // всплывает сам, отклонённый из поиска кандидат возвращается в очередь
+    // профиля неразобранным (R36).
+    workspace().clearRejections(card.sourceProcurementId);
     workspace().setArchived(card.sourceProcurementId, false);
-    const next = withTriage(card, workspace());
+    let next = withTriage(card, workspace());
+    if (next.triage === "reject") {
+      // No earlier monitor/participate survived: the case returns as an
+      // undecided candidate, so the stored reject mark is dropped too.
+      const undecided = { ...next };
+      delete undecided.triage;
+      next = SpecialistProcurementCard.parse(undecided);
+      for (const profileId of next.profileIds) {
+        workspace().appendSearchId(profileId, next.id);
+      }
+    }
+    if (next.triage === "monitor" || next.triage === "participate") {
+      // A restored working case needs the same hydration «Участвовать»
+      // performs, and a return to participate resumes the missed file ingest.
+      next = await hydrateSourceCard(next);
+      if (next.live !== true) {
+        next = SpecialistProcurementCard.parse({ ...next, live: true });
+      }
+    }
     catalog().upsertCase(next);
     await persistProgress([next.id]);
+    if (next.triage === "participate") {
+      startParticipateIngest(next);
+    }
     logger.info("Specialist case restored from trash", {
       sourceProcurementId: card.sourceProcurementId,
-      kind,
+      kind: next.triage ?? "candidate",
     });
     return SpecialistProcurementListResponse.parse({ items: [next] });
   });

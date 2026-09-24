@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpecialistWorkingProfile } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -347,13 +347,13 @@ describe("ProfileApp", () => {
     renderProfile(profile(), vi.fn(async () => profile()));
 
     await user.type(screen.getByLabelText("Название"), "Черновик");
-    await user.click(screen.getByRole("link", { name: "Входящие" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Входящие" }));
 
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("не сохранены"));
     expect(screen.getByText("Профиль направления")).toBeTruthy();
 
     confirm.mockReturnValue(true);
-    await user.click(screen.getByRole("link", { name: "Входящие" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Входящие" }));
     expect(screen.queryByText("Профиль направления")).toBeNull();
   });
 
@@ -363,7 +363,7 @@ describe("ProfileApp", () => {
 
     renderProfile(profile(), vi.fn(async () => profile()));
 
-    await user.click(screen.getByRole("link", { name: "Входящие" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Входящие" }));
 
     expect(confirm).not.toHaveBeenCalled();
     expect(screen.queryByText("Профиль направления")).toBeNull();

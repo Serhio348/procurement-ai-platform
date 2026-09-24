@@ -202,8 +202,8 @@ describe("InboxApp", () => {
 
     expect(screen.queryByText(/Тревога:/)).toBeNull();
     expect(screen.getAllByText("Новых изменений нет").length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Профили" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Корзина" })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Профили" })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Корзина" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Задачи/ })).toHaveProperty("disabled", true);
   });
 });

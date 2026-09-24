@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   InboxFixtureItem,
@@ -8,6 +8,11 @@ import {
 import { inboxItemFromFoundCard, SpecialistCatalog } from "@procurement/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpecialistApp } from "./SpecialistApp.js";
+
+// Drawer and bottom tab bar render the same section labels; nav assertions
+// target the drawer (aria-label «Разделы»).
+const sectionsNav = () =>
+  within(screen.getByRole("navigation", { name: "Разделы" }));
 
 const profile = SpecialistWorkingProfile.parse({
   id: "00000000-0000-4000-8000-000000000901",
@@ -123,7 +128,7 @@ describe("SpecialistApp search list", () => {
     await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
     expect(await screen.findByRole("button", { name: "Отслеживать" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "КТПБ из входящих" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
+    expect(sectionsNav().getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
   });
 
   it("opens a watched case from the inbox inside Мои закупки", async () => {
@@ -158,10 +163,10 @@ describe("SpecialistApp search list", () => {
 
     await vi.waitFor(() => {
       expect(
-        screen.getByRole("link", { name: "Мои закупки" }).className,
+        sectionsNav().getByRole("link", { name: "Мои закупки" }).className,
       ).toContain("nav-current");
     });
-    expect(screen.getByRole("link", { name: "Закупки" }).className).not.toContain("nav-current");
+    expect(sectionsNav().getByRole("link", { name: "Закупки" }).className).not.toContain("nav-current");
   });
 
   it("opening a foreign profile's inbox case does not claim it for the active profile", async () => {
@@ -201,7 +206,7 @@ describe("SpecialistApp search list", () => {
       await screen.findByRole("heading", { level: 2, name: "Чужая закупка из входящих" }),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole("link", { name: "Закупки" }));
+    await user.click(sectionsNav().getByRole("link", { name: "Закупки" }));
     // The active profile's queue shows only its own cards; the foreign
     // candidate keeps its origin profile instead of being claimed.
     expect(screen.queryByRole("button", { name: /Чужая закупка из входящих/ })).toBeNull();
@@ -310,7 +315,7 @@ describe("SpecialistApp search list", () => {
     // is attempted (browsers blocked the old window.open loop silently).
     await user.click(screen.getByRole("button", { name: "Скачать документы" }));
     await vi.waitFor(() => {
-      expect(screen.getByRole("link", { name: "Мои закупки" }).className).toContain(
+      expect(sectionsNav().getByRole("link", { name: "Мои закупки" }).className).toContain(
         "nav-current",
       );
     });

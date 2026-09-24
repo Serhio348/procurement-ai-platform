@@ -34,7 +34,7 @@ const TAB_ICONS = {
   search: "M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Z M15.2 15.2 20 20",
   mine: "M6 7h12v13H6z M9 7V5a3 3 0 0 1 6 0v2",
   profiles: "M12 8a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z M5 19c.8-3 3.5-4.5 7-4.5s6.2 1.5 7 4.5",
-  more: "M5 12h.01 M12 12h.01 M19 12h.01",
+  trash: "M5 7h14 M9 7V5h6v2 M7 7l1 13h8l1-13",
 } as const;
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -203,6 +203,11 @@ export function Shell({ children }: { children: ReactNode }) {
           >
             <path d="M4 7h16M4 12h16M4 17h16" />
           </svg>
+          {pending + errors > 0 ? (
+            <span className="nav-toggle-badge" aria-label="Требуют внимания">
+              {pending + errors}
+            </span>
+          ) : null}
         </button>
         <span className="shell-topbar-brand">
           <span className="nav-brand-mark">
@@ -285,18 +290,16 @@ export function Shell({ children }: { children: ReactNode }) {
           <TabIcon d={TAB_ICONS.profiles} />
           <span className="mobile-tab-label">Профили</span>
         </NavLink>
-        <button
-          type="button"
-          className="mobile-tab"
-          aria-label="Ещё разделы"
-          onClick={() => setNavOpen(true)}
+        <NavLink
+          to="/trash"
+          onClick={guardedClick}
+          className={({ isActive }) =>
+            isActive ? "mobile-tab is-current" : "mobile-tab"
+          }
         >
-          <TabIcon d={TAB_ICONS.more} />
-          <span className="mobile-tab-label">Ещё</span>
-          {pending + errors > 0 ? (
-            <span className="mobile-tab-badge">{pending + errors}</span>
-          ) : null}
-        </button>
+          <TabIcon d={TAB_ICONS.trash} />
+          <span className="mobile-tab-label">Корзина</span>
+        </NavLink>
       </nav>
     </div>
   );

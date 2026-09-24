@@ -116,7 +116,7 @@
 - [`docs/architecture/STAGE-107.md`](docs/architecture/STAGE-107.md) — единая актуальная спецификация очередей поиска и совместимости контрактов; STAGE-63/64/66 помечены историческими (R44)
 - [`docs/architecture/STAGE-108.md`](docs/architecture/STAGE-108.md) — инкрементальный persist: skip неизменённых карточек/профилей/verdicts/inbox по canonicalJson-сравнению, `loadCasesByIds` вместо N+1 в tab=search, ограниченный кэш источника (R37)
 - [`docs/architecture/STAGE-109.md`](docs/architecture/STAGE-109.md) — CI: verify на сервисном PostgreSQL (интеграционные тесты не скипаются) + Playwright e2e «вход → профиль → поиск → review → решение → reload» на выделенных портах (R41)
-- [`docs/architecture/STAGE-110.md`](docs/architecture/STAGE-110.md) — адаптивная вёрстка ≤768px: гибридная навигация (top bar ☰ + bottom tabs + drawer со всеми разделами), однопанельный list↔detail (карточка над списком по `:has()`/`is-triage-*`), тач-цели ≥44px, safe-area + мета для будущего PWA (R32)
+- [`docs/architecture/STAGE-110.md`](docs/architecture/STAGE-110.md) — адаптивная вёрстка ≤768px: гибридная навигация (top bar ☰ + bottom tabs 5 разделов + drawer со всеми разделами), однопанельный list↔detail (карточка над списком по `:has()`/`is-triage-*`), тач-цели ≥44px, safe-area + мета для будущего PWA (R32)
 
 ---
 

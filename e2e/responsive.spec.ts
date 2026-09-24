@@ -31,14 +31,15 @@ for (const width of [320, 390, 768]) {
     await signIn(page);
     await expectNoHorizontalOverflow(page);
 
-    // Bottom tab bar is present with the primary sections + «Ещё».
+    // Bottom tab bar holds the five primary sections; the ☰ button in the
+    // top bar is the only entry to the drawer — no duplicated menu.
     const tabs = page.locator(".mobile-tabs");
     await expect(tabs).toBeVisible();
     await expect(tabs.getByRole("link", { name: /Входящие/ })).toBeVisible();
     await expect(tabs.getByRole("link", { name: /Закупки/ })).toBeVisible();
     await expect(tabs.getByRole("link", { name: /Мои/ })).toBeVisible();
     await expect(tabs.getByRole("link", { name: /Профили/ })).toBeVisible();
-    await expect(tabs.getByRole("button", { name: /Ещё/ })).toBeVisible();
+    await expect(tabs.getByRole("link", { name: /Корзина/ })).toBeVisible();
 
     // The drawer stays off-canvas until opened.
     await expect(page.locator(".shell")).not.toHaveClass(/is-nav-open/);
@@ -50,14 +51,14 @@ for (const width of [320, 390, 768]) {
   });
 }
 
-test("responsive drawer at 390px: opens via «Ещё», closes via ✕ and backdrop", async ({
+test("responsive drawer at 390px: opens via ☰, closes via ✕ and backdrop", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await signIn(page);
 
-  // «Ещё» in the tab bar opens the drawer with the full section list.
-  await page.locator(".mobile-tabs").getByRole("button", { name: /Ещё/ }).click();
+  // ☰ in the top bar opens the drawer with the full section list.
+  await page.getByRole("button", { name: "Меню", exact: true }).click();
   const nav = page.locator(".nav");
   await expect(nav.getByRole("link", { name: "Корзина" })).toBeVisible();
   await expect(nav.getByRole("button", { name: "Выйти" })).toBeVisible();
@@ -67,7 +68,7 @@ test("responsive drawer at 390px: opens via «Ещё», closes via ✕ and backd
   await nav.getByRole("button", { name: "Закрыть меню" }).click();
   await expect(page.locator(".shell")).not.toHaveClass(/is-nav-open/);
 
-  // Hamburger in the top bar opens it; backdrop click closes it.
+  // Backdrop click closes it.
   await page.getByRole("button", { name: "Меню", exact: true }).click();
   await expect(nav.getByRole("link", { name: "Корзина" })).toBeVisible();
   await page.locator(".nav-backdrop").click({ position: { x: 340, y: 400 } });

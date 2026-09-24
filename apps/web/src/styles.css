@@ -2605,6 +2605,7 @@ h3 {
   }
 
   .nav-toggle {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2616,6 +2617,20 @@ h3 {
     background: transparent;
     color: #d5dae2;
     cursor: pointer;
+  }
+
+  .nav-toggle-badge {
+    position: absolute;
+    top: 6px;
+    right: 4px;
+    min-width: 17px;
+    padding: 1px 5px;
+    border-radius: 9px;
+    background: #a33b3b;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 650;
+    text-align: center;
   }
 
   .nav-toggle:hover {

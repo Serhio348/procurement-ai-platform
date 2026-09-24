@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProcedureCard, SpecialistIngestProgress, SpecialistProcurementCard } from "@procurement/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -313,7 +313,7 @@ describe("ProcurementDetailApp", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("link", { name: "Корзина" })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Корзина" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Отслеживать" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Вернуть в «Мои закупки»" }));
     expect(restore).toHaveBeenCalledWith(trashed.id);

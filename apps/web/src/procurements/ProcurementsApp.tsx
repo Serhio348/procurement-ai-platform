@@ -317,6 +317,20 @@ export function ProcurementsApp({
     };
   }, [requestedId, inQueue, inCatalog]);
   const selected = inQueue ?? inCatalog ?? fetched ?? items[0];
+  // R32: on narrow screens the card renders above the list — selecting a row
+  // deep in the list must bring the opened card (and its actions) into view.
+  const detailRef = useRef<HTMLElement>(null);
+  const selectedId = selected?.id;
+  useEffect(() => {
+    if (selectedId === undefined) return;
+    if (
+      typeof window.matchMedia !== "function" ||
+      !window.matchMedia("(max-width: 768px)").matches
+    ) {
+      return;
+    }
+    detailRef.current?.scrollIntoView({ block: "start" });
+  }, [selectedId]);
   const selectedKindLabel =
     selected === undefined ? undefined : cardProcedureKindLabel(selected);
   const ingestForSelected =
@@ -619,6 +633,7 @@ export function ProcurementsApp({
         </section>
 
         <section
+          ref={detailRef}
           className={
             selected?.triage === undefined ? "detail" : `detail is-triage-${selected.triage}`
           }

@@ -1,4 +1,9 @@
+import { useEffect, useRef } from "react";
 import type { SpecialistInboxAction, SpecialistInboxEntry } from "@procurement/contracts";
+
+const isNarrowViewport = () =>
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(max-width: 768px)").matches;
 
 export interface InboxPageProps {
   entries: readonly SpecialistInboxEntry[];
@@ -24,6 +29,15 @@ export function InboxPage(props: InboxPageProps) {
       group.key === "new" ? NEW_INBOX_TOPICS.has(entry.topic) : !NEW_INBOX_TOPICS.has(entry.topic),
     ),
   }));
+
+  // R32: on narrow screens the card renders above the list — tapping a row
+  // deep in the list must bring the opened card (and its actions) into view.
+  const detailRef = useRef<HTMLElement>(null);
+  const selectedId = selected?.id;
+  useEffect(() => {
+    if (selectedId === undefined || !isNarrowViewport()) return;
+    detailRef.current?.scrollIntoView({ block: "start" });
+  }, [selectedId]);
 
   return (
     <main className="workspace">
@@ -82,7 +96,7 @@ export function InboxPage(props: InboxPageProps) {
         )}
       </section>
 
-      <section className="detail" aria-labelledby="detail-heading">
+      <section ref={detailRef} className="detail" aria-labelledby="detail-heading">
         {selected === undefined ? (
           <>
             <h2 id="detail-heading">Закупка</h2>

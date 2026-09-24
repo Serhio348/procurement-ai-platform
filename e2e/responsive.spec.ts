@@ -89,7 +89,9 @@ test("responsive drawer at 390px: opens via ☰, closes via ✕ and backdrop", a
 test("responsive workspace at 390px: opened card renders above the list", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 800 });
+  // Short viewport: detail + list together exceed it, so the regression
+  // scenario (row tapped while scrolled down) is real.
+  await page.setViewportSize({ width: 390, height: 500 });
   await signIn(page);
 
   // Seed a review candidate via the fixture search (same setup as the
@@ -110,11 +112,20 @@ test("responsive workspace at 390px: opened card renders above the list", async 
   await expect(candidate.first()).toBeVisible({ timeout: 60_000 });
   await expectNoHorizontalOverflow(page);
 
-  // Open the entry — on a narrow screen the card is the primary panel and
-  // renders above the list; the action buttons stay reachable.
-  await candidate.first().click();
+  // Scroll the workspace to the bottom — the detail panel leaves the
+  // viewport, simulating a tap deep in the list.
+  await page
+    .locator(".workspace")
+    .evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(page.locator(".detail")).not.toBeInViewport();
+
+  // Tapping another row (the first candidate is auto-selected, so pick a
+  // different one) must bring the opened card and its actions back into
+  // view — no manual scrolling to the top.
+  await candidate.last().click();
   const detail = page.locator(".detail");
   await expect(detail).toBeVisible();
+  await expect(detail).toBeInViewport();
   const inbox = page.locator(".inbox");
   const [detailBox, inboxBox] = await Promise.all([
     detail.boundingBox(),

@@ -2489,3 +2489,196 @@ h3 {
   bottom: 64px;
   background: #7a4a12;
 }
+
+/* ==========================================================================
+   R32 · Мобильный режим (основа будущего PWA)
+   До 768px включительно:
+   - навигация сворачивается в горизонтальную прокручиваемую полосу сверху;
+   - workspace становится однопанельным: выбранная карточка показывается
+     первой (order:-1), список — под ней; страница прокручивается целиком;
+   - точки касания >= 44px;
+   - учитываются safe-area insets (вырез/жестовая зона) для установки как PWA.
+   ========================================================================== */
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  /* --- Верхняя навигационная полоса --- */
+  .nav {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    padding-top: calc(4px + env(safe-area-inset-top, 0px));
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid #151922;
+  }
+
+  .nav-brand {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin: 0 8px 0 0;
+    padding: 4px 8px 4px 0;
+    border-bottom: 0;
+    border-right: 1px solid #3a4354;
+  }
+
+  .nav-brand-mark,
+  .nav-brand-mark svg {
+    width: 30px;
+    height: 30px;
+  }
+
+  .nav-brand-text {
+    flex-direction: row;
+    gap: 4px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .nav nav {
+    flex-direction: row;
+    gap: 2px;
+  }
+
+  .nav-current,
+  .nav-link,
+  .nav-soon {
+    width: auto;
+    min-height: 44px;
+    padding: 10px 12px;
+    white-space: nowrap;
+    font-size: 14px;
+  }
+
+  .nav-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    margin: 0 0 0 auto;
+    padding: 4px 0 4px 10px;
+    border-top: 0;
+    border-left: 1px solid #3a4354;
+  }
+
+  .nav-user-role {
+    display: none;
+  }
+
+  .nav-sign-out {
+    margin-top: 0;
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  /* --- Однопанельный workspace: список и карточка прокручиваются вместе --- */
+  .workspace {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: auto;
+  }
+
+  .inbox,
+  .detail {
+    flex: none;
+    overflow: visible;
+    padding: 12px 16px 20px;
+  }
+
+  .inbox {
+    border-right: 0;
+  }
+
+  /* Открытая карточка — первой, список под ней.
+     ProcurementsApp помечает выбранную карточку классом is-triage-*;
+     во Входящих выбранное событие содержит .inbox-actions. */
+  .detail[class*="is-triage-"],
+  .detail:has(.inbox-actions) {
+    order: -1;
+    border-bottom: 8px solid #eef0f3;
+  }
+
+  .detail:not([class*="is-triage"]):not(:has(.inbox-actions)) {
+    display: none;
+  }
+
+  /* --- Тач-цели >= 44px --- */
+  .inbox-row {
+    min-height: 44px;
+    padding: 12px 10px 12px 8px;
+  }
+
+  .inbox-search select {
+    min-height: 40px;
+  }
+
+  .search-profile,
+  .triage-actions button,
+  .inbox-actions button,
+  .profile-actions button,
+  .doc-open {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  /* --- Страницы вне .workspace: компактнее отступы --- */
+  .profile-page,
+  .admin-workspace,
+  .my-procurements,
+  .procurement-detail {
+    padding: 16px;
+  }
+
+  .my-procurements-header {
+    flex-wrap: wrap;
+  }
+
+  .my-procurements-search {
+    width: 100%;
+  }
+
+  .procurement-detail-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 16px;
+  }
+
+  .procurement-detail-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: 8px;
+  }
+
+  .procurement-detail-list dt {
+    font-size: 12px;
+  }
+
+  /* --- Плавающие уведомления --- */
+  .toast {
+    top: auto;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    max-width: none;
+  }
+
+  .connection-stale {
+    right: 12px;
+    left: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: none;
+    max-width: none;
+  }
+
+  .service-degraded {
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+}

@@ -1,16 +1,27 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SpecialistInboxAction, SpecialistInboxEntry } from "@procurement/contracts";
+import { ConfirmToast } from "../shell/ConfirmToast.js";
 
 const isNarrowViewport = () =>
   typeof window.matchMedia === "function" &&
   window.matchMedia("(max-width: 768px)").matches;
 
+function pluralRu(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
 export interface InboxPageProps {
   entries: readonly SpecialistInboxEntry[];
   selectedId?: string;
   busyId?: string;
+  clearing?: boolean;
   onSelect?: (id: string) => void;
   onResolve?: (id: string, action: SpecialistInboxAction) => void;
+  onDismissAll?: () => void;
 }
 
 const NEW_INBOX_TOPICS = new Set(["new_found", "review"]);
@@ -39,8 +50,26 @@ export function InboxPage(props: InboxPageProps) {
     detailRef.current?.scrollIntoView({ block: "start" });
   }, [selectedId]);
 
+  const [confirmClear, setConfirmClear] = useState(false);
+
   return (
     <main className="workspace">
+      {confirmClear ? (
+        <ConfirmToast
+          confirmLabel="Очистить"
+          message={`Очистить входящие? ${props.entries.length} ${pluralRu(
+            props.entries.length,
+            "запись",
+            "записи",
+            "записей",
+          )} будет отмечено как разобранные — те же события повторно не появятся, новые изменения продолжат приходить.`}
+          onConfirm={() => {
+            setConfirmClear(false);
+            props.onDismissAll?.();
+          }}
+          onCancel={() => setConfirmClear(false)}
+        />
+      ) : null}
       <section className="inbox" aria-labelledby="inbox-heading">
         {props.entries.some((entry) => entry.urgent) ? (
           <p className="inbox-alarm" role="status">
@@ -52,7 +81,19 @@ export function InboxPage(props: InboxPageProps) {
             за вами
           </p>
         ) : null}
-        <h1 id="inbox-heading">Входящие</h1>
+        <div className="inbox-toolbar">
+          <h1 id="inbox-heading">Входящие</h1>
+          {props.entries.length === 0 || props.onDismissAll === undefined ? null : (
+            <button
+              type="button"
+              className="inbox-clear"
+              disabled={props.clearing === true}
+              onClick={() => setConfirmClear(true)}
+            >
+              {props.clearing === true ? "Очищаем…" : "Очистить всё"}
+            </button>
+          )}
+        </div>
         {props.entries.length === 0 ? (
           <p className="empty">Новых изменений нет</p>
         ) : (

@@ -6,15 +6,18 @@ import { InboxPage } from "./InboxPage.js";
 export function InboxApp({
   entries,
   onResolve,
+  onDismissAll,
 }: {
   entries: readonly SpecialistInboxEntry[];
   onResolve?: (
     id: string,
     action: SpecialistInboxAction,
   ) => Promise<void>;
+  onDismissAll?: () => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState<string | undefined>(entries[0]?.id);
   const [busyId, setBusyId] = useState<string | undefined>();
+  const [clearing, setClearing] = useState(false);
   const selected = entries.find((entry) => entry.id === selectedId) ?? entries[0];
 
   return (
@@ -23,7 +26,16 @@ export function InboxApp({
         entries={entries}
         {...(selected === undefined ? {} : { selectedId: selected.id })}
         {...(busyId === undefined ? {} : { busyId })}
+        {...(clearing ? { clearing: true } : {})}
         onSelect={setSelectedId}
+        {...(onDismissAll === undefined
+          ? {}
+          : {
+              onDismissAll: () => {
+                setClearing(true);
+                void onDismissAll().finally(() => setClearing(false));
+              },
+            })}
         {...(onResolve === undefined
           ? {}
           : {

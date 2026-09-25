@@ -66,6 +66,10 @@ export interface SpecialistAppProps {
   reindex?: (id: string) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   refreshInbox?: () => Promise<readonly SpecialistInboxEntry[]>;
+  dismissAllInbox?: () => Promise<{
+    items: readonly SpecialistInboxEntry[];
+    dismissed: number;
+  }>;
   resolveInbox?: (
     id: string,
     action: SpecialistInboxAction,
@@ -107,6 +111,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const setProfileWatch = props.setProfileWatch;
   const refreshInbox = props.refreshInbox;
   const resolveInbox = props.resolveInbox;
+  const dismissAllInbox = props.dismissAllInbox;
 
   // Every inbox swap goes through here: new ids are remembered once, and a
   // deadline event that just arrived also raises a passive toast.
@@ -544,6 +549,20 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           element={
             <InboxRoute
               entries={inbox}
+              {...(dismissAllInbox === undefined
+                ? {}
+                : {
+                    dismissAll: async () => {
+                      const result = await dismissAllInbox();
+                      applyInboxItems(result.items);
+                      if (result.dismissed > 0) {
+                        pushNotice(
+                          "Входящие очищены",
+                          `Разобрано ${result.dismissed} записей — те же события повторно не придут`,
+                        );
+                      }
+                    },
+                  })}
               {...(resolveInbox === undefined
                 ? {}
                 : {
@@ -765,17 +784,20 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
 function InboxRoute({
   entries,
   resolve,
+  dismissAll,
 }: {
   entries: readonly SpecialistInboxEntry[];
   resolve?: (
     id: string,
     action: SpecialistInboxAction,
   ) => Promise<SpecialistInboxResolveResponse>;
+  dismissAll?: () => Promise<void>;
 }): ReactElement {
   const navigate = useNavigate();
   return (
     <InboxApp
       entries={entries}
+      {...(dismissAll === undefined ? {} : { onDismissAll: dismissAll })}
       {...(resolve === undefined
         ? {}
         : {

@@ -17,6 +17,7 @@ import {
   purgeProcurement,
   emptyTrash,
   reindexProcurement,
+  dismissAllInbox,
   resolveInbox,
   restoreProcurement,
   saveProfile,
@@ -159,6 +160,7 @@ function LiveConsole() {
       reindex={reindexProcurement}
       ingestProgress={fetchIngestProgress}
       refreshInbox={fetchInbox}
+      dismissAllInbox={dismissAllInbox}
       resolveInbox={resolveInbox}
       listMine={fetchProcurements}
       loadCard={fetchProcurement}

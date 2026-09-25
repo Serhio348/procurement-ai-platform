@@ -127,6 +127,15 @@ export const SpecialistInboxListResponse = z.object({
 });
 export type SpecialistInboxListResponse = z.infer<typeof SpecialistInboxListResponse>;
 
+export const SpecialistInboxDismissAllResponse = z.object({
+  items: z.array(SpecialistInboxEntry),
+  /** How many open rows the clear marked as read. */
+  dismissed: z.number().int().min(0),
+});
+export type SpecialistInboxDismissAllResponse = z.infer<
+  typeof SpecialistInboxDismissAllResponse
+>;
+
 export const SpecialistInboxResolveWrite = z.object({
   action: SpecialistInboxAction,
 });

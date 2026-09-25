@@ -2751,6 +2751,7 @@ h3 {
   .search-profile,
   .triage-actions button,
   .inbox-actions button,
+  .inbox-clear,
   .profile-actions button,
   .doc-open {
     min-height: 44px;
@@ -2816,4 +2817,25 @@ h3 {
   .nav {
     transition: none;
   }
+}
+
+.inbox-clear {
+  flex: none;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: #8a1c1c;
+  background: #fde8e8;
+  border: 1px solid #efc4c4;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.inbox-clear:hover:not(:disabled) {
+  background: #f8d4d4;
+}
+
+.inbox-clear:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

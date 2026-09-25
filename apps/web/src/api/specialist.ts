@@ -1,5 +1,6 @@
 import {
   ProcedureCard,
+  SpecialistInboxDismissAllResponse,
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
@@ -11,6 +12,7 @@ import {
   SpecialistServiceHealth,
   SpecialistWorkingProfile,
   type SpecialistInboxAction,
+  type SpecialistInboxDismissAllResponse as SpecialistInboxDismissAllResponseValue,
   type SpecialistInboxEntry,
   type SpecialistInboxResolveResponse as SpecialistInboxResolveResponseValue,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
@@ -61,6 +63,19 @@ export async function deleteInbox(
     await throwApiError(response, "Не удалось удалить сообщение");
   }
   return SpecialistInboxListResponse.parse(await response.json()).items;
+}
+
+export async function dismissAllInbox(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistInboxDismissAllResponseValue> {
+  const response = await fetcher(
+    "/api/inbox/dismiss-all",
+    withCredentials({ method: "POST" }),
+  );
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось очистить входящие");
+  }
+  return SpecialistInboxDismissAllResponse.parse(await response.json());
 }
 
 export async function fetchProcurements(

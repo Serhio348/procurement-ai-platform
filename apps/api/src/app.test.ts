@@ -253,6 +253,61 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("clears the whole inbox and a re-posted event does not resurrect", async () => {
+    const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
+    const listed = await app.inject({ method: "GET", url: "/api/inbox" });
+    const ids = (JSON.parse(listed.body).items as Array<{ id: string }>).map(
+      (item) => item.id,
+    );
+    expect(ids.length).toBeGreaterThan(0);
+
+    // «Очистить всё» marks every open row read in one write and reports
+    // the count the console shows in the confirmation toast.
+    const cleared = await app.inject({
+      method: "POST",
+      url: "/api/inbox/dismiss-all",
+    });
+    expect(cleared.statusCode).toBe(200);
+    const clearedBody = JSON.parse(cleared.body) as {
+      items: unknown[];
+      dismissed: number;
+    };
+    expect(clearedBody.dismissed).toBe(ids.length);
+    expect(clearedBody.items).toHaveLength(0);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/inbox" })).body,
+    ).toContain('"items":[]');
+
+    // The same event re-recorded later stays a duplicate — clearing the
+    // inbox must not let old news come back.
+    const event = {
+      procurement: {
+        title: "Поставка КТПБ",
+        status: "cancelled",
+        url: "https://goszakupki.by/auction/view/001",
+        sourceProcurementId: "auction/001",
+      },
+      change: {
+        id: ids[0],
+        procurementId: "00000000-0000-4000-8000-000000000020",
+        kind: "status_changed",
+        previous: "accepting_bids",
+        current: "cancelled",
+        detectedAt: "2026-09-03T11:00:00.000Z",
+        urgent: true,
+      },
+    };
+    const reposted = await app.inject({
+      method: "POST",
+      url: "/api/inbox/events",
+      payload: event,
+    });
+    expect(reposted.statusCode).toBe(200);
+    expect(JSON.parse(reposted.body).items).toHaveLength(0);
+
+    await app.close();
+  });
+
   it("lists procurement cases including a non-urgent latest change", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
 

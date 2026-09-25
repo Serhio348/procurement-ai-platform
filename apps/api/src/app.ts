@@ -10,6 +10,7 @@ import {
   SpecialistServiceHealth,
   SpecialistDiscoveryResponse,
   SpecialistIngestProgress,
+  SpecialistInboxDismissAllResponse,
   SpecialistInboxEntry,
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
@@ -2117,6 +2118,24 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persist();
     return presentInbox();
+  });
+
+  // «Очистить всё»: every open row is marked read in one write. Dismissed
+  // rows keep their change id, so the same event re-recorded later stays a
+  // duplicate and cannot resurrect (a genuinely new change arrives with a
+  // new id and still shows up — clearing must not break watching).
+  app.post("/api/inbox/dismiss-all", async () => {
+    const ids = catalog()
+      .urgentInbox()
+      .map((entry) => entry.id);
+    catalog().dismissMany(ids);
+    workspace().setDismissedInboxIds(catalog().dismissedIds());
+    await persist();
+    logger.info("Specialist inbox cleared", { dismissed: ids.length });
+    return SpecialistInboxDismissAllResponse.parse({
+      items: presentInbox().items,
+      dismissed: ids.length,
+    });
   });
 
   app.post("/api/inbox/:id/resolve", async (request, reply) => {

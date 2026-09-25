@@ -206,4 +206,45 @@ describe("InboxApp", () => {
     expect(within(screen.getByRole("navigation", { name: "Разделы" })).getByRole("link", { name: "Корзина" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Задачи/ })).toHaveProperty("disabled", true);
   });
+
+  it("clears every inbox row only after the specialist confirms", async () => {
+    const user = userEvent.setup();
+    let dismissed = 0;
+    render(
+      <MemoryRouter>
+        <InboxAlertProvider count={2}>
+          <InboxApp
+            entries={SpecialistCatalog.parse(fixture).urgentInbox()}
+            onDismissAll={async () => {
+              dismissed += 1;
+            }}
+          />
+        </InboxAlertProvider>
+      </MemoryRouter>,
+    );
+
+    // The button exists only with rows and a wired handler; the confirm
+    // explains that read events cannot come back but new changes still can.
+    const clear = screen.getByRole("button", { name: "Очистить всё" });
+    await user.click(clear);
+    expect(screen.getByText(/будет отмечено как разобранные/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(dismissed).toBe(0);
+
+    await user.click(screen.getByRole("button", { name: "Очистить всё" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Очистить" }),
+    );
+    expect(dismissed).toBe(1);
+  });
+
+  it("does not offer the clear-all button without a handler or rows", () => {
+    render(
+      <MemoryRouter>
+        <InboxApp entries={[]} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: "Очистить всё" })).toBeNull();
+  });
 });

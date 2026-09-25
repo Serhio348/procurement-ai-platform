@@ -910,6 +910,20 @@ h3 {
   font-size: 13px;
 }
 
+.profile-assist {
+  background: #f4f7fb;
+  border-color: #c3d2e3;
+}
+
+.profile-assist-note {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #e8f0e6;
+  color: #2e5d2a;
+  font-size: 13px;
+}
+
 .profile-unsaved {
   margin: 0 0 12px;
   padding: 8px 12px;

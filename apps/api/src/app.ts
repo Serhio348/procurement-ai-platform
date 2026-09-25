@@ -3,7 +3,7 @@ import {
   AdminCabinetListResponse,
   InboxFixtureItem,
   ProcedureCard,
-  type SearchQuery,
+  SearchQuery,
   SpecialistArchiveWrite,
   SpecialistDecisionWrite,
   SpecialistDiscoveryHealthResponse,
@@ -20,6 +20,8 @@ import {
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistProfileSearchRequest,
+  SpecialistProfileSuggestRequest,
+  SpecialistProfileSuggestResponse,
   SpecialistProfileWrite,
   SpecialistSearchProgressQuery,
   SpecialistSearchRequest,
@@ -110,6 +112,7 @@ import { createSearchProgressHub } from "./search-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 import type { ReviewBudget, SpecialistReviewPort } from "./search-review.js";
+import type { ProfileSuggestPort } from "./profile-suggest.js";
 import type { SearchIntentPort } from "./search-intent.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -158,6 +161,10 @@ export interface BuildApiOptions {
   logger?: Logger;
   blobDirectory?: string;
   searchHits?: SpecialistSearchHitsPort;
+  /** Listing reads for the profile-draft probe; defaults to searchHits. */
+  suggestSearch?: SpecialistSearchHitsPort;
+  /** Free text → profile draft via the model. Absent: suggestion is off. */
+  profileSuggest?: ProfileSuggestPort;
   /** Second look at weak / keyword-less hits. Absent: they all wait in the inbox. */
   searchReview?: SpecialistReviewPort;
   /**
@@ -237,6 +244,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
+  const suggestSearch = options.suggestSearch ?? searchHits;
+  const profileSuggest = options.profileSuggest;
   const searchReview = options.searchReview;
   const searchIntent = options.searchIntent;
   const cardWatch = options.cardWatch;
@@ -1991,6 +2000,75 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     await persistWorkspaceOnly();
     logger.info("Specialist working profile created", { id: created.id });
     return SpecialistWorkingProfile.parse(created);
+  });
+
+
+  // AI-assisted profile drafting (R64): free text → model draft → real
+  // listing probe → refined draft. Stateless: the draft is only returned,
+  // saving stays a separate explicit PUT by the specialist.
+  app.post("/api/profiles/suggest", async (request, reply) => {
+    const parsed = SpecialistProfileSuggestRequest.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    if (profileSuggest === undefined) {
+      return reply.code(503).send({ error: "model_unavailable" });
+    }
+    try {
+      const first = await profileSuggest.draft(parsed.data.text);
+      let sampledTitles: string[] = [];
+      let grounded = false;
+      const probeTerms = first.probeTerms.slice(0, 3);
+      if (probeTerms.length > 0) {
+        try {
+          const pages = await Promise.all(
+            probeTerms.map((term) =>
+              suggestSearch.search(
+                SearchQuery.omit({ sourceId: true }).parse({ keywords: [term], limit: 25 }),
+              ),
+            ),
+          );
+          sampledTitles = [
+            ...new Set(pages.flatMap((hits) => hits.map((hit) => hit.title))),
+          ].slice(0, 40);
+          grounded = true;
+        } catch (error) {
+          // A dead source must not kill the suggestion — the draft simply
+          // stays ungrounded and the response says so.
+          logger.warn("Profile suggest listing probe failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      const refined = await profileSuggest.refine({
+        text: parsed.data.text,
+        draft: first,
+        sampledTitles,
+      });
+      logger.info("Specialist profile draft suggested", {
+        keywords: refined.keywords.length,
+        probeTerms: probeTerms.length,
+        grounded,
+      });
+      return SpecialistProfileSuggestResponse.parse({
+        draft: {
+          name: refined.name,
+          purpose: refined.purpose,
+          keywords: refined.keywords,
+          excludeKeywords: refined.excludeKeywords,
+          statuses: refined.statuses,
+          excludeSingleSource: refined.excludeSingleSource,
+        },
+        explanation: refined.explanation,
+        sampledTitles,
+        grounded,
+      });
+    } catch (error) {
+      logger.warn("Profile suggest failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return reply.code(502).send({ error: "suggest_failed" });
+    }
   });
 
   app.post("/api/profiles/:id/activate", async (request, reply) => {

@@ -308,6 +308,113 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("drafts a profile from free text and grounds it on real listing titles", async () => {
+    const probeTerms: string[] = [];
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      profileSuggest: {
+        draft: async () => ({
+          name: "КТП и сети",
+          purpose: "Поставка комплектных подстанций",
+          keywords: ["КТП"],
+          excludeKeywords: [],
+          statuses: ["accepting_bids"],
+          excludeSingleSource: false,
+          probeTerms: ["КТП"],
+          explanation: "Понял как поставку подстанций.",
+        }),
+        refine: async ({ draft, sampledTitles }) => ({
+          ...draft,
+          keywords: [...draft.keywords, "комплектная трансформаторная подстанция"],
+          excludeKeywords: ["монтаж"],
+          explanation: `Уточнено по ${sampledTitles.length} заголовкам.`,
+        }),
+      },
+      suggestSearch: {
+        search: async (query) => {
+          probeTerms.push(query.keywords.join(","));
+          return [
+            SearchHit.parse({
+              sourceId: "goszakupki_by",
+              sourceProcurementId: "auction/probe-1",
+              url: "https://goszakupki.by/auction/view/probe-1",
+              title: "КТП киоскового типа для сельского района",
+            }),
+          ];
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/profiles/suggest",
+      payload: { text: "Поставляем КТП и щитовое оборудование, монтаж не делаем" },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      draft: { keywords: string[]; excludeKeywords: string[]; statuses: string[] };
+      sampledTitles: string[];
+      grounded: boolean;
+      explanation: string;
+    };
+    expect(body.grounded).toBe(true);
+    expect(probeTerms).toEqual(["КТП"]);
+    expect(body.sampledTitles).toContain("КТП киоскового типа для сельского района");
+    expect(body.draft.keywords).toContain("комплектная трансформаторная подстанция");
+    expect(body.draft.excludeKeywords).toContain("монтаж");
+    expect(body.draft.statuses).toEqual(["accepting_bids"]);
+
+    await app.close();
+  });
+
+  it("returns an ungrounded draft when the listing probe fails", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      profileSuggest: {
+        draft: async () => ({
+          name: "НКУ",
+          purpose: "",
+          keywords: ["НКУ"],
+          excludeKeywords: [],
+          statuses: ["accepting_bids"],
+          excludeSingleSource: false,
+          probeTerms: ["НКУ"],
+          explanation: "Черновик.",
+        }),
+        refine: async ({ draft }) => draft,
+      },
+      suggestSearch: {
+        search: async () => {
+          throw new Error("source down");
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/profiles/suggest",
+      payload: { text: "Поставка НКУ" },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { grounded: boolean; draft: { keywords: string[] } };
+    expect(body.grounded).toBe(false);
+    expect(body.draft.keywords).toEqual(["НКУ"]);
+
+    await app.close();
+  });
+
+  it("answers 503 for a profile suggestion when the model is not configured", async () => {
+    const app = await buildSpecialistApi({ catalog: new SpecialistCatalog() });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/profiles/suggest",
+      payload: { text: "Поставка КТП" },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response.body).error).toBe("model_unavailable");
+    await app.close();
+  });
+
   it("lists procurement cases including a non-urgent latest change", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
 

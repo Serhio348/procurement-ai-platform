@@ -494,6 +494,36 @@ export const SpecialistProfileWrite = SpecialistWorkingProfile.omit({
 export type SpecialistProfileWrite = z.infer<typeof SpecialistProfileWrite>;
 
 /**
+ * AI-assisted profile drafting: the fields the model is allowed to propose.
+ * Filters and description stay manual; watch is never enabled by a draft.
+ */
+export const SpecialistProfileDraft = SpecialistProfileWrite.pick({
+  name: true,
+  purpose: true,
+  keywords: true,
+  excludeKeywords: true,
+  statuses: true,
+  excludeSingleSource: true,
+});
+export type SpecialistProfileDraft = z.infer<typeof SpecialistProfileDraft>;
+
+export const SpecialistProfileSuggestRequest = z.object({
+  text: z.string().trim().min(3).max(4000),
+});
+export type SpecialistProfileSuggestRequest = z.infer<typeof SpecialistProfileSuggestRequest>;
+
+export const SpecialistProfileSuggestResponse = z.object({
+  draft: SpecialistProfileDraft,
+  /** One paragraph in Russian: why these words and what the probe found. */
+  explanation: z.string().max(4000).default(""),
+  /** Real listing titles the draft was checked against — shown for trust. */
+  sampledTitles: z.array(z.string().min(1)).max(60).default([]),
+  /** false → the source probe did not run; the draft came from the text alone. */
+  grounded: z.boolean().default(false),
+});
+export type SpecialistProfileSuggestResponse = z.infer<typeof SpecialistProfileSuggestResponse>;
+
+/**
  * A hit the review step (card or model) confidently called irrelevant for a
  * profile. Remembered so the next pass does not spend a card fetch and a model
  * call on the same procedure again. Not a specialist decision.

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type {
   ProcedureStatus,
+  SpecialistProfileSuggestResponse,
   SpecialistProfileWrite,
   SpecialistWorkingProfile,
 } from "@procurement/contracts";
@@ -51,11 +52,13 @@ export function ProfileApp({
   activate,
   save,
   setWatch,
+  suggest,
 }: {
   profile: SpecialistWorkingProfile;
   activate?: (id: string) => Promise<SpecialistWorkingProfile>;
   save: (next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
   setWatch: (id: string, watchNewProcurements: boolean) => Promise<SpecialistWorkingProfile>;
+  suggest?: (text: string) => Promise<SpecialistProfileSuggestResponse>;
 }): ReactElement {
   const [profile, setProfile] = useState(initial);
   const [name, setName] = useState(initial.name);
@@ -69,6 +72,9 @@ export function ProfileApp({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
   const [tab, setTab] = useState<"profile" | "search">("profile");
+  const [assistText, setAssistText] = useState("");
+  const [assistBusy, setAssistBusy] = useState(false);
+  const [assistNote, setAssistNote] = useState<string | undefined>();
   const navigate = useNavigate();
   const untitled = initial.name.trim().length === 0;
   const activateRef = useRef(activate);
@@ -165,6 +171,45 @@ export function ProfileApp({
     }
   }
 
+  // AI draft (R64): fills the visible fields but never saves — the
+  // specialist reviews the chips and presses «Сохранить профиль».
+  async function fillFromSuggestion(): Promise<void> {
+    if (suggest === undefined || assistBusy) return;
+    const text = assistText.trim();
+    if (text.length < 3) return;
+    setAssistBusy(true);
+    try {
+      const result = await suggest(text);
+      if (name.trim() === "" && result.draft.name.trim() !== "") {
+        setName(result.draft.name);
+      }
+      if (purpose.trim() === "" && result.draft.purpose.trim() !== "") {
+        setPurpose(result.draft.purpose);
+      }
+      if (result.draft.keywords.length > 0) {
+        setKeywords(mergePhrases(keywords, result.draft.keywords));
+      }
+      if (result.draft.excludeKeywords.length > 0) {
+        setExcluded(
+          splitExcludeLines([excluded, ...result.draft.excludeKeywords].join("\n")).join("\n"),
+        );
+      }
+      if (result.draft.statuses.length > 0) {
+        setStatuses(result.draft.statuses);
+      }
+      setExcludeSingleSource(result.draft.excludeSingleSource);
+      setAssistNote(
+        result.grounded
+          ? `${result.explanation} Проверено по ${result.sampledTitles.length} реальным объявлениям — правьте и сохраните.`
+          : `${result.explanation} Черновик по тексту, выдачу площадки посмотреть не удалось — проверьте внимательнее.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Не удалось подобрать профиль.");
+    } finally {
+      setAssistBusy(false);
+    }
+  }
+
   async function toggleWatch(): Promise<void> {
     if (busy) return;
     setBusy(true);
@@ -212,6 +257,42 @@ export function ProfileApp({
             void saveProfile();
           }}
         >
+          {suggest === undefined ? null : (
+            <section className="profile-section profile-assist">
+              <label htmlFor="profile-assist-text">
+                Опишите направление своими словами
+              </label>
+              <p className="profile-hint">
+                Например: «Поставляем КТП и щитовое оборудование, монтаж не делаем» — система
+                посмотрит похожие закупки на площадке и заполнит поля черновиком.
+              </p>
+              <textarea
+                id="profile-assist-text"
+                rows={3}
+                value={assistText}
+                onChange={(event) => {
+                  setAssistText(event.target.value);
+                }}
+              />
+              <div className="profile-add-row">
+                <button
+                  type="button"
+                  className="profile-fill"
+                  disabled={busy || assistBusy || assistText.trim().length < 3}
+                  onClick={() => {
+                    void fillFromSuggestion();
+                  }}
+                >
+                  {assistBusy ? "Смотрю похожие закупки…" : "Заполнить профиль"}
+                </button>
+              </div>
+              {assistNote === undefined ? null : (
+                <p className="profile-assist-note" role="status">
+                  {assistNote}
+                </p>
+              )}
+            </section>
+          )}
           <section className="profile-section" aria-labelledby="profile-name">
             <label htmlFor="profile-name">Название</label>
             <input

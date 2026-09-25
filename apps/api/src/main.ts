@@ -17,6 +17,7 @@ import { recordJournal } from "./admin/journal.js";
 import { openSpecialistPersistence } from "./persist.js";
 import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
+import { createProfileSuggestFromEnv } from "./profile-suggest.js";
 import { createSearchClassifierFromEnv } from "./search-classifier.js";
 import { createSearchIntentFromEnv } from "./search-intent.js";
 import { createProcurementSearchReview } from "./search-review.js";
@@ -103,6 +104,17 @@ async function main(): Promise<void> {
           logger,
         });
   const commercialReader = createCommercialReaderFromEnv(process.env);
+  const profileSuggest = createProfileSuggestFromEnv(process.env);
+  // The listing probe answers on the interactive lane — a specialist waiting
+  // on «Заполнить профиль» must not queue behind background search/ingest.
+  const suggestSearch =
+    mcpInteractive === undefined
+      ? undefined
+      : createProcurementSearchHits({
+          caller: mcpInteractive.caller,
+          sourceId: SourceId.parse("goszakupki_by"),
+          logger,
+        });
   logger.info("Search intent configured", { model: searchIntent !== undefined });
   if (mcp !== undefined) {
     logger.info("Search review configured", { model: classifier !== undefined });
@@ -158,6 +170,8 @@ async function main(): Promise<void> {
     ...(searchHits === undefined ? {} : { searchHits }),
     ...(searchReview === undefined ? {} : { searchReview }),
     ...(searchIntent === undefined ? {} : { searchIntent }),
+    ...(profileSuggest === undefined ? {} : { profileSuggest }),
+    ...(suggestSearch === undefined ? {} : { suggestSearch }),
     ...(cardWatch === undefined ? {} : { cardWatch }),
     ...(monitorWatch === undefined ? {} : { monitorWatch }),
     ...(watchLimit === undefined ? {} : { watchLimit }),

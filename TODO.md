@@ -554,6 +554,14 @@
 - Тач-цель вкладок ≥44px на ≤768px (R32).
 - Регрессия: `splits new procurements from changes on watched cards` (InboxApp.test.tsx) проверяет обе вкладки и счётчики.
 
+### [x] R64 · P2 · Специалисту сложно заполнить профиль: слова и исключения придумываются вручную
+
+**Исправлено (этап 113).** На форме профиля поле «Опишите направление своими словами» + кнопка «Заполнить профиль»: модель строит черновик, проверяет его по реальной выдаче площадки (листинг-проб по ≤3 фразам на interactive-линии MCP) и уточняет слова под лексику заголовков.
+
+- `POST /api/profiles/suggest` — stateless, ничего не сохраняет: ответ `{ draft, explanation, sampledTitles, grounded }`; без модели — 503 `model_unavailable`, при падении пробы — черновик по тексту с `grounded:false`.
+- Форма заполняется без сохранения: название/назначение — только если пустые, слова/исключения — merge с дедупом, статусы и «единственный источник» — по черновику; dirty-флаг и «Сохранить» остаются за специалистом.
+- Регрессии: `drafts a profile from free text and grounds it on real listing titles`, `returns an ungrounded draft when the listing probe fails`, `answers 503 … model is not configured` (app.test.ts); `drafts the form from free text without saving it`, `shows the suggestion error` (ProfileApp.test.tsx); 3 unit-теста порта (profile-suggest.test.ts).
+
 ## Рекомендуемый порядок работы
 
 1. Зафиксировать регрессиями основные нарушения доверия: R01, R02, R05–R11, R13, R18.

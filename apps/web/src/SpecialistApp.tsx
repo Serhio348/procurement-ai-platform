@@ -11,6 +11,7 @@ import type {
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistProfileWrite,
+  SpecialistProfileSuggestResponse,
   SpecialistSearchResponse,
   SpecialistSearchRun,
   SpecialistServiceHealth,
@@ -48,6 +49,7 @@ export interface SpecialistAppProps {
   deleteProfile?: (id: string) => Promise<SpecialistProfileListResponse>;
   activateProfile?: (id: string) => Promise<SpecialistWorkingProfile>;
   saveProfile?: (id: string, next: SpecialistProfileWrite) => Promise<SpecialistWorkingProfile>;
+  suggestProfile?: (text: string) => Promise<SpecialistProfileSuggestResponse>;
   setProfileWatch?: (
     id: string,
     watchNewProcurements: boolean,
@@ -108,6 +110,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
   const createProfile = props.createProfile;
   const deleteProfile = props.deleteProfile;
   const saveProfile = props.saveProfile;
+  const suggestProfile = props.suggestProfile;
   const setProfileWatch = props.setProfileWatch;
   const refreshInbox = props.refreshInbox;
   const resolveInbox = props.resolveInbox;
@@ -652,6 +655,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 }
                 return remember(await saveProfile(id, next));
               }}
+              {...(suggestProfile === undefined ? {} : { suggest: suggestProfile })}
               setWatch={async (id, watchNewProcurements) => {
                 if (setProfileWatch === undefined) {
                   const current =
@@ -860,6 +864,7 @@ export function ProfileEditorRoute({
   activate,
   save,
   setWatch,
+  suggest,
 }: {
   profiles: readonly SpecialistWorkingProfile[];
   activate?: (id: string) => Promise<SpecialistWorkingProfile>;
@@ -868,6 +873,7 @@ export function ProfileEditorRoute({
     id: string,
     watchNewProcurements: boolean,
   ) => Promise<SpecialistWorkingProfile>;
+  suggest?: (text: string) => Promise<SpecialistProfileSuggestResponse>;
 }): ReactElement {
   const { id } = useParams();
   const profile = profiles.find((item) => item.id === id) ?? profiles[0];
@@ -879,6 +885,7 @@ export function ProfileEditorRoute({
       key={profile.id}
       profile={profile}
       {...(activate === undefined ? {} : { activate })}
+      {...(suggest === undefined ? {} : { suggest })}
       save={(next) => save(profile.id, next)}
       setWatch={setWatch}
     />

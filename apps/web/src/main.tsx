@@ -21,6 +21,7 @@ import {
   resolveInbox,
   restoreProcurement,
   saveProfile,
+  suggestProfile,
   searchProcurements,
   setProcurementArchived,
   setProfileWatch,
@@ -151,6 +152,7 @@ function LiveConsole() {
       deleteProfile={deleteProfile}
       activateProfile={activateProfile}
       saveProfile={saveProfile}
+      suggestProfile={suggestProfile}
       setProfileWatch={setProfileWatch}
       decide={decideProcurement}
       archive={setProcurementArchived}

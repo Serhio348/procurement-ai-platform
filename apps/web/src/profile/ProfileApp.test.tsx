@@ -52,6 +52,74 @@ function renderProfile(
 }
 
 describe("ProfileApp", () => {
+  it("drafts the form from free text without saving it", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => profile());
+    const suggest = vi.fn(async () => ({
+      draft: {
+        name: "КТП и сети",
+        purpose: "Поставка комплектных подстанций",
+        keywords: ["КТП", "комплектная трансформаторная подстанция"],
+        excludeKeywords: ["монтаж"],
+        statuses: ["accepting_bids" as const],
+        excludeSingleSource: false,
+      },
+      explanation: "Понял как поставку подстанций.",
+      sampledTitles: ["КТП киоскового типа для района"],
+      grounded: true,
+    }));
+
+    render(
+      <MemoryRouter>
+        <ProfileApp
+          profile={profile({ name: "", keywords: [] })}
+          save={save}
+          setWatch={vi.fn(async () => profile())}
+          suggest={suggest}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.type(
+      screen.getByLabelText("Опишите направление своими словами"),
+      "Поставляем КТП, монтаж не делаем",
+    );
+    await user.click(screen.getByRole("button", { name: "Заполнить профиль" }));
+
+    expect(suggest).toHaveBeenCalledWith("Поставляем КТП, монтаж не делаем");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("КТП и сети");
+    expect(
+      screen.getByRole("button", { name: "Убрать комплектная трансформаторная подстанция" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Убрать КТП" })).toBeTruthy();
+    expect(screen.getByText(/Проверено по 1 реальным объявлениям/)).toBeTruthy();
+    // The draft is reviewable, not auto-saved.
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByText(/Есть несохранённые изменения/)).toBeTruthy();
+  });
+
+  it("shows the suggestion error instead of failing silently", async () => {
+    const user = userEvent.setup();
+    const suggest = vi.fn(async () => {
+      throw new Error("Подсказка недоступна: модель не настроена");
+    });
+
+    render(
+      <MemoryRouter>
+        <ProfileApp
+          profile={profile({ name: "", keywords: [] })}
+          save={vi.fn(async () => profile())}
+          setWatch={vi.fn(async () => profile())}
+          suggest={suggest}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText("Опишите направление своими словами"), "КТП");
+    await user.click(screen.getByRole("button", { name: "Заполнить профиль" }));
+    expect(screen.getByText("Подсказка недоступна: модель не настроена")).toBeTruthy();
+  });
+
   it("opens empty fields without stock search words", () => {
     render(
       <MemoryRouter>

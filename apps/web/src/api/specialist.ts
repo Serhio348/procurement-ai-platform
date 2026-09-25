@@ -7,6 +7,7 @@ import {
   SpecialistProcurementCard,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
+  SpecialistProfileSuggestResponse,
   SpecialistSearchResponse,
   SpecialistSearchRun,
   SpecialistServiceHealth,
@@ -16,6 +17,7 @@ import {
   type SpecialistInboxEntry,
   type SpecialistInboxResolveResponse as SpecialistInboxResolveResponseValue,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistProfileSuggestResponse as SpecialistProfileSuggestResponseValue,
   type SpecialistProfileWrite,
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
   type SpecialistSearchRun as SpecialistSearchRunValue,
@@ -211,6 +213,29 @@ export async function activateProfile(
     await throwApiError(response, "Не удалось выбрать профиль");
   }
   return SpecialistWorkingProfile.parse(await response.json());
+}
+
+export async function suggestProfile(
+  text: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistProfileSuggestResponseValue> {
+  const response = await fetcher(
+    "/api/profiles/suggest",
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  );
+  if (!response.ok) {
+    await throwApiError(
+      response,
+      response.status === 503
+        ? "Подсказка недоступна: модель не настроена"
+        : "Не удалось подобрать профиль",
+    );
+  }
+  return SpecialistProfileSuggestResponse.parse(await response.json());
 }
 
 export async function saveProfile(

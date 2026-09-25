@@ -8,6 +8,18 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // The PWA service worker is a plain script in the serviceworker scope.
+    files: ["apps/web/public/sw.js"],
+    languageOptions: {
+      globals: {
+        self: "readonly",
+        caches: "readonly",
+        fetch: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.cjs"],
     languageOptions: {
       sourceType: "commonjs",

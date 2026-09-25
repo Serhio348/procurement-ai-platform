@@ -566,6 +566,10 @@
 
 **Исправлено.** `inferSearchIntentPlan` собирал `objects`/`required_context`/`desired_actions`/`excluded_actions` без ограничения, а `SearchIntentPlan` ограничивает каждую ось 20 элементами — профиль с >20 фразами ронял ручной поиск (502 `search_failed`). Теперь оси обрезаются до бюджета; `coercePlan` зажимает и ответ модели вместо сброса всего плана в fallback. Регрессия: `clips a wide profile to the axis budget instead of crashing` (intent-score.test.ts). Поймано на проде после «Заполнить профиль» (R64): подсказка добавила слова сверх лимита.
 
+### [x] R66 · P3 · Консоль не была PWA: без установки на телефон и быстрого запуска
+
+**Исправлено (этап 114).** `manifest.webmanifest` + иконки (192/512/maskable/apple-touch, повторяют boot-mark); service worker кэширует только app-shell (`/assets/` cache-first, навигации network-first → кэш), **`/api/` не кэшируется** — протухшие закупки и inbox недопустимы; регистрация SW только в prod-сборке. Офлайн-режим данных и Web Push — отдельные этапы. Регрессия: `pwa.test.ts` (manifest, иконки, исключение api из кэша).
+
 ## Рекомендуемый порядок работы
 
 1. Зафиксировать регрессиями основные нарушения доверия: R01, R02, R05–R11, R13, R18.

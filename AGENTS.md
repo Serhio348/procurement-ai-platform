@@ -120,6 +120,7 @@
 - [`docs/architecture/STAGE-111.md`](docs/architecture/STAGE-111.md) — «Очистить всё» во входящих: `POST /api/inbox/dismiss-all` + ConfirmToast; очищенное не воскресает (дедуп по стабильному `change.id`), новые изменения приходят (R62)
 - [`docs/architecture/STAGE-112.md`](docs/architecture/STAGE-112.md) — вкладки «Новые закупки»/«Изменения в моих закупках» во входящих вместо смешанных секций (R63)
 - [`docs/architecture/STAGE-113.md`](docs/architecture/STAGE-113.md) — «Заполнить профиль»: свободный текст → черновик модели, проверенный листинг-пробом по реальной выдаче, без автосохранения (R64)
+- [`docs/architecture/STAGE-114.md`](docs/architecture/STAGE-114.md) — PWA-оболочка: manifest, иконки, service worker кэширует только shell, `/api/` никогда не в кэше (R66)
 
 ---
 

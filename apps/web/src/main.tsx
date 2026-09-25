@@ -47,6 +47,15 @@ if (root === null) {
   throw new Error("Root element #root is missing");
 }
 
+// PWA shell: cached app shell for fast startup and an offline screen.
+// API responses are never cached — the console must not show stale
+// procurements or inbox rows.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
+
 createRoot(root).render(
   <StrictMode>
     <AuthSessionProvider>

@@ -106,12 +106,15 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
       pushUnique(excluded, action);
     }
   }
+  // A profile may hold up to 50 saved phrases while every plan axis is
+  // capped at 20 — a wide profile must degrade to a clipped plan instead of
+  // crashing the whole search on a ZodError (R65).
   return SearchIntentPlan.parse({
-    objects,
-    required_context: context,
+    objects: objects.slice(0, 20),
+    required_context: context.slice(0, 20),
     excluded_context: [],
-    desired_actions: desired,
-    excluded_actions: excluded,
+    desired_actions: desired.slice(0, 20),
+    excluded_actions: excluded.slice(0, 20),
     intent: lookingForWorks ? "works" : "equipment_purchase",
   });
 }
@@ -215,12 +218,16 @@ export function parseSearchIntentPlan(raw: unknown): SearchIntentPlanValue | und
 function coercePlan(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const row = raw as Record<string, unknown>;
+  // Clip overlong axes instead of dropping the whole model plan to fallback:
+  // the 20-item cap is a budget guard, not a validity property (R65).
+  const clip = (value: unknown): unknown =>
+    Array.isArray(value) ? value.slice(0, 20) : value;
   return {
-    objects: row["objects"] ?? row["equipment"],
-    required_context: row["required_context"] ?? row["requiredContext"] ?? row["context"],
-    excluded_context: row["excluded_context"] ?? row["excludedContext"],
-    desired_actions: row["desired_actions"] ?? row["desiredActions"],
-    excluded_actions: row["excluded_actions"] ?? row["excludedActions"],
+    objects: clip(row["objects"] ?? row["equipment"]),
+    required_context: clip(row["required_context"] ?? row["requiredContext"] ?? row["context"]),
+    excluded_context: clip(row["excluded_context"] ?? row["excludedContext"]),
+    desired_actions: clip(row["desired_actions"] ?? row["desiredActions"]),
+    excluded_actions: clip(row["excluded_actions"] ?? row["excludedActions"]),
     intent: row["intent"] ?? "equipment_purchase",
   };
 }

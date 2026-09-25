@@ -562,6 +562,10 @@
 - Форма заполняется без сохранения: название/назначение — только если пустые, слова/исключения — merge с дедупом, статусы и «единственный источник» — по черновику; dirty-флаг и «Сохранить» остаются за специалистом.
 - Регрессии: `drafts a profile from free text and grounds it on real listing titles`, `returns an ungrounded draft when the listing probe fails`, `answers 503 … model is not configured` (app.test.ts); `drafts the form from free text without saving it`, `shows the suggestion error` (ProfileApp.test.tsx); 3 unit-теста порта (profile-suggest.test.ts).
 
+### [x] R65 · P1 · Поиск падает ZodError, когда в профиле больше 20 фраз
+
+**Исправлено.** `inferSearchIntentPlan` собирал `objects`/`required_context`/`desired_actions`/`excluded_actions` без ограничения, а `SearchIntentPlan` ограничивает каждую ось 20 элементами — профиль с >20 фразами ронял ручной поиск (502 `search_failed`). Теперь оси обрезаются до бюджета; `coercePlan` зажимает и ответ модели вместо сброса всего плана в fallback. Регрессия: `clips a wide profile to the axis budget instead of crashing` (intent-score.test.ts). Поймано на проде после «Заполнить профиль» (R64): подсказка добавила слова сверх лимита.
+
 ## Рекомендуемый порядок работы
 
 1. Зафиксировать регрессиями основные нарушения доверия: R01, R02, R05–R11, R13, R18.

@@ -728,6 +728,21 @@ describe("inferSearchIntentPlan", () => {
     expect(plan.excluded_actions).toContain("монтаж");
     expect(plan.intent).toBe("equipment_purchase");
   });
+
+  it("clips a wide profile to the axis budget instead of crashing (R65)", () => {
+    // Profiles allow 50 phrases; every plan axis is capped at 20. A wide
+    // profile must produce a clipped plan, not a ZodError in the search path.
+    const keywords = Array.from({ length: 40 }, (_, i) => `щиток ${i + 1}`);
+    const plan = inferSearchIntentPlan({
+      name: "Оборудование водоподготовки",
+      keywords,
+      excludeKeywords: [],
+    });
+    expect(plan.objects.length).toBeLessThanOrEqual(20);
+    expect(plan.desired_actions.length).toBeLessThanOrEqual(20);
+    expect(plan.excluded_actions.length).toBeLessThanOrEqual(20);
+    expect(plan.objects[0]).toBe("щиток 1");
+  });
 });
 
 describe("extraPlatformSearchTerms", () => {

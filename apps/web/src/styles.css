@@ -478,6 +478,28 @@ h3 {
   margin: 16px 0 6px;
 }
 
+.inbox-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 14px;
+  flex-wrap: wrap;
+}
+
+.inbox-tab {
+  padding: 8px 14px;
+  border: 1px solid #d5dae2;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.inbox-tab-active {
+  background: #3a5d86;
+  color: #fff;
+  border-color: #3a5d86;
+}
+
 .inbox-list {
   list-style: none;
   margin: 0;
@@ -2752,6 +2774,7 @@ h3 {
   .triage-actions button,
   .inbox-actions button,
   .inbox-clear,
+  .inbox-tab,
   .profile-actions button,
   .doc-open {
     min-height: 44px;

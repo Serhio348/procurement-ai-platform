@@ -118,6 +118,7 @@
 - [`docs/architecture/STAGE-109.md`](docs/architecture/STAGE-109.md) — CI: verify на сервисном PostgreSQL (интеграционные тесты не скипаются) + Playwright e2e «вход → профиль → поиск → review → решение → reload» на выделенных портах (R41)
 - [`docs/architecture/STAGE-110.md`](docs/architecture/STAGE-110.md) — адаптивная вёрстка ≤768px: гибридная навигация (top bar ☰ + bottom tabs 5 разделов + drawer со всеми разделами), однопанельный list↔detail (карточка над списком по `:has()`/`is-triage-*`), тач-цели ≥44px, safe-area + мета для будущего PWA (R32)
 - [`docs/architecture/STAGE-111.md`](docs/architecture/STAGE-111.md) — «Очистить всё» во входящих: `POST /api/inbox/dismiss-all` + ConfirmToast; очищенное не воскресает (дедуп по стабильному `change.id`), новые изменения приходят (R62)
+- [`docs/architecture/STAGE-112.md`](docs/architecture/STAGE-112.md) — вкладки «Новые закупки»/«Изменения в моих закупках» во входящих вместо смешанных секций (R63)
 
 ---
 

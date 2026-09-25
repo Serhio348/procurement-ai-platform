@@ -27,19 +27,26 @@ export interface InboxPageProps {
 const NEW_INBOX_TOPICS = new Set(["new_found", "review"]);
 
 const INBOX_GROUPS = [
-  { key: "new", title: "Новые закупки" },
-  { key: "watched", title: "Изменения в моих закупках" },
+  { key: "new", title: "Новые закупки", empty: "Новых закупок нет" },
+  { key: "watched", title: "Изменения в моих закупках", empty: "Изменений в отслеживаемых закупках нет" },
 ] as const;
 
+type InboxGroupKey = (typeof INBOX_GROUPS)[number]["key"];
+
 export function InboxPage(props: InboxPageProps) {
-  const selected =
-    props.entries.find((entry) => entry.id === props.selectedId) ?? props.entries[0];
   const groups = INBOX_GROUPS.map((group) => ({
     ...group,
     entries: props.entries.filter((entry) =>
       group.key === "new" ? NEW_INBOX_TOPICS.has(entry.topic) : !NEW_INBOX_TOPICS.has(entry.topic),
     ),
   }));
+  const [tab, setTab] = useState<InboxGroupKey>(() =>
+    props.entries.some((entry) => NEW_INBOX_TOPICS.has(entry.topic)) ? "new" : "watched",
+  );
+  const activeGroup = groups.find((group) => group.key === tab) ?? groups[0]!;
+  const selected =
+    activeGroup.entries.find((entry) => entry.id === props.selectedId) ??
+    activeGroup.entries[0];
 
   // R32: on narrow screens the card renders above the list — tapping a row
   // deep in the list must bring the opened card (and its actions) into view.
@@ -94,46 +101,59 @@ export function InboxPage(props: InboxPageProps) {
             </button>
           )}
         </div>
-        {props.entries.length === 0 ? (
-          <p className="empty">Новых изменений нет</p>
+        <div className="inbox-tabs" role="tablist" aria-label="Разделы входящих">
+          {groups.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              role="tab"
+              aria-selected={activeGroup.key === group.key}
+              className={
+                activeGroup.key === group.key ? "inbox-tab inbox-tab-active" : "inbox-tab"
+              }
+              onClick={() => {
+                setTab(group.key);
+                const first = group.entries[0];
+                if (first !== undefined) {
+                  props.onSelect?.(first.id);
+                }
+              }}
+            >
+              {group.title} ({group.entries.length})
+            </button>
+          ))}
+        </div>
+        {activeGroup.entries.length === 0 ? (
+          <p className="empty">{activeGroup.empty}</p>
         ) : (
-          groups
-            .filter((group) => group.entries.length > 0)
-            .map((group) => (
-              <section key={group.key} aria-label={group.title}>
-                <h2 className="inbox-group">
-                  {group.title} ({group.entries.length})
-                </h2>
-                <ul className="inbox-list">
-                  {group.entries.map((entry) => {
-                    const isSelected = selected?.id === entry.id;
-                    return (
-                      <li key={entry.id}>
-                        <button
-                          type="button"
-                          className={isSelected ? "inbox-row is-selected" : "inbox-row"}
-                          aria-current={isSelected ? "true" : undefined}
-                          onClick={() => {
-                            props.onSelect?.(entry.id);
-                          }}
-                        >
-                          <span className="inbox-row-top">
-                            <span className="inbox-title">{entry.title}</span>
-                            <span className="inbox-marks">
-                              <span className={`inbox-topic is-${entry.topic}`}>
-                                {entry.topicLabel}
-                              </span>
-                            </span>
-                          </span>
-                          <span className="inbox-summary">{entry.summary}</span>
-                          <span className="inbox-date">{entry.detectedOn}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ))
+          <ul className="inbox-list">
+            {activeGroup.entries.map((entry) => {
+              const isSelected = selected?.id === entry.id;
+              return (
+                <li key={entry.id}>
+                  <button
+                    type="button"
+                    className={isSelected ? "inbox-row is-selected" : "inbox-row"}
+                    aria-current={isSelected ? "true" : undefined}
+                    onClick={() => {
+                      props.onSelect?.(entry.id);
+                    }}
+                  >
+                    <span className="inbox-row-top">
+                      <span className="inbox-title">{entry.title}</span>
+                      <span className="inbox-marks">
+                        <span className={`inbox-topic is-${entry.topic}`}>
+                          {entry.topicLabel}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="inbox-summary">{entry.summary}</span>
+                    <span className="inbox-date">{entry.detectedOn}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
 

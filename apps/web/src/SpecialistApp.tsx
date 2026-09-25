@@ -553,12 +553,19 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                 ? {}
                 : {
                     dismissAll: async () => {
-                      const result = await dismissAllInbox();
-                      applyInboxItems(result.items);
-                      if (result.dismissed > 0) {
+                      try {
+                        const result = await dismissAllInbox();
+                        applyInboxItems(result.items);
+                        if (result.dismissed > 0) {
+                          pushNotice(
+                            "Входящие очищены",
+                            `Разобрано ${result.dismissed} записей — те же события повторно не придут`,
+                          );
+                        }
+                      } catch (error) {
                         pushNotice(
-                          "Входящие очищены",
-                          `Разобрано ${result.dismissed} записей — те же события повторно не придут`,
+                          "Не удалось очистить входящие",
+                          error instanceof Error ? error.message : "Повторите попытку",
                         );
                       }
                     },

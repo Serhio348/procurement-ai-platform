@@ -5,6 +5,7 @@ import {
   activateProfile,
   cancelSearch,
   createProfile,
+  createTelegramLink,
   decideProcurement,
   deleteProfile,
   fetchInbox,
@@ -14,6 +15,7 @@ import {
   fetchProfiles,
   fetchSearchProgress,
   fetchServiceHealth,
+  fetchTelegramStatus,
   purgeProcurement,
   emptyTrash,
   reindexProcurement,
@@ -25,6 +27,8 @@ import {
   searchProcurements,
   setProcurementArchived,
   setProfileWatch,
+  setTelegramMode,
+  unlinkTelegram,
 } from "./api/specialist.js";
 import { AccessPendingPage } from "./auth/AccessPendingPage.js";
 import { AuthScreen } from "./auth/AuthScreen.js";
@@ -178,6 +182,12 @@ function LiveConsole() {
       searchProgress={fetchSearchProgress}
       cancelSearch={cancelSearch}
       serviceHealth={fetchServiceHealth}
+      telegram={{
+        status: fetchTelegramStatus,
+        link: createTelegramLink,
+        setMode: setTelegramMode,
+        unlink: unlinkTelegram,
+      }}
     />
   );
 }

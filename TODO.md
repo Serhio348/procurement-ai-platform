@@ -570,6 +570,16 @@
 
 **Исправлено (этап 114).** `manifest.webmanifest` + иконки (192/512/maskable/apple-touch, повторяют boot-mark); service worker кэширует только app-shell (`/assets/` cache-first, навигации network-first → кэш), **`/api/` не кэшируется** — протухшие закупки и inbox недопустимы; регистрация SW только в prod-сборке. Офлайн-режим данных и Web Push — отдельные этапы. Регрессия: `pwa.test.ts` (manifest, иконки, исключение api из кэша).
 
+### [x] R67 · P2 · Нет уведомлений на телефон: PWA-push требует домен и HTTPS
+
+**Исправлено (этап 115).** Полноценный Telegram-бот: push без домена/HTTPS — исходящий Bot API + long polling `getUpdates` (webhook невозможен без публичного HTTPS).
+
+- **Привязка**: «Профили → Подключить Telegram» создаёт одноразовый код (~10 мин) → deep-link `t.me/<bot>?start=<code>`; `/start <code>` связывает `chat_id` с пользователем. Таблицы `specialist_telegram` (ссылка user→chat, режим), `specialist_telegram_codes`, `specialist_telegram_sent` (дедуп отправки).
+- **Уведомления**: каждое записанное inbox-событие → сообщение с заголовком, сводкой изменения и кнопками «Открыть в консоли»/«Разобрано». Дедуп по `(workspace, change.id)` — маркер пишется до send, рестарт не дублирует. Режим «только срочные» пропускает несрочные события.
+- **Команды бота**: `/start`, `/new` (до 5 открытых событий), `/status`, `/urgent`, `/all`, `/stop`, `/help`. Кнопка «Разобрано» закрывает inbox-строку только у чата, привязанного к кабинету-владельцу события.
+- **API**: `GET /api/telegram`, `POST /api/telegram/link`, `POST /api/telegram/mode`, `DELETE /api/telegram`. Без `TELEGRAM_BOT_TOKEN` — `available:false`, ничего не падает; недоступный бот на старте — запись в журнал и `degraded` в `/api/health`.
+- Регрессии: `telegram.test.ts` (8 тестов: link/expiry/команды/дедуп/urgent/callback-авторизация), `app.telegram.test.ts` (endpoint'ы и анонс события), `TelegramConnect.test.tsx` (UI-потоки).
+
 ## Рекомендуемый порядок работы
 
 1. Зафиксировать регрессиями основные нарушения доверия: R01, R02, R05–R11, R13, R18.

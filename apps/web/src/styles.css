@@ -924,6 +924,32 @@ h3 {
   font-size: 13px;
 }
 
+.telegram-connect {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid #d5dae2;
+  border-radius: 8px;
+  background: #f4f7fb;
+}
+
+.telegram-connect h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.telegram-connect .profile-hint {
+  margin-bottom: 8px;
+}
+
+.telegram-disconnect {
+  width: auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
 .profile-unsaved {
   margin: 0 0 12px;
   padding: 8px 12px;

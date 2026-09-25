@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import type { SpecialistWorkingProfile } from "@procurement/contracts";
 import { profileDisplayName } from "@procurement/domain";
 import { Shell } from "../shell/Shell.js";
+import { TelegramConnect, type TelegramApi } from "./TelegramConnect.js";
 
 export function profileCreatedToast(name: string): string {
   return `Профиль «${name}» создан.`;
@@ -18,10 +19,12 @@ export function ProfileList({
   profiles,
   create,
   remove,
+  telegram,
 }: {
   profiles: readonly SpecialistWorkingProfile[];
   create: () => Promise<void>;
   remove?: (id: string) => Promise<void>;
+  telegram?: TelegramApi;
 }) {
   const location = useLocation();
   const incoming = profileListToast(location.state);
@@ -73,6 +76,7 @@ export function ProfileList({
           Каждое направление — свой профиль и своё слежение. На вкладке
           «Закупки» выберите профиль и нажмите «Искать по профилю».
         </p>
+        {telegram === undefined ? null : <TelegramConnect api={telegram} />}
         {!canRemove ? (
           <p className="profile-hint">
             Единственный профиль удалить нельзя — сначала создайте другой через

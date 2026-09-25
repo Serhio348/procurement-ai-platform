@@ -32,6 +32,7 @@ import { ProcurementDetailApp } from "./procurements/ProcurementDetailApp.js";
 import { ProcurementsApp } from "./procurements/ProcurementsApp.js";
 import { ProfileApp } from "./profile/ProfileApp.js";
 import { ProfileList } from "./profile/ProfileList.js";
+import type { TelegramApi } from "./profile/TelegramConnect.js";
 import { NoticeStack, type InboxNotice } from "./shell/NoticeToast.js";
 import { UnsavedGuardProvider } from "./shell/UnsavedGuard.js";
 
@@ -86,6 +87,7 @@ export interface SpecialistAppProps {
   searchProgress?: (profileId: string) => Promise<SpecialistSearchRun>;
   cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
   serviceHealth?: () => Promise<SpecialistServiceHealth>;
+  telegram?: TelegramApi | undefined;
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -605,6 +607,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           element={
             <ProfileListRoute
               profiles={profiles}
+              telegram={props.telegram}
               create={async () => {
                 if (createProfile === undefined) return undefined;
                 return remember(await createProfile(), true);
@@ -841,10 +844,12 @@ function ProfileListRoute({
   profiles,
   create,
   remove,
+  telegram,
 }: {
   profiles: readonly SpecialistWorkingProfile[];
   create: () => Promise<SpecialistWorkingProfile | undefined>;
   remove?: (id: string) => Promise<void>;
+  telegram?: TelegramApi | undefined;
 }): ReactElement {
   const navigate = useNavigate();
   return (
@@ -855,6 +860,7 @@ function ProfileListRoute({
         if (created !== undefined) navigate(`/profiles/${created.id}`);
       }}
       {...(remove === undefined ? {} : { remove })}
+      {...(telegram === undefined ? {} : { telegram })}
     />
   );
 }

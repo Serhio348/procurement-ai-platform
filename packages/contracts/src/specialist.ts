@@ -136,6 +136,29 @@ export type SpecialistInboxDismissAllResponse = z.infer<
   typeof SpecialistInboxDismissAllResponse
 >;
 
+/** Telegram link of the signed-in specialist — set up from the console. */
+export const SpecialistTelegramStatus = z.object({
+  /** Bot is configured on the server; without it linking is impossible. */
+  available: z.boolean(),
+  linked: z.boolean(),
+  username: z.string().optional(),
+  mode: z.enum(["all", "urgent"]).optional(),
+});
+export type SpecialistTelegramStatus = z.infer<typeof SpecialistTelegramStatus>;
+
+export const SpecialistTelegramLinkResponse = z.object({
+  code: z.string().min(1),
+  /** t.me deep link with the one-time code; absent until the bot name is known. */
+  url: z.string().url().optional(),
+  expiresInSec: z.number().int().min(1),
+});
+export type SpecialistTelegramLinkResponse = z.infer<typeof SpecialistTelegramLinkResponse>;
+
+export const SpecialistTelegramModeWrite = z.object({
+  mode: z.enum(["all", "urgent"]),
+});
+export type SpecialistTelegramModeWrite = z.infer<typeof SpecialistTelegramModeWrite>;
+
 export const SpecialistInboxResolveWrite = z.object({
   action: SpecialistInboxAction,
 });
@@ -672,6 +695,7 @@ export const SpecialistServiceHealth = z.object({
       commercialReader: z.boolean(),
     }),
     mail: z.boolean(),
+    telegram: z.boolean(),
   }),
   /** Human-readable names of missing/failed capabilities. */
   degraded: z.array(z.string().min(1)),

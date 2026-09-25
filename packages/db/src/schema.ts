@@ -1032,3 +1032,57 @@ export const workspaceBackfillRuns = pgTable("workspace_backfill_runs", {
   id: varchar("id", { length: 64 }).primaryKey(),
   appliedAt: timestamptz("applied_at").notNull().defaultNow(),
 });
+
+/**
+ * Telegram link of one console user: chat_id is the delivery address, mode
+ * filters which inbox topics reach the chat. Personal cabinets only —
+ * workspace membership is not consulted.
+ */
+export const specialistTelegram = pgTable(
+  "specialist_telegram",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    chatId: varchar("chat_id", { length: 32 }).notNull(),
+    username: varchar("username", { length: 64 }),
+    /** "all" — every urgent inbox event; "urgent" — deadlines/watch changes only. */
+    mode: varchar("mode", { length: 16 }).notNull().default("all"),
+    linkedAt: timestamptz("linked_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("specialist_telegram_chat_uq").on(table.chatId)],
+);
+
+/** One-time link codes issued by POST /api/telegram/link; consumed on /start. */
+export const specialistTelegramCodes = pgTable(
+  "specialist_telegram_codes",
+  {
+    code: varchar("code", { length: 32 }).primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    expiresAt: timestamptz("expires_at").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("specialist_telegram_codes_user_idx").on(table.userId)],
+);
+
+/**
+ * At-most-once delivery marker: an inbox event already announced in Telegram
+ * never repeats after a restart, and a row dismissed before dispatch is not
+ * announced late.
+ */
+export const specialistTelegramSent = pgTable(
+  "specialist_telegram_sent",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    eventKey: varchar("event_key", { length: 255 }).notNull(),
+    sentAt: timestamptz("sent_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("specialist_telegram_sent_uq").on(table.workspaceId, table.eventKey),
+  ],
+);

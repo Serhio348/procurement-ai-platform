@@ -121,6 +121,7 @@
 - [`docs/architecture/STAGE-112.md`](docs/architecture/STAGE-112.md) — вкладки «Новые закупки»/«Изменения в моих закупках» во входящих вместо смешанных секций (R63)
 - [`docs/architecture/STAGE-113.md`](docs/architecture/STAGE-113.md) — «Заполнить профиль»: свободный текст → черновик модели, проверенный листинг-пробом по реальной выдаче, без автосохранения (R64)
 - [`docs/architecture/STAGE-114.md`](docs/architecture/STAGE-114.md) — PWA-оболочка: manifest, иконки, service worker кэширует только shell, `/api/` никогда не в кэше (R66)
+- [`docs/architecture/STAGE-115.md`](docs/architecture/STAGE-115.md) — Telegram-бот: push без домена через long polling, одноразовые коды привязки, inbox→chat с дедупом, команды и кнопки «Разобрано» (R67)
 
 ---
 

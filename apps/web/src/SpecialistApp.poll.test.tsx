@@ -98,6 +98,7 @@ describe("SpecialistApp service health banner (R42)", () => {
       objectStore: "minio",
       models: { searchIntent: true, classifier: true, commercialReader: true },
       mail: true,
+      telegram: false,
     },
     degraded: ["PostgreSQL"],
   });

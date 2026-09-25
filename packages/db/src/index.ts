@@ -4,5 +4,6 @@ export * from "./migrate.js";
 export * from "./repositories.js";
 export * from "./schema.js";
 export * from "./specialist-store.js";
+export * from "./telegram-store.js";
 export * from "./workspace-backfill.js";
 export * from "./workspace-scope.js";

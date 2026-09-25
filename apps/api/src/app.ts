@@ -15,6 +15,9 @@ import {
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
   SpecialistInboxResolveWrite,
+  SpecialistTelegramLinkResponse,
+  SpecialistTelegramModeWrite,
+  SpecialistTelegramStatus,
   SpecialistProcurementCard,
   SpecialistProcurementListQuery,
   SpecialistProcurementListResponse,
@@ -114,6 +117,7 @@ import type { BlobStore } from "./object-store.js";
 import type { ReviewBudget, SpecialistReviewPort } from "./search-review.js";
 import type { ProfileSuggestPort } from "./profile-suggest.js";
 import type { SearchIntentPort } from "./search-intent.js";
+import type { TelegramNotifier } from "./telegram.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createMemoryCabinetRegistry,
@@ -200,6 +204,8 @@ export interface BuildApiOptions {
   searchProgress?: ReturnType<typeof createSearchProgressHub>;
   authDirectory?: AuthDirectory;
   authMail?: AuthMailPort;
+  /** Telegram bot: inbox announcements + link/unlink endpoints. Absent: off. */
+  telegram?: TelegramNotifier;
   authCookieSecure?: boolean;
   authPublicUrl?: string;
   internalApiToken?: string;
@@ -218,6 +224,10 @@ export interface BuildApiOptions {
     source?: { background: boolean; interactive: boolean };
     models?: { searchIntent: boolean; classifier: boolean; commercialReader: boolean };
     mail?: boolean;
+    /** Bot token set and getMe answered. */
+    telegram?: boolean;
+    /** Token set but the bot API is unreachable — degraded, not silent. */
+    telegramFailed?: boolean;
     postgresConfigured?: boolean;
     postgresPing?: () => Promise<boolean>;
   };
@@ -851,8 +861,24 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return { card: owned, isNew: existing === undefined };
   }
 
+  /**
+   * Records an inbox event and announces it in Telegram when the owner linked
+   * a chat. Fire-and-forget: a bot/network failure must not break the flow
+   * that created the event — the console inbox is the durable list.
+   */
+  function recordInbox(item: InboxFixtureItemValue): {
+    duplicate: boolean;
+    item: InboxFixtureItemValue;
+  } {
+    const recorded = catalog().record(item);
+    if (!recorded.duplicate && options.telegram !== undefined) {
+      void options.telegram.notifyInbox(currentCabinet().workspaceId, recorded.item);
+    }
+    return recorded;
+  }
+
   function queueFoundInbox(card: SpecialistProcurementCardValue, now: string): void {
-    const recorded = catalog().record(inboxItemFromFoundCard(card, now));
+    const recorded = recordInbox(inboxItemFromFoundCard(card, now));
     if (recorded.duplicate) catalog().undismiss(recorded.item.change.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
   }
@@ -1165,7 +1191,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         workspace().appendSearchId(profile.id, remembered.card.id);
         catalog().dismissByProcurementId(item.card.id);
         if (scoring.inboxForMatches && remembered.isNew) {
-          catalog().record(inboxItemFromFoundCard(profileView, now));
+          recordInbox(inboxItemFromFoundCard(profileView, now));
         }
       } else {
         ambiguousCount += 1;
@@ -1416,7 +1442,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       // re-reported; its values still reach the card (R25).
       const item = options?.suppressTransitions?.has(watchTransitionKey(built.change))
         ? built
-        : catalog().record(built).item;
+        : recordInbox(built).item;
       next = withTriage(applyInboxChangeToCard(next, item.change), workspace());
       next = applySourceCard(next, fresh, now);
     }
@@ -1872,6 +1898,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!models.classifier) degraded.push("Модель: оценка карточек");
     if (!models.commercialReader) degraded.push("Модель: чтение условий");
     if (health?.mail !== true) degraded.push("Почта");
+    if (health?.telegramFailed === true) degraded.push("Telegram");
     const ready =
       postgres !== "failed" &&
       source !== "off" &&
@@ -1889,6 +1916,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         objectStore: health?.objectStore ?? "unknown",
         models,
         mail: health?.mail === true,
+        telegram: health?.telegram === true,
       },
       degraded,
       discovery: discoveryController.health(await watchingProfilesCount()),
@@ -2177,7 +2205,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request" });
     }
-    const recorded = catalog().record(parsed.data);
+    const recorded = recordInbox(parsed.data);
     logger.info("Specialist inbox event recorded", {
       duplicate: recorded.duplicate,
       changeId: recorded.item.change.id,
@@ -2213,6 +2241,45 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return SpecialistInboxDismissAllResponse.parse({
       items: presentInbox().items,
       dismissed: ids.length,
+    });
+  });
+
+  // Telegram link management: codes are one-time and short-lived; the bot
+  // talks to Telegram itself through getUpdates polling, no webhook needed.
+  app.get("/api/telegram", async (request) => {
+    if (options.telegram === undefined) {
+      return SpecialistTelegramStatus.parse({ available: false, linked: false });
+    }
+    const status = await options.telegram.status(request.principal?.userId ?? "");
+    return SpecialistTelegramStatus.parse({ available: true, ...status });
+  });
+
+  app.post("/api/telegram/link", async (request, reply) => {
+    if (options.telegram === undefined) {
+      return reply.code(503).send({ error: "telegram_unavailable" });
+    }
+    const created = await options.telegram.createLinkCode(request.principal?.userId ?? "");
+    return SpecialistTelegramLinkResponse.parse(created);
+  });
+
+  app.post("/api/telegram/mode", async (request, reply) => {
+    if (options.telegram === undefined) {
+      return reply.code(503).send({ error: "telegram_unavailable" });
+    }
+    const parsed = SpecialistTelegramModeWrite.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    await options.telegram.setMode(request.principal?.userId ?? "", parsed.data.mode);
+    const status = await options.telegram.status(request.principal?.userId ?? "");
+    return SpecialistTelegramStatus.parse({ available: true, ...status });
+  });
+
+  app.delete("/api/telegram", async (request) => {
+    if (options.telegram !== undefined) {
+      await options.telegram.unlink(request.principal?.userId ?? "");
+    }
+    return SpecialistTelegramStatus.parse({
+      available: options.telegram !== undefined,
+      linked: false,
     });
   });
 

@@ -46,6 +46,8 @@ export interface SpecialistPersistence {
   postgres: boolean;
   /** DATABASE_URL was set — PostgreSQL is the required system of record. */
   postgresConfigured: boolean;
+  /** Raw drizzle handle for satellite stores (telegram links); absent on disk mode. */
+  db?: Database | undefined;
   /** Live reachability check: the boot flag alone lies after a later outage. */
   ping: () => Promise<boolean>;
   authDirectory: AuthDirectory;
@@ -656,6 +658,8 @@ export async function openSpecialistPersistence(options: {
     workspace: fileWorkspace,
     postgres: store !== undefined,
     postgresConfigured: configuredUrl.length > 0,
+    /** Raw drizzle handle for satellite stores (telegram links). */
+    db: connected?.db,
     async ping() {
       if (connected === undefined) return configuredUrl.length === 0;
       try {

@@ -11,6 +11,8 @@ import {
   SpecialistSearchResponse,
   SpecialistSearchRun,
   SpecialistServiceHealth,
+  SpecialistTelegramLinkResponse,
+  SpecialistTelegramStatus,
   SpecialistWorkingProfile,
   type SpecialistInboxAction,
   type SpecialistInboxDismissAllResponse as SpecialistInboxDismissAllResponseValue,
@@ -22,6 +24,8 @@ import {
   type SpecialistSearchResponse as SpecialistSearchResponseValue,
   type SpecialistSearchRun as SpecialistSearchRunValue,
   type SpecialistServiceHealth as SpecialistServiceHealthValue,
+  type SpecialistTelegramLinkResponse as SpecialistTelegramLinkResponseValue,
+  type SpecialistTelegramStatus as SpecialistTelegramStatusValue,
   type SpecialistTriageKind,
   type SpecialistProfileListResponse as SpecialistProfileListResponseValue,
   type SpecialistIngestProgress as SpecialistIngestProgressValue,
@@ -408,6 +412,57 @@ export async function searchFailureMessage(response: Response): Promise<string> 
  * components are data, not a request failure. Only a network/JSON failure
  * throws; that case is already covered by the poll-stale banner.
  */
+export async function fetchTelegramStatus(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistTelegramStatusValue> {
+  const response = await fetcher("/api/telegram", withCredentials());
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось проверить Telegram");
+  }
+  return SpecialistTelegramStatus.parse(await response.json());
+}
+
+export async function createTelegramLink(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistTelegramLinkResponseValue> {
+  const response = await fetcher(
+    "/api/telegram/link",
+    withCredentials({ method: "POST" }),
+  );
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось создать ссылку Telegram");
+  }
+  return SpecialistTelegramLinkResponse.parse(await response.json());
+}
+
+export async function setTelegramMode(
+  mode: "all" | "urgent",
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistTelegramStatusValue> {
+  const response = await fetcher(
+    "/api/telegram/mode",
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    }),
+  );
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось сменить режим Telegram");
+  }
+  return SpecialistTelegramStatus.parse(await response.json());
+}
+
+export async function unlinkTelegram(
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistTelegramStatusValue> {
+  const response = await fetcher("/api/telegram", withCredentials({ method: "DELETE" }));
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось отключить Telegram");
+  }
+  return SpecialistTelegramStatus.parse(await response.json());
+}
+
 export async function fetchServiceHealth(
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistServiceHealthValue> {

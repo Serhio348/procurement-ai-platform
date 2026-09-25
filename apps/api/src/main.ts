@@ -23,6 +23,12 @@ import { createSearchIntentFromEnv } from "./search-intent.js";
 import { createProcurementSearchReview } from "./search-review.js";
 import { createDiscoveryController } from "./discovery-control.js";
 import { createProcurementCardWatch } from "./card-watch.js";
+import {
+  createTelegramBotFromEnv,
+  createTelegramNotifier,
+  type TelegramNotifier,
+} from "./telegram.js";
+import { createPostgresTelegramStore } from "@procurement/db";
 
 // /api/health reports the deployed revision so an operator can verify which
 // build actually answers instead of inferring it from old inbox rows (R42).
@@ -133,6 +139,59 @@ async function main(): Promise<void> {
     }
   }
   const authMail = createSmtpMailPort(process.env);
+  // The bot needs durable links and send markers: without postgres it stays
+  // off rather than announcing the same inbox events again after a restart.
+  let telegram: TelegramNotifier | undefined;
+  let telegramOk = false;
+  const telegramBot = createTelegramBotFromEnv(process.env);
+  if (telegramBot !== undefined && persistence.db !== undefined) {
+    try {
+      const me = await telegramBot.getMe();
+      telegram = createTelegramNotifier({
+        bot: telegramBot,
+        store: createPostgresTelegramStore(persistence.db),
+        logger,
+        publicUrl:
+          process.env["APP_PUBLIC_URL"] ??
+          process.env["AUTH_PUBLIC_URL"] ??
+          process.env["BETTER_AUTH_URL"] ??
+          "http://127.0.0.1:5173",
+        botUsername: me.username,
+        openCabinet: async (userId) => {
+          const workspaceId = await persistence.cabinets.findWorkspaceId(userId);
+          if (workspaceId === undefined) return undefined;
+          const cabinet = await persistence.cabinets.open(workspaceId);
+          return {
+            workspaceId,
+            inbox: cabinet.catalog.urgentInbox().map((entry) => ({
+              id: entry.id,
+              title: entry.title,
+              statusLabel: entry.statusLabel,
+              detail: entry.detail,
+              url: entry.url,
+            })),
+            async dismiss(id) {
+              if (!cabinet.catalog.dismiss(id)) return false;
+              cabinet.workspace.setDismissedInboxIds(cabinet.catalog.dismissedIds());
+              await persistence.cabinets.persist(cabinet);
+              return true;
+            },
+          };
+        },
+      });
+      telegramOk = true;
+      logger.info("Telegram bot configured", { bot: me.username });
+    } catch (error) {
+      logger.error("Telegram bot unavailable", error);
+      await recordJournal(persistence.journal, {
+        kind: "platform",
+        level: "error",
+        message: "Telegram-бот не ответил на запуске. Уведомления в Telegram выключены.",
+      });
+    }
+  } else if (telegramBot !== undefined) {
+    logger.warn("Telegram bot token set but PostgreSQL is off — bot disabled");
+  }
   const watchLimitRaw = process.env["SPECIALIST_WATCH_LIMIT"];
   const watchLimit =
     watchLimitRaw === undefined ? undefined : Math.max(0, Number.parseInt(watchLimitRaw, 10) || 0);
@@ -174,6 +233,7 @@ async function main(): Promise<void> {
     ...(suggestSearch === undefined ? {} : { suggestSearch }),
     ...(cardWatch === undefined ? {} : { cardWatch }),
     ...(monitorWatch === undefined ? {} : { monitorWatch }),
+    ...(telegram === undefined ? {} : { telegram }),
     ...(watchLimit === undefined ? {} : { watchLimit }),
     ...(mcp === undefined
       ? {}
@@ -202,6 +262,8 @@ async function main(): Promise<void> {
         commercialReader: commercialReader !== undefined,
       },
       mail: authMail !== undefined,
+      telegram: telegramOk,
+      telegramFailed: telegramBot !== undefined && !telegramOk,
       postgresConfigured: persistence.postgresConfigured,
       postgresPing: persistence.ping,
     },
@@ -255,8 +317,30 @@ async function main(): Promise<void> {
     }, intervalMs);
   }
 
+  // Telegram long polling: without a public HTTPS endpoint a webhook is
+  // impossible, so the bot pulls updates itself — works from any server.
+  let telegramTimer: ReturnType<typeof setTimeout> | undefined;
+  if (telegram !== undefined) {
+    let offset = 0;
+    const poll = async (): Promise<void> => {
+      try {
+        offset = await telegram.pollOnce(offset);
+      } catch (error) {
+        logger.error("Telegram polling failed", error);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5_000);
+        });
+      }
+      telegramTimer = setTimeout(() => {
+        void poll();
+      }, 1_000);
+    };
+    void poll();
+  }
+
   const shutdown = async (): Promise<void> => {
     if (timer !== undefined) clearInterval(timer);
+    if (telegramTimer !== undefined) clearTimeout(telegramTimer);
     if (redisRepeat !== undefined) await redisRepeat.close();
     await app.close();
     if (mcp !== undefined) await mcp.close();

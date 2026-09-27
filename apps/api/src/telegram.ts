@@ -34,7 +34,12 @@ export interface TelegramUpdate {
 export interface TelegramBot {
   getMe(): Promise<{ username: string }>;
   getUpdates(offset: number, timeoutSec: number): Promise<TelegramUpdate[]>;
-  sendMessage(input: { chatId: string; text: string; buttons?: TelegramButton[] }): Promise<void>;
+  sendMessage(input: {
+    chatId: string;
+    text: string;
+    buttons?: TelegramButton[];
+    keyboard?: string[][];
+  }): Promise<void>;
   answerCallbackQuery(id: string, text?: string): Promise<void>;
 }
 
@@ -42,6 +47,11 @@ const TELEGRAM_API = "https://api.telegram.org";
 const LINK_CODE_TTL_MS = 10 * 60_000;
 /** keep the callback payload short: "d:<changeId>" */
 const DISMISS_PREFIX = "d:";
+/**
+ * Persistent reply keyboard under the input field: each key sends the command
+ * text it is labelled with, so a tap behaves exactly like typing it.
+ */
+const COMMAND_KEYBOARD = [["/new", "/status"], ["/urgent", "/all"], ["/stop", "/help"]];
 
 async function callBot(token: string, method: string, body: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -116,15 +126,15 @@ export function createTelegramBot(token: string): TelegramBot {
       return updates;
     },
     async sendMessage(input) {
-      await callBot(token, "sendMessage", {
-        chat_id: input.chatId,
-        text: input.text,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-        ...(input.buttons === undefined || input.buttons.length === 0
-          ? {}
-          : {
-              reply_markup: {
+      const replyMarkup =
+        input.keyboard !== undefined && input.keyboard.length > 0
+          ? {
+              keyboard: input.keyboard.map((row) => row.map((label) => ({ text: label }))),
+              resize_keyboard: true,
+              persistent: true,
+            }
+          : input.buttons !== undefined && input.buttons.length > 0
+            ? {
                 inline_keyboard: [
                   input.buttons.map((button) => ({
                     text: button.text,
@@ -134,8 +144,14 @@ export function createTelegramBot(token: string): TelegramBot {
                       : { callback_data: button.callbackData }),
                   })),
                 ],
-              },
-            }),
+              }
+            : undefined;
+      await callBot(token, "sendMessage", {
+        chat_id: input.chatId,
+        text: input.text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
       });
     },
     async answerCallbackQuery(id, answerText) {
@@ -211,7 +227,7 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
 
   const safeSend = async (
     link: TelegramLink,
-    input: { text: string; buttons?: TelegramButton[] },
+    input: { text: string; buttons?: TelegramButton[]; keyboard?: string[][] },
   ): Promise<void> => {
     try {
       await bot.sendMessage({ chatId: link.chatId, ...input });
@@ -219,6 +235,9 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
       logger.error("Telegram send failed", error, { chatId: link.chatId });
     }
   };
+
+  const sendMenu = (chatId: string, text: string): Promise<void> =>
+    bot.sendMessage({ chatId, text, keyboard: COMMAND_KEYBOARD });
 
   const welcomeText =
     "Telegram подключён. Сюда будут приходить новые закупки и изменения по отслеживаемым.\n" +
@@ -246,7 +265,7 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
         chatId: message.chatId,
         ...(message.username === undefined ? {} : { username: message.username }),
       });
-      await bot.sendMessage({ chatId: message.chatId, text: welcomeText });
+      await sendMenu(message.chatId, welcomeText);
       return;
     }
     const link = await store.linkByChat(message.chatId);
@@ -265,29 +284,29 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
       }
       case "/urgent": {
         await store.setMode(link.userId, "urgent");
-        await bot.sendMessage({
-          chatId: message.chatId,
-          text: "Режим «только срочные»: приходят дедлайны и изменения отслеживаемых.",
-        });
+        await sendMenu(
+          message.chatId,
+          "Режим «только срочные»: приходят дедлайны и изменения отслеживаемых.",
+        );
         return;
       }
       case "/all": {
         await store.setMode(link.userId, "all");
-        await bot.sendMessage({
-          chatId: message.chatId,
-          text: "Режим «все события»: приходят и новые закупки, и изменения.",
-        });
+        await sendMenu(
+          message.chatId,
+          "Режим «все события»: приходят и новые закупки, и изменения.",
+        );
         return;
       }
       case "/new": {
         const cabinet = await options.openCabinet?.(link.userId);
         if (cabinet === undefined) {
-          await bot.sendMessage({ chatId: message.chatId, text: "Кабинет недоступен." });
+          await sendMenu(message.chatId, "Кабинет недоступен.");
           return;
         }
         const items = cabinet.inbox.slice(0, 5);
         if (items.length === 0) {
-          await bot.sendMessage({ chatId: message.chatId, text: "Открытых событий нет." });
+          await sendMenu(message.chatId, "Открытых событий нет.");
           return;
         }
         for (const entry of items) {
@@ -305,25 +324,25 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
       case "/status": {
         const cabinet = await options.openCabinet?.(link.userId);
         if (cabinet === undefined) {
-          await bot.sendMessage({ chatId: message.chatId, text: "Кабинет недоступен." });
+          await sendMenu(message.chatId, "Кабинет недоступен.");
           return;
         }
-        await bot.sendMessage({
-          chatId: message.chatId,
-          text: `Открытых событий во входящих: ${cabinet.inbox.length}. Консоль: ${publicUrl}`,
-        });
+        await sendMenu(
+          message.chatId,
+          `Открытых событий во входящих: ${cabinet.inbox.length}. Консоль: ${publicUrl}`,
+        );
         return;
       }
       case "/help":
       case "/start_": {
-        await bot.sendMessage({ chatId: message.chatId, text: welcomeText });
+        await sendMenu(message.chatId, welcomeText);
         return;
       }
       default: {
-        await bot.sendMessage({
-          chatId: message.chatId,
-          text: "Команды: /new — открытые события, /status — сводка, /urgent — только срочные, /all — все, /stop — отключить.",
-        });
+        await sendMenu(
+          message.chatId,
+          "Команды: /new — открытые события, /status — сводка, /urgent — только срочные, /all — все, /stop — отключить.",
+        );
       }
     }
   };

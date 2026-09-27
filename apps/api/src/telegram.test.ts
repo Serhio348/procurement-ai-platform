@@ -12,12 +12,18 @@ import {
 const workspaceId = "00000000-0000-4000-8000-0000000000aa";
 const userId = "00000000-0000-4000-8000-0000000000bb";
 
+type SentMessage = {
+  chatId: string;
+  text: string;
+  buttons?: { text: string; callbackData?: string }[];
+  keyboard?: string[][];
+};
+
 function stubBot(): TelegramBot & {
-  sent: { chatId: string; text: string; buttons?: { text: string; callbackData?: string }[] }[];
+  sent: SentMessage[];
   answered: { id: string; text?: string }[];
 } {
-  const sent: { chatId: string; text: string; buttons?: { text: string; callbackData?: string }[] }[] =
-    [];
+  const sent: SentMessage[] = [];
   const answered: { id: string; text?: string }[] = [];
   return {
     sent,
@@ -104,6 +110,13 @@ describe("telegram notifier", () => {
       username: "spec",
       mode: "all",
     });
+    // The welcome answer ships the persistent command keyboard, so a linked
+    // specialist taps buttons instead of typing slash commands.
+    expect(bot.sent[0]?.keyboard).toEqual([
+      ["/new", "/status"],
+      ["/urgent", "/all"],
+      ["/stop", "/help"],
+    ]);
     bot.sent.length = 0;
 
     await notifier.notifyInbox(workspaceId, inboxItem());

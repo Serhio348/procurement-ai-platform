@@ -31,6 +31,8 @@ UI «Профили → Уведомления в Telegram → Подключи�
 
 `/start`, `/new` (до 5 открытых inbox-строк через `openCabinet`), `/status`, `/urgent`, `/all`, `/stop`, `/help`. Callback «Разобрано» резолвится через `linkByChat → openCabinet(userId) → catalog.dismiss(changeId)` — чужой чат не может закрыть событие другого кабинета. `answerCallbackQuery` отвечает «Событие закрыто»/«уже закрыто».
 
+Ответы на команды несут постоянную reply-клавиатуру (`/new /status /urgent /all /stop /help`) — специалист жмёт кнопки вместо набора команд. Клавиатура и inline-кнопки событий разнесены: `reply_markup.keyboard` на служебных ответах, `inline_keyboard` на карточках закупок.
+
 ### Запуск и деградация
 
 - Без `TELEGRAM_BOT_TOKEN`: `telegram=undefined`, `GET /api/telegram` → `{available:false}`, link → 503, API работает.

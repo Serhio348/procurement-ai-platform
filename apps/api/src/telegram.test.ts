@@ -111,11 +111,11 @@ describe("telegram notifier", () => {
       mode: "all",
     });
     // The welcome answer ships the persistent command keyboard, so a linked
-    // specialist taps buttons instead of typing slash commands.
+    // specialist taps Russian-labelled buttons instead of typing commands.
     expect(bot.sent[0]?.keyboard).toEqual([
-      ["/new", "/status"],
-      ["/urgent", "/all"],
-      ["/stop", "/help"],
+      ["Новые события", "Статус"],
+      ["Только срочные", "Все события"],
+      ["Отключить", "Помощь"],
     ]);
     bot.sent.length = 0;
 
@@ -182,6 +182,11 @@ describe("telegram notifier", () => {
     await notifier.handleUpdate({ updateId: 2, message: { chatId: "777", text: "/new" } });
     expect(bot.sent.map((m) => m.text).join("\n")).toContain("Закупка раз");
     expect(bot.sent.map((m) => m.text).join("\n")).toContain("Закупка два");
+
+    // The reply-keyboard label maps onto the same command.
+    bot.sent.length = 0;
+    await notifier.handleUpdate({ updateId: 4, message: { chatId: "777", text: "Новые события" } });
+    expect(bot.sent.map((m) => m.text).join("\n")).toContain("Закупка раз");
 
     await notifier.handleUpdate({
       updateId: 3,

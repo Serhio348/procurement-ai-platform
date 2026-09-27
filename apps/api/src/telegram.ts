@@ -48,10 +48,22 @@ const LINK_CODE_TTL_MS = 10 * 60_000;
 /** keep the callback payload short: "d:<changeId>" */
 const DISMISS_PREFIX = "d:";
 /**
- * Persistent reply keyboard under the input field: each key sends the command
- * text it is labelled with, so a tap behaves exactly like typing it.
+ * Persistent reply keyboard under the input field. A key tap sends its label
+ * as a message, so KEY_TO_COMMAND maps every label onto the command it means.
  */
-const COMMAND_KEYBOARD = [["/new", "/status"], ["/urgent", "/all"], ["/stop", "/help"]];
+const COMMAND_KEYBOARD = [
+  ["Новые события", "Статус"],
+  ["Только срочные", "Все события"],
+  ["Отключить", "Помощь"],
+];
+const KEY_TO_COMMAND = new Map<string, string>([
+  ["новые события", "/new"],
+  ["статус", "/status"],
+  ["только срочные", "/urgent"],
+  ["все события", "/all"],
+  ["отключить", "/stop"],
+  ["помощь", "/help"],
+]);
 
 async function callBot(token: string, method: string, body: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -241,7 +253,7 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
 
   const welcomeText =
     "Telegram подключён. Сюда будут приходить новые закупки и изменения по отслеживаемым.\n" +
-    "Команды: /new — открытые события, /status — сводка, /urgent — только срочные, /all — все события, /stop — отключить.";
+    "Пользуйтесь кнопками внизу чата: «Новые события», «Статус», «Только срочные», «Все события», «Отключить».";
 
   const handleMessage = async (message: {
     chatId: string;
@@ -249,7 +261,10 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
     username?: string;
   }): Promise<void> => {
     const [command = "", ...rest] = message.text.trim().split(/\s+/u);
-    const verb = command.split("@")[0]?.toLowerCase() ?? "";
+    const verb =
+      KEY_TO_COMMAND.get(message.text.trim().toLowerCase()) ??
+      command.split("@")[0]?.toLowerCase() ??
+      "";
     if (verb === "/start") {
       const code = rest[0]?.trim() ?? "";
       const link = await store.consumeLinkCode(code);
@@ -341,7 +356,7 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
       default: {
         await sendMenu(
           message.chatId,
-          "Команды: /new — открытые события, /status — сводка, /urgent — только срочные, /all — все, /stop — отключить.",
+          "Выберите действие кнопками внизу чата: «Новые события», «Статус», «Только срочные», «Все события», «Отключить».",
         );
       }
     }

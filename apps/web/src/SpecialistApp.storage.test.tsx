@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { configure } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import {
   InboxFixtureItem,
@@ -8,6 +9,10 @@ import {
 import { inboxItemFromFoundCard, SpecialistCatalog } from "@procurement/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpecialistApp } from "./SpecialistApp.js";
+
+// Async findBy/waitFor default to 1s — under full-suite CPU contention the
+// mocked resolves plus React render regularly outgrow it.
+configure({ asyncUtilTimeout: 5000 });
 
 // Drawer and bottom tab bar render the same section labels; nav assertions
 // target the drawer (aria-label «Разделы»).
@@ -161,11 +166,14 @@ describe("SpecialistApp search list", () => {
 
     await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
 
-    await vi.waitFor(() => {
-      expect(
-        sectionsNav().getByRole("link", { name: "Мои закупки" }).className,
-      ).toContain("nav-current");
-    });
+    await vi.waitFor(
+      () => {
+        expect(
+          sectionsNav().getByRole("link", { name: "Мои закупки" }).className,
+        ).toContain("nav-current");
+      },
+      { timeout: 5000 },
+    );
     expect(sectionsNav().getByRole("link", { name: "Закупки" }).className).not.toContain("nav-current");
   });
 
@@ -314,11 +322,14 @@ describe("SpecialistApp search list", () => {
     // the request does not hang on platform downloads, and no popup batch
     // is attempted (browsers blocked the old window.open loop silently).
     await user.click(screen.getByRole("button", { name: "Скачать документы" }));
-    await vi.waitFor(() => {
-      expect(sectionsNav().getByRole("link", { name: "Мои закупки" }).className).toContain(
-        "nav-current",
-      );
-    });
+    await vi.waitFor(
+      () => {
+        expect(sectionsNav().getByRole("link", { name: "Мои закупки" }).className).toContain(
+          "nav-current",
+        );
+      },
+      { timeout: 5000 },
+    );
     expect(screen.getByText("Документы скачиваются")).toBeTruthy();
   });
 

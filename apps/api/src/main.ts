@@ -6,7 +6,7 @@ import { createLogger } from "@procurement/observability";
 import { buildSpecialistApi, type SpecialistApi } from "./app.js";
 import { createSmtpMailPort } from "./auth/mail.js";
 import { resolveBlobDirectory } from "./blobs.js";
-import { startDiscoveryRepeat } from "./discovery-queue.js";
+import { removeDiscoveryRepeat, startDiscoveryRepeat } from "./discovery-queue.js";
 import { discoveryTransport } from "./discovery-transport.js";
 import { createProcurementDocumentIngest } from "./document-ingest.js";
 import { createCommercialReaderFromEnv } from "./commercial-reader.js";
@@ -293,6 +293,20 @@ async function main(): Promise<void> {
 
   let redisRepeat: Awaited<ReturnType<typeof startDiscoveryRepeat>> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  if (transport.kind === "off") {
+    // Interval=0 must be honestly off: the BullMQ scheduler lives in Redis,
+    // so an earlier registration keeps feeding the queue unless removed.
+    const redisUrl = process.env["REDIS_URL"]?.trim() ?? "";
+    if (redisUrl.length > 0) {
+      try {
+        await removeDiscoveryRepeat({ redisUrl, logger });
+      } catch (error) {
+        logger.warn("Redis discovery scheduler cleanup failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
   if (transport.kind === "redis") {
     try {
       redisRepeat = await startDiscoveryRepeat({

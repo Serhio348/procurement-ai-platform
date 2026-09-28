@@ -121,7 +121,10 @@ describe.skipIf(process.env["TEST_DATABASE_URL"] === undefined)("PostgreSQL tras
       await app?.close();
       await persistence.close();
     }
-  });
+    },
+    // Real PostgreSQL round-trips under parallel suite load outgrow the 15s default.
+    60_000,
+  );
 });
 
 describe("openSpecialistPersistence", () => {

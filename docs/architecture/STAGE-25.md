@@ -58,6 +58,26 @@ CI / нет Docker
 **Fallback обязателен.** `npm run verify` и тесты без Docker. Живой
 контур — `npm run infra:up` и `npm run db:migrate`.
 
+## Дополнение R70 — выключенное discovery честно выключено
+
+BullMQ-планировщик хранится в Redis, а не в процессе: `upsertJobScheduler`
+переживает рестарты и смену интервала (новый `every` перезаписывает старый —
+override встроен в bullmq 5). Раньше `SPECIALIST_DISCOVERY_INTERVAL_MS=0`
+останавливал только worker процесса, а запись планировщика оставалась — любой
+процесс с worker на той же очереди продолжал бы запускать прогоны.
+
+Теперь при `transport.kind === "off"` и настроенном `REDIS_URL` на старте
+вызывается `removeJobScheduler` — расписание снимается из Redis совсем.
+При включении `startDiscoveryRepeat` логирует весь список schedulers
+(`{key, every}`) — залипшая запись от старого процесса видна в журнале сразу.
+
+Отдельная причина «прогонов каждые 5 минут», которую код не закрывает:
+второй живой процесс API (старый `tsx`/второй юнит) с тем же Redis. Диагностика —
+`journalctl -u procurement-api | grep "discovery queued"` и список процессов.
+
+Регрессия: `discovery-queue.test.ts` на реальном Redis (`TEST_REDIS_URL`) —
+планировщик ставится, переживает остановку worker и снимается при выключении.
+
 ---
 
 ## 4. Изменения

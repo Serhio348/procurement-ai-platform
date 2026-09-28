@@ -548,7 +548,7 @@ export function createSpecialistStore(db: Database) {
     async listTrashIds(workspaceId: string): Promise<string[]> {
       return withWorkspace(db, workspaceId, async (tx) => {
         const rows = await tx
-          .select({ id: workspaceProcurements.id })
+          .select({ id: sql<string>`${workspaceProcurements.card}->>'id'` })
           .from(workspaceProcurements)
           .where(
             and(

@@ -270,7 +270,9 @@ integration("PostgreSQL migrations and invariants", () => {
     expect((await store.listCases(workspaceId, { tab: "trash" })).items.map((item) => item.id)).toEqual([
       card.id,
     ]);
-    await store.removeCases([card.id], workspaceId);
+    const ids = await store.listTrashIds(workspaceId);
+    expect(ids).toEqual([card.id]);
+    await store.removeCases(ids, workspaceId);
     expect((await store.listCases(workspaceId, { tab: "trash" })).items).toEqual([]);
     expect(await store.getCase(workspaceId, card.id)).toBeUndefined();
   });

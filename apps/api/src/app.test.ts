@@ -4492,6 +4492,108 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it.each(["monitor", "participate", "reject"] as const)(
+    "does not put a previously %s case back into new inbox during manual search",
+    async (kind) => {
+      const catalog = new SpecialistCatalog();
+      const workspace = new SpecialistWorkspace();
+      const card = SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000821",
+        sourceProcurementId: "auction/already-decided",
+        url: "https://goszakupki.by/auction/view/already-decided",
+        title: "Кабель для подстанции",
+        status: "accepting_bids",
+        statusLabel: "Приём предложений",
+        triage: kind,
+        foundAs: "review",
+        live: true,
+      });
+      catalog.upsertCase(card);
+      workspace.recordDecision(card.sourceProcurementId, kind, "2026-09-20T10:00:00.000Z");
+      if (kind !== "reject") {
+        catalog.record(inboxItemFromWatchChange(card, {
+          kind: "status_changed", field: "status", previous: "announced", current: "accepting_bids",
+        }, "2026-09-21T10:00:00.000Z"));
+      }
+      const review = vi.fn(async (): Promise<ReviewOutcome[]> => [{
+        verdict: "needs_human", decidedBy: "model", reason: "Проверить", matchedTerms: [], confidence: 0.5,
+      }]);
+      const app = await buildSpecialistApi({
+        catalog, workspace, searchReview: { review },
+        searchHits: { search: async () => [SearchHit.parse({ ...card, sourceId: "goszakupki_by" })] },
+      });
+      try {
+        const profileId = await activeProfileId(app);
+        await app.inject({ method: "PUT", url: `/api/profiles/${profileId}`, payload: { name: "Кабель", keywords: ["кабель"] } });
+        await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId } });
+        await vi.waitFor(() => expect(workspace.searchRuns()[0]?.status).toBe("done"));
+        expect(catalog.urgentInbox().map((item) => item.kind)).toEqual(kind === "reject" ? [] : ["status_changed"]);
+        expect(review).not.toHaveBeenCalled();
+        expect(catalog.procurement(card.id)?.triage).toBe(kind);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each([
+    ["manual", "reject", "needs_human"],
+    ["manual", "monitor", "needs_human"],
+    ["manual", "participate", "relevant"],
+    ["discovery", "reject", "relevant"],
+    ["discovery", "reject", "needs_human"],
+    ["discovery", "monitor", "needs_human"],
+  ] as const)("ignores a late %s review after %s (%s)", async (mode, kind, verdict) => {
+    const catalog = new SpecialistCatalog();
+    const workspace = new SpecialistWorkspace();
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000822",
+      sourceProcurementId: "auction/late-decision",
+      url: "https://goszakupki.by/auction/view/late-decision",
+      title: "Кабель для подстанции",
+      status: "accepting_bids",
+      statusLabel: "Приём предложений",
+      foundAs: "review",
+      live: true,
+    });
+    catalog.upsertCase(card);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const review = vi.fn(async (): Promise<ReviewOutcome[]> => {
+      await gate;
+      return [{ verdict, decidedBy: "model", reason: "Проверено", matchedTerms: [], confidence: 0.5 }];
+    });
+    const app = await buildSpecialistApi({
+      catalog, workspace, searchReview: { review },
+      searchHits: { search: async () => [SearchHit.parse({ ...card, sourceId: "goszakupki_by" })] },
+    });
+    let discovery: ReturnType<typeof app.runDiscovery> | undefined;
+    try {
+      const profileId = await activeProfileId(app);
+      await app.inject({ method: "PUT", url: `/api/profiles/${profileId}`, payload: { name: "Кабель", keywords: ["кабель"] } });
+      workspace.setWatch(true);
+      if (mode === "discovery") discovery = app.runDiscovery();
+      else await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId } });
+      await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(1));
+      const decision = await app.inject({ method: "POST", url: `/api/procurements/${card.id}/decision`, payload: { kind } });
+      expect(decision.statusCode).toBe(200);
+      if (kind === "reject") {
+        expect((await app.inject({ method: "DELETE", url: `/api/procurements/${card.id}` })).statusCode).toBe(204);
+      }
+      release();
+      if (discovery !== undefined) await discovery;
+      else await vi.waitFor(() => expect(workspace.searchRuns()[0]?.status).toBe("done"));
+      expect(catalog.urgentInbox()).toEqual([]);
+      expect(workspace.searchIds(profileId)).toEqual([]);
+      if (kind === "reject") expect(catalog.storedCases()).toEqual([]);
+      else expect(catalog.procurement(card.id)?.triage).toBe(kind);
+    } finally {
+      release();
+      await discovery;
+      await app.close();
+    }
+  });
+
   it("empties every rejected case from trash and keeps them out of search", async () => {
     const hits = [
       SearchHit.parse({

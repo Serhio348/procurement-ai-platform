@@ -826,12 +826,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
    * foundAs/score/reason are recomputed as a derived view — one direction
    * cannot overwrite another's answer (R04).
    */
-  async function rememberFound(
+  function rememberFound(
     card: SpecialistProcurementCardValue,
     profileId: string,
     now: string,
-  ): Promise<{ card: SpecialistProcurementCardValue; isNew: boolean }> {
-    const existing = await findExistingCase(card.sourceProcurementId);
+    existing: SpecialistProcurementCardValue | undefined,
+  ): { card: SpecialistProcurementCardValue; isNew: boolean } {
     const merged: SpecialistProcurementCardValue =
       existing === undefined
         ? { ...card, lastSeenAt: now }
@@ -1048,6 +1048,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     let scoredCount = 0;
     const matched: SpecialistProcurementCardValue[] = [];
     const dropped: string[] = [];
+    const skipDecided = (): void => {
+      scoredCount += 1;
+      discarded += 1;
+      searchProgress.scored(profile.id, runId, {
+        scoredCount,
+        matchCount,
+        discardedCount: discarded,
+        reviewCount: ambiguousCount,
+      });
+    };
     const cabinet = currentCabinet();
     const reviewProfile = {
       name: profileDisplayName(profile),
@@ -1062,11 +1072,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const reviewBudget: ReviewBudget = { used: 0 };
     for (const item of pending) {
       if (!runAlive()) break;
+      if (workspace().latestKind(item.card.sourceProcurementId) !== undefined) {
+        skipDecided();
+        continue;
+      }
       const outcome =
         searchReview === undefined
           ? scoreIntentCard(procedureCardFromHit(item.hit, now), plan).outcome
           : (await searchReview.review([item.hit], reviewProfile, reviewBudget))[0];
       if (!runAlive()) break;
+      const existing = await findExistingCase(item.card.sourceProcurementId);
+      if (!runAlive()) break;
+      if (workspace().latestKind(item.card.sourceProcurementId) !== undefined || existing?.triage !== undefined) {
+        skipDecided();
+        continue;
+      }
       scoredCount += 1;
       if (outcome?.verdict === "irrelevant") {
         discarded += 1;
@@ -1105,8 +1125,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         }
         continue;
       }
-      const existing = await findExistingCase(item.card.sourceProcurementId);
-      if (!runAlive()) break;
       const procedureStatus = outcome?.status ?? item.hit.status ?? item.card.status;
       const requestedClosedStatus =
         isClosedProcedureStatus(procedureStatus) && profile.statuses.includes(procedureStatus);
@@ -1180,8 +1198,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         outcome?.card === undefined
           ? builtCard
           : applyFreshSourceCard(builtCard, outcome.card, now).next;
-      const remembered = await rememberFound(reviewedCard, profile.id, now);
-      if (!runAlive()) break;
+      const remembered = rememberFound(reviewedCard, profile.id, now, existing);
       // Inbox rows carry this profile's verdict: a candidate stays a review
       // row even when another direction matched the same card (R04).
       const profileView = projectCardForProfile(remembered.card, profile.id);
@@ -1334,10 +1351,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     options: { skipKnownIrrelevant: boolean },
   ): Promise<{
     pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }>;
-    skippedRejected: number;
+    skippedDecided: number;
     discardedFromReview: number;
   }> {
-    const rejected = workspace().rejectedSourceIds();
     const sourceIds = selected.ambiguousCards.map((item) => item.sourceProcurementId);
     const stored = await cabinets.loadCasesBySources(currentCabinet().workspaceId, sourceIds);
     const known = new Map(
@@ -1346,14 +1362,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     for (const [sourceId, card] of stored) {
       if (!known.has(sourceId)) known.set(sourceId, card);
     }
-    let skippedRejected = 0;
+    let skippedDecided = 0;
     let discardedFromReview = 0;
     const pending: Array<{ card: SpecialistProcurementCardValue; hit: SearchHit }> = [];
     for (const [index, card] of selected.ambiguousCards.entries()) {
       const hit = selected.ambiguousHits[index];
       if (hit === undefined) continue;
-      if (rejected.has(card.sourceProcurementId)) {
-        skippedRejected += 1;
+      const already = known.get(card.sourceProcurementId);
+      if (workspace().latestKind(card.sourceProcurementId) !== undefined || already?.triage !== undefined) {
+        skippedDecided += 1;
         continue;
       }
       if (
@@ -1363,7 +1380,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         discardedFromReview += 1;
         continue;
       }
-      const already = known.get(card.sourceProcurementId);
       // "Already matched" is per profile: another direction's verdict must
       // not exempt this profile from scoring the card itself (R04).
       if (
@@ -1377,7 +1393,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       }
       pending.push({ card, hit });
     }
-    return { pending, skippedRejected, discardedFromReview };
+    return { pending, skippedDecided, discardedFromReview };
   }
 
   /**
@@ -1597,7 +1613,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       skipKnownIrrelevant: false,
     });
     const listingDiscarded =
-      selected.discardedCount + collected.skippedRejected + collected.discardedFromReview;
+      selected.discardedCount + collected.skippedDecided + collected.discardedFromReview;
     const background = searchReview !== undefined;
     searchProgress.begin({
       profileId: profile.id,
@@ -2597,6 +2613,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     for (const id of ids) {
       catalog().dropCase(id);
       catalog().dismissByProcurementId(id);
+      workspace().removeSearchId(id);
     }
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persistWorkspaceOnly();
@@ -2619,6 +2636,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     catalog().dropCase(card.id);
     catalog().dismissByProcurementId(card.id);
+    workspace().removeSearchId(card.id);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persistWorkspaceOnly();
     await cabinets.removeCases(currentCabinet().workspaceId, [card.id]);

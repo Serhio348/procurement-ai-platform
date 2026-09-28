@@ -7,6 +7,7 @@ import type {
 } from "@procurement/contracts";
 import {
   bidsDeadlinePassed,
+  hasBidsDeadline,
   cardProcedureKindLabel,
   isIngestRunning,
   isSingleSourceAfterFailedProcedure,
@@ -633,9 +634,16 @@ export function MyProcurementsApp({
                 const procedureKind = cardProcedureKindLabel(item);
                 const deadline = printDeadline(item.watchSnapshot?.bidsDeadline);
                 const names = profileNamesForCard(item, profiles);
+                const deadlineClass = hasBidsDeadline(item)
+                  ? bidsDeadlinePassed(item, today)
+                    ? " is-deadline-expired"
+                    : " is-deadline-open"
+                  : "";
                 return (
                   <li key={item.id}>
-                    <article className={`my-procurements-card is-${item.triage ?? "unknown"}`}>
+                    <article
+                      className={`my-procurements-card is-${item.triage ?? "unknown"}${deadlineClass}`}
+                    >
                       <button
                         type="button"
                         className="my-procurements-card-main"

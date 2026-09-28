@@ -155,6 +155,25 @@ describe("MyProcurementsApp", () => {
     expect(screen.queryByText("срок подачи истёк")).toBeNull();
   });
 
+  it("tints the card pale red once the deadline passed and pale green while open", () => {
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp procurements={[card]} now={() => new Date("2026-09-11T10:00:00+03:00")} />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector(".my-procurements-card.is-deadline-expired")).toBeTruthy();
+    expect(document.querySelector(".my-procurements-card.is-deadline-open")).toBeNull();
+    unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/my-procurements"]}>
+        <MyProcurementsApp procurements={[card]} now={() => new Date("2026-08-01T10:00:00+03:00")} />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector(".my-procurements-card.is-deadline-open")).toBeTruthy();
+    expect(document.querySelector(".my-procurements-card.is-deadline-expired")).toBeNull();
+  });
+
   it("keeps an archived card out of the main tabs and lists it under «Архив»", async () => {
     const user = userEvent.setup();
     const stored = SpecialistProcurementCard.parse({ ...card, archived: true });

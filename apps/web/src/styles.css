@@ -1980,6 +1980,17 @@ h3 {
   box-shadow: 0 2px 4px rgb(30 36 48 / 8%), 0 12px 22px rgb(30 36 48 / 10%);
 }
 
+/* Deadline tint: pale green while acceptance is open, pale red once closed. */
+.my-procurements-card.is-deadline-open {
+  background: #eef6ee;
+  border-color: #bcd8bc;
+}
+
+.my-procurements-card.is-deadline-expired {
+  background: #fbeeee;
+  border-color: #e3baba;
+}
+
 .my-procurements-card-main {
   display: flex;
   flex-direction: column;

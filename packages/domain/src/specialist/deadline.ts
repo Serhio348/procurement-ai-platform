@@ -29,6 +29,11 @@ function deadlineInstant(card: SpecialistProcurementCard): PlatformInstant | und
     : undefined;
 }
 
+/** The card carries a parseable acceptance deadline (live card or snapshot). */
+export function hasBidsDeadline(card: SpecialistProcurementCard): boolean {
+  return deadlineInstant(card) !== undefined;
+}
+
 /**
  * True when acceptance closes within `windowMs` from `now` and has not
  * closed yet. A date-only deadline counts by local calendar distance:

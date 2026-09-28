@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { SpecialistCatalog } from "@procurement/domain";
+import { SpecialistProcurementCard } from "@procurement/contracts";
+import { inboxItemFromFoundCard, SpecialistCatalog, SpecialistWorkspace } from "@procurement/domain";
 import { buildSpecialistApi } from "./app.js";
+import { TEST_WORKSPACE_ID } from "./cabinets.js";
 import type { TelegramNotifier } from "./telegram.js";
 
 function stubTelegram(): TelegramNotifier & { calls: string[] } {
@@ -106,5 +108,35 @@ describe("telegram endpoints", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(telegram.calls).toContain("notify");
     await app.close();
+  });
+
+  it("decides a case without an HTTP request when a chat button is tapped", async () => {
+    const catalog = new SpecialistCatalog();
+    const workspace = new SpecialistWorkspace();
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000777",
+      sourceProcurementId: "auction/from-telegram",
+      url: "https://goszakupki.by/auction/view/from-telegram",
+      title: "Кабель для подстанции",
+      status: "accepting_bids",
+      statusLabel: "Приём предложений",
+      foundAs: "review",
+      live: true,
+    });
+    catalog.upsertCase(card);
+    catalog.record(inboxItemFromFoundCard(card, "2026-09-20T10:00:00.000Z"));
+    const profileId = workspace.profile().id;
+    workspace.appendSearchId(profileId, card.id);
+    const app = await buildSpecialistApi({ catalog, workspace });
+    try {
+      const decided = await app.decideForWorkspace(TEST_WORKSPACE_ID, card.id, "monitor");
+      expect(decided?.triage).toBe("monitor");
+      // The same invariants the console endpoint keeps: queue and inbox closed.
+      expect(workspace.searchIds(profileId)).toEqual([]);
+      expect(catalog.urgentInbox()).toEqual([]);
+      expect(await app.decideForWorkspace(TEST_WORKSPACE_ID, "missing", "reject")).toBeUndefined();
+    } finally {
+      await app.close();
+    }
   });
 });

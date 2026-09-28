@@ -36,6 +36,7 @@ import {
   type SearchHit,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
+  type SpecialistTriageKind as SpecialistTriageKindValue,
   type SpecialistWorkingProfile as SpecialistWorkingProfileValue,
   type SpecialistWorkspaceState,
   type SearchIntentPlan,
@@ -157,6 +158,16 @@ export interface SpecialistSearchHitsPort {
 
 export interface SpecialistApi extends FastifyInstance {
   runDiscovery: (limit?: number) => Promise<ReturnType<typeof SpecialistDiscoveryResponse.parse>>;
+  /**
+   * Applies «Следить»/«Участвовать»/«Не нужно» inside a named cabinet — the
+   * Telegram callback path has no HTTP request, so it opens the workspace and
+   * runs the same decision the console endpoint performs.
+   */
+  decideForWorkspace: (
+    workspaceId: string,
+    cardId: string,
+    kind: SpecialistTriageKindValue,
+  ) => Promise<SpecialistProcurementCardValue | undefined>;
 }
 
 export interface BuildApiOptions {
@@ -2495,30 +2506,25 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     );
   });
 
-  app.post("/api/procurements/:id/decision", async (request, reply) => {
-    const params = request.params as { id: string };
-    const parsed = SpecialistDecisionWrite.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
-    const card = await resolveCase(params.id);
-    if (card === undefined) {
-      return reply.code(404).send({ error: "not_found" });
-    }
-    workspace().recordDecision(card.sourceProcurementId, parsed.data.kind, clock());
-    if (
-      parsed.data.kind === "monitor" ||
-      parsed.data.kind === "participate" ||
-      parsed.data.kind === "reject"
-    ) {
-      workspace().removeSearchId(card.id);
-    }
+  /**
+   * One triage decision path for the console endpoint and the Telegram
+   * callback: record the verdict, drop the case from every search queue,
+   * close stale inbox rows, hydrate monitored cases and persist.
+   */
+  const applyTriageDecision = async (
+    cardId: string,
+    kind: SpecialistTriageKindValue,
+  ): Promise<SpecialistProcurementCardValue | undefined> => {
+    const card = await resolveCase(cardId);
+    if (card === undefined) return undefined;
+    workspace().recordDecision(card.sourceProcurementId, kind, clock());
+    workspace().removeSearchId(card.id);
     let next = withTriage(card, workspace());
     // Stale rows for this case are cleared before the fresh read: changes the
     // read detects are reported as new rows and must survive the cleanup.
     catalog().dismissByProcurementId(next.id);
     // Hydrate the platform card before returning; file ingest continues after.
-    if (parsed.data.kind === "monitor" || parsed.data.kind === "participate") {
+    if (kind === "monitor" || kind === "participate") {
       next = await hydrateSourceCard(next);
       if (next.live !== true) {
         next = SpecialistProcurementCard.parse({ ...next, live: true });
@@ -2527,14 +2533,27 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     catalog().upsertCase(next);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
     await persistProgress([next.id]);
-    if (parsed.data.kind === "participate") {
+    if (kind === "participate") {
       startParticipateIngest(next);
     }
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,
-      kind: parsed.data.kind,
+      kind,
       documentCount: next.documents.length,
     });
+    return next;
+  };
+
+  app.post("/api/procurements/:id/decision", async (request, reply) => {
+    const params = request.params as { id: string };
+    const parsed = SpecialistDecisionWrite.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const next = await applyTriageDecision(params.id, parsed.data.kind);
+    if (next === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
     return SpecialistProcurementListResponse.parse({ items: [next] });
   });
 
@@ -2763,7 +2782,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       .send(Buffer.from(bytes));
   });
 
-  const api = Object.assign(app, { runDiscovery }) as SpecialistApi;
+  /**
+   * Telegram callbacks arrive outside any HTTP request, so the cabinet that
+   * owns the card is opened explicitly and the decision runs inside its
+   * AsyncLocalStorage context — the same ambient cabinet a request would set.
+   */
+  const decideForWorkspace: SpecialistApi["decideForWorkspace"] = async (
+    workspaceId,
+    cardId,
+    kind,
+  ) => {
+    const cabinet = await cabinets.open(workspaceId);
+    return cabinetAls.run(cabinet, () => applyTriageDecision(cardId, kind));
+  };
+
+  const api = Object.assign(app, { runDiscovery, decideForWorkspace }) as SpecialistApi;
   return api;
 }
 

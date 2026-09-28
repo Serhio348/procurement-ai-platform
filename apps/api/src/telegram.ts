@@ -1,5 +1,8 @@
 import { randomBytes } from "node:crypto";
-import type { InboxFixtureItem as InboxFixtureItemValue } from "@procurement/contracts";
+import type {
+  InboxFixtureItem as InboxFixtureItemValue,
+  SpecialistTriageKind as SpecialistTriageKindValue,
+} from "@procurement/contracts";
 import { compileChangeAlert, compileTelegramText } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type { TelegramLink, TelegramStore } from "@procurement/db";
@@ -27,6 +30,9 @@ export interface TelegramUpdate {
     id: string;
     chatId: string;
     data: string;
+    /** Needed to rewrite the message once a decision is applied. */
+    messageId?: number;
+    messageText?: string;
   };
 }
 
@@ -34,11 +40,18 @@ export interface TelegramUpdate {
 export interface TelegramBot {
   getMe(): Promise<{ username: string }>;
   getUpdates(offset: number, timeoutSec: number): Promise<TelegramUpdate[]>;
+  /** Inline buttons are passed as rows — each inner array is one row. */
   sendMessage(input: {
     chatId: string;
     text: string;
-    buttons?: TelegramButton[];
+    buttons?: TelegramButton[][];
     keyboard?: string[][];
+  }): Promise<void>;
+  editMessageText(input: {
+    chatId: string;
+    messageId: number;
+    text: string;
+    buttons?: TelegramButton[][];
   }): Promise<void>;
   answerCallbackQuery(id: string, text?: string): Promise<void>;
 }
@@ -47,6 +60,13 @@ const TELEGRAM_API = "https://api.telegram.org";
 const LINK_CODE_TTL_MS = 10 * 60_000;
 /** keep the callback payload short: "d:<changeId>" */
 const DISMISS_PREFIX = "d:";
+/** "t:<cardId>:<kind>" — a triage decision straight from the chat. */
+const DECIDE_PREFIX = "t:";
+const DECIDE_LABEL: Record<SpecialistTriageKindValue, string> = {
+  monitor: "Следить",
+  participate: "Участвовать",
+  reject: "Не нужно",
+};
 /**
  * Persistent reply keyboard under the input field. A key tap sends its label
  * as a message, so KEY_TO_COMMAND maps every label onto the command it means.
@@ -64,6 +84,16 @@ const KEY_TO_COMMAND = new Map<string, string>([
   ["отключить", "/stop"],
   ["помощь", "/help"],
 ]);
+
+function inlineKeyboard(rows: TelegramButton[][]): Record<string, unknown>[][] {
+  return rows.map((row) =>
+    row.map((button) => ({
+      text: button.text,
+      ...(button.url === undefined ? {} : { url: button.url }),
+      ...(button.callbackData === undefined ? {} : { callback_data: button.callbackData }),
+    })),
+  );
+}
 
 async function callBot(token: string, method: string, body: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -129,8 +159,16 @@ export function createTelegramBot(token: string): TelegramBot {
           const data = text(callback["data"]);
           const id = text(callback["id"]);
           const chatId = chat?.["id"];
+          const messageId = callbackMessage?.["message_id"];
+          const messageText = text(callbackMessage?.["text"]);
           if (id !== undefined && data !== undefined && typeof chatId === "number") {
-            out.callbackQuery = { id, chatId: String(chatId), data };
+            out.callbackQuery = {
+              id,
+              chatId: String(chatId),
+              data,
+              ...(typeof messageId === "number" ? { messageId } : {}),
+              ...(messageText === undefined ? {} : { messageText }),
+            };
           }
         }
         updates.push(out);
@@ -146,17 +184,7 @@ export function createTelegramBot(token: string): TelegramBot {
               persistent: true,
             }
           : input.buttons !== undefined && input.buttons.length > 0
-            ? {
-                inline_keyboard: [
-                  input.buttons.map((button) => ({
-                    text: button.text,
-                    ...(button.url === undefined ? {} : { url: button.url }),
-                    ...(button.callbackData === undefined
-                      ? {}
-                      : { callback_data: button.callbackData }),
-                  })),
-                ],
-              }
+            ? { inline_keyboard: inlineKeyboard(input.buttons) }
             : undefined;
       await callBot(token, "sendMessage", {
         chat_id: input.chatId,
@@ -164,6 +192,18 @@ export function createTelegramBot(token: string): TelegramBot {
         parse_mode: "HTML",
         disable_web_page_preview: true,
         ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
+      });
+    },
+    async editMessageText(input) {
+      await callBot(token, "editMessageText", {
+        chat_id: input.chatId,
+        message_id: input.messageId,
+        text: input.text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...(input.buttons === undefined || input.buttons.length === 0
+          ? {}
+          : { reply_markup: { inline_keyboard: inlineKeyboard(input.buttons) } }),
       });
     },
     async answerCallbackQuery(id, answerText) {
@@ -187,11 +227,21 @@ export interface TelegramNotifierOptions {
   /** Console base URL for the «Открыть» button — plain http is fine for a link. */
   publicUrl: string;
   botUsername?: string;
-  /** Used by «/new» and the dismiss button; absent in fixture-only tests. */
+  /** Used by «/new», the dismiss button and triage buttons; absent in fixture-only tests. */
   openCabinet?: (userId: string) => Promise<{
     workspaceId: string;
-    inbox: { id: string; title: string; statusLabel: string; detail: string; url: string }[];
+    inbox: {
+      id: string;
+      procurementId: string;
+      kind: string;
+      title: string;
+      statusLabel: string;
+      detail: string;
+      url: string;
+    }[];
     dismiss(id: string): Promise<boolean>;
+    /** Applies «Следить»/«Участвовать»/«Не нужно» inside the linked cabinet. */
+    decide?(cardId: string, kind: SpecialistTriageKindValue): Promise<"ok" | "not_found" | "unavailable">;
   } | undefined>;
 }
 
@@ -211,24 +261,47 @@ function escapeHtml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+/**
+ * Triage buttons ride on candidate events only: a status/document change of an
+ * already decided case does not ask for a decision again.
+ */
+function isCandidateEvent(kind: string): boolean {
+  return kind === "procedure_found" || kind === "procedure_candidate";
+}
+
+/** Telegram callback_data caps at 64 bytes; a uuid card id fits with room. */
+function decideButtonRows(cardId: string): TelegramButton[][] {
+  const kinds: SpecialistTriageKindValue[] = ["monitor", "participate", "reject"];
+  const row = kinds
+    .map((kind) => ({ text: DECIDE_LABEL[kind], callbackData: `${DECIDE_PREFIX}${cardId}:${kind}` }))
+    .filter((button) => button.callbackData.length <= 64);
+  return row.length === 0 ? [] : [row];
+}
+
 export function formatInboxMessage(
   item: InboxFixtureItemValue,
   publicUrl: string,
-): { text: string; buttons: TelegramButton[] } {
+): { text: string; buttons: TelegramButton[][] } {
   const compiled = compileChangeAlert([item.change], {
     title: item.procurement.title,
     sourceProcurementId: item.procurement.sourceProcurementId,
     url: item.procurement.url,
   });
   const body = compiled?.body ?? item.procurement.title;
+  const triage = isCandidateEvent(item.change.kind)
+    ? decideButtonRows(item.change.procurementId)
+    : [];
   return {
     text: compileTelegramText(
       `<b>${escapeHtml(compiled?.title ?? item.procurement.title)}</b>`,
       escapeHtml(body),
     ),
     buttons: [
-      { text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl },
-      { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${item.change.id}` },
+      ...triage,
+      [
+        { text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl },
+        { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${item.change.id}` },
+      ],
     ],
   };
 }
@@ -239,7 +312,7 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
 
   const safeSend = async (
     link: TelegramLink,
-    input: { text: string; buttons?: TelegramButton[]; keyboard?: string[][] },
+    input: { text: string; buttons?: TelegramButton[][]; keyboard?: string[][] },
   ): Promise<void> => {
     try {
       await bot.sendMessage({ chatId: link.chatId, ...input });
@@ -329,8 +402,11 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
             chatId: message.chatId,
             text: `<b>${escapeHtml(entry.statusLabel)}</b>\n${escapeHtml(entry.title)}\n${escapeHtml(entry.detail).slice(0, 300)}`,
             buttons: [
-              { text: "Открыть в консоли", url: publicUrl },
-              { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${entry.id}` },
+              ...(isCandidateEvent(entry.kind) ? decideButtonRows(entry.procurementId) : []),
+              [
+                { text: "Открыть в консоли", url: publicUrl },
+                { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${entry.id}` },
+              ],
             ],
           });
         }
@@ -412,13 +488,42 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
       try {
         if (update.message !== undefined) await handleMessage(update.message);
         if (update.callbackQuery !== undefined) {
-          const { id, chatId, data } = update.callbackQuery;
+          const { id, chatId, data, messageId, messageText } = update.callbackQuery;
           if (data.startsWith(DISMISS_PREFIX)) {
             const eventId = data.slice(DISMISS_PREFIX.length);
             const link = await store.linkByChat(chatId);
             const cabinet = link === undefined ? undefined : await options.openCabinet?.(link.userId);
             const done = cabinet === undefined ? false : await cabinet.dismiss(eventId);
             await bot.answerCallbackQuery(id, done ? "Событие закрыто" : "Событие уже закрыто");
+          } else if (data.startsWith(DECIDE_PREFIX)) {
+            const [cardId = "", kind = ""] = data.slice(DECIDE_PREFIX.length).split(":");
+            const label = DECIDE_LABEL[kind as SpecialistTriageKindValue];
+            const link = await store.linkByChat(chatId);
+            const cabinet = link === undefined ? undefined : await options.openCabinet?.(link.userId);
+            const result =
+              cabinet?.decide === undefined || label === undefined
+                ? "unavailable"
+                : await cabinet.decide(cardId, kind as SpecialistTriageKindValue);
+            await bot.answerCallbackQuery(
+              id,
+              result === "ok"
+                ? `Принято: «${label}»`
+                : result === "not_found"
+                  ? "Закупка не найдена — возможно, уже удалена"
+                  : "Решение сейчас недоступно",
+            );
+            if (result === "ok" && messageId !== undefined && messageText !== undefined) {
+              try {
+                await bot.editMessageText({
+                  chatId,
+                  messageId,
+                  text: `${messageText}\n\nРешение: «${label}»`,
+                  buttons: [[{ text: "Открыть в консоли", url: publicUrl }]],
+                });
+              } catch (error) {
+                logger.error("Telegram message edit failed", error, { chatId, messageId });
+              }
+            }
           } else {
             await bot.answerCallbackQuery(id);
           }

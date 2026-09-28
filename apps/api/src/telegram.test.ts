@@ -15,18 +15,21 @@ const userId = "00000000-0000-4000-8000-0000000000bb";
 type SentMessage = {
   chatId: string;
   text: string;
-  buttons?: { text: string; callbackData?: string }[];
+  buttons?: { text: string; callbackData?: string; url?: string }[][];
   keyboard?: string[][];
 };
 
 function stubBot(): TelegramBot & {
   sent: SentMessage[];
+  edited: { chatId: string; messageId: number; text: string; buttons?: SentMessage["buttons"] }[];
   answered: { id: string; text?: string }[];
 } {
   const sent: SentMessage[] = [];
+  const edited: { chatId: string; messageId: number; text: string; buttons?: SentMessage["buttons"] }[] = [];
   const answered: { id: string; text?: string }[] = [];
   return {
     sent,
+    edited,
     answered,
     async getMe() {
       return { username: "zakupki_test_bot" };
@@ -37,11 +40,16 @@ function stubBot(): TelegramBot & {
     async sendMessage(input) {
       sent.push(input);
     },
+    async editMessageText(input) {
+      edited.push(input);
+    },
     async answerCallbackQuery(id, text) {
       answered.push({ id, ...(text === undefined ? {} : { text }) });
     },
   };
 }
+
+const flatButtons = (message: SentMessage | undefined) => (message?.buttons ?? []).flat();
 
 function inboxItem(kind: string = "procedure_candidate", urgent = true): InboxFixtureItem {
   return {
@@ -63,11 +71,14 @@ function inboxItem(kind: string = "procedure_candidate", urgent = true): InboxFi
   };
 }
 
-function setup(openInbox: { id: string; title: string }[] = []) {
+function setup(
+  openInbox: { id: string; title: string; kind?: string; procurementId?: string }[] = [],
+) {
   const bot = stubBot();
   const store = createMemoryTelegramStore();
   store.seedWorkspaceLink(workspaceId, userId);
   const dismissed: string[] = [];
+  const decisions: { cardId: string; kind: string }[] = [];
   const notifier = createTelegramNotifier({
     bot,
     store,
@@ -80,6 +91,8 @@ function setup(openInbox: { id: string; title: string }[] = []) {
             workspaceId,
             inbox: openInbox.map((entry) => ({
               id: entry.id,
+              procurementId: entry.procurementId ?? "00000000-0000-4000-8000-0000000000cc",
+              kind: entry.kind ?? "status_changed",
               title: entry.title,
               statusLabel: "Подача предложений",
               detail: "Номер: 1.",
@@ -89,10 +102,14 @@ function setup(openInbox: { id: string; title: string }[] = []) {
               dismissed.push(id);
               return true;
             },
+            async decide(cardId, kind) {
+              decisions.push({ cardId, kind });
+              return cardId === "missing" ? "not_found" : "ok";
+            },
           }
         : undefined,
   });
-  return { bot, store, notifier, dismissed };
+  return { bot, store, notifier, dismissed, decisions };
 }
 
 describe("telegram notifier", () => {
@@ -123,7 +140,11 @@ describe("telegram notifier", () => {
     expect(bot.sent).toHaveLength(1);
     expect(bot.sent[0]?.chatId).toBe("777");
     expect(bot.sent[0]?.text).toContain("Поставка КТП");
-    expect(bot.sent[0]?.buttons?.some((button) => button.callbackData === "d:evt-procedure_candidate")).toBe(true);
+    expect(flatButtons(bot.sent[0]).some((button) => button.callbackData === "d:evt-procedure_candidate")).toBe(true);
+    // A candidate ships the triage row: the specialist decides from the chat.
+    expect(flatButtons(bot.sent[0]).map((button) => button.text)).toEqual(
+      expect.arrayContaining(["Следить", "Участвовать", "Не нужно"]),
+    );
   });
 
   it("rejects a wrong or reused code", async () => {
@@ -168,6 +189,8 @@ describe("telegram notifier", () => {
     expect(bot.sent).toHaveLength(0);
     await notifier.notifyInbox(workspaceId, inboxItem("deadline_changed"));
     expect(bot.sent).toHaveLength(1);
+    // A watch-change event is already decided — no triage row on it.
+    expect(flatButtons(bot.sent[0]).some((button) => button.callbackData?.startsWith("t:"))).toBe(false);
   });
 
   it("lists open inbox rows on /new and dismisses from a button", async () => {
@@ -196,6 +219,50 @@ describe("telegram notifier", () => {
     expect(bot.answered[0]?.text).toBe("Событие закрыто");
   });
 
+  it("applies a triage decision from an inline button and rewrites the card message", async () => {
+    const { bot, notifier, decisions } = setup();
+    const { code } = await notifier.createLinkCode(userId);
+    await notifier.handleUpdate({ updateId: 1, message: { chatId: "777", text: `/start ${code}` } });
+
+    const cardId = "00000000-0000-4000-8000-0000000000cc";
+    await notifier.handleUpdate({
+      updateId: 2,
+      callbackQuery: {
+        id: "cb2",
+        chatId: "777",
+        data: `t:${cardId}:participate`,
+        messageId: 55,
+        messageText: "Новая закупка\nПоставка КТП для завода",
+      },
+    });
+    expect(decisions).toEqual([{ cardId, kind: "participate" }]);
+    expect(bot.answered[0]?.text).toBe("Принято: «Участвовать»");
+    // The decided message keeps only the console link — no second guess.
+    expect(bot.edited[0]?.text).toContain("Решение: «Участвовать»");
+    expect(flatButtons(bot.edited[0] as SentMessage).map((button) => button.text)).toEqual([
+      "Открыть в консоли",
+    ]);
+  });
+
+  it("does not decide for an unlinked chat or a missing card", async () => {
+    const { bot, notifier, decisions } = setup();
+    await notifier.handleUpdate({
+      updateId: 1,
+      callbackQuery: { id: "cb3", chatId: "999", data: "t:00000000-0000-4000-8000-0000000000cc:monitor" },
+    });
+    expect(decisions).toEqual([]);
+    expect(bot.answered[0]?.text).toBe("Решение сейчас недоступно");
+
+    const { code } = await notifier.createLinkCode(userId);
+    await notifier.handleUpdate({ updateId: 2, message: { chatId: "777", text: `/start ${code}` } });
+    await notifier.handleUpdate({
+      updateId: 3,
+      callbackQuery: { id: "cb4", chatId: "777", data: "t:missing:reject" },
+    });
+    expect(decisions).toEqual([{ cardId: "missing", kind: "reject" }]);
+    expect(bot.answered.at(-1)?.text).toContain("не найдена");
+  });
+
   it("/stop unlinks the chat", async () => {
     const { bot, notifier } = setup();
     const { code } = await notifier.createLinkCode(userId);
@@ -213,7 +280,9 @@ describe("formatInboxMessage", () => {
     const message = formatInboxMessage(item, "http://x.test");
     expect(message.text).not.toContain("<КТП>");
     expect(message.text).toContain("&lt;КТП&gt;");
-    expect(message.buttons[0]?.url).toBe("http://x.test");
+    expect(message.buttons.flat().find((button) => button.url !== undefined)?.url).toBe(
+      "http://x.test",
+    );
   });
 });
 

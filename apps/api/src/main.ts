@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SourceId } from "@procurement/contracts";
 import { createLogger } from "@procurement/observability";
-import { buildSpecialistApi } from "./app.js";
+import { buildSpecialistApi, type SpecialistApi } from "./app.js";
 import { createSmtpMailPort } from "./auth/mail.js";
 import { resolveBlobDirectory } from "./blobs.js";
 import { startDiscoveryRepeat } from "./discovery-queue.js";
@@ -143,6 +143,9 @@ async function main(): Promise<void> {
   // off rather than announcing the same inbox events again after a restart.
   let telegram: TelegramNotifier | undefined;
   let telegramOk = false;
+  // The notifier is built before the app (notifyInbox is an app option), but
+  // triage callbacks only arrive via polling that starts after the app exists.
+  const decideBridge: { fn?: SpecialistApi["decideForWorkspace"] } = {};
   const telegramBot = createTelegramBotFromEnv(process.env);
   if (telegramBot !== undefined && persistence.db !== undefined) {
     try {
@@ -165,6 +168,8 @@ async function main(): Promise<void> {
             workspaceId,
             inbox: cabinet.catalog.urgentInbox().map((entry) => ({
               id: entry.id,
+              procurementId: entry.procurementId,
+              kind: entry.kind,
               title: entry.title,
               statusLabel: entry.statusLabel,
               detail: entry.detail,
@@ -175,6 +180,11 @@ async function main(): Promise<void> {
               cabinet.workspace.setDismissedInboxIds(cabinet.catalog.dismissedIds());
               await persistence.cabinets.persist(cabinet);
               return true;
+            },
+            async decide(cardId, kind) {
+              if (decideBridge.fn === undefined) return "unavailable";
+              const card = await decideBridge.fn(workspaceId, cardId, kind);
+              return card === undefined ? "not_found" : "ok";
             },
           };
         },
@@ -268,6 +278,7 @@ async function main(): Promise<void> {
       postgresPing: persistence.ping,
     },
   });
+  decideBridge.fn = app.decideForWorkspace;
   const port = Number.parseInt(process.env["API_PORT"] ?? "3001", 10);
   await app.listen({ port, host: "127.0.0.1" });
   const transport = discoveryTransport(process.env);

@@ -753,7 +753,8 @@ function rejectionNotes(
     .map((item) => {
       let host = item.url;
       try {
-        host = new URL(item.url).hostname;
+        const parsed = new URL(item.url);
+        host = parsed.hostname.length > 0 ? parsed.hostname : item.url;
       } catch {
         // keep the raw url as the note target
       }

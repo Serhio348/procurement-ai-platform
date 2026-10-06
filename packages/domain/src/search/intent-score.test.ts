@@ -507,6 +507,40 @@ describe("scoreSearchIntent", () => {
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
   });
 
+  it("does not read «электронный» as the электрооборудование of a works profile", () => {
+    // Live false positive: marketing/3722849 «поверка медицинского
+    // оборудования» reached two cabinets as match 90 because the adjective
+    // stem of «электронный» collapsed into the bound prefix «электро».
+    // The deployed profile verbatim: «электромонтажные работы» is what made
+    // the lot look like the wanted action, so a trimmed list would not catch it.
+    const worksPlan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "электрооборудование",
+        "КТП",
+        "НКУ",
+        "сети электроснабжения",
+        "электромонтажные работы",
+        "монтаж",
+        "пусконаладка",
+      ],
+      excludeKeywords: [],
+    });
+    const card = ProcedureCard.parse({
+      ...procedureCard("поверка медицинского оборудования", "поверка электронный термометр"),
+      lots: [
+        { number: "1", title: "поверке Beurer PO 30" },
+        { number: "2", title: "поверка электронный термометр" },
+        { number: "3", title: "поверке термометр электронный" },
+        { number: "4", title: "поверке электрокардиограф Смарт" },
+      ],
+    });
+
+    const result = scoreSearchIntentFromProcedure(card, worksPlan);
+    expect(result.decision).not.toBe("match");
+    expect(result.matchedObjects).not.toContain("электрооборудование");
+  });
+
   it("does not match a design profile on a construction object named проект", () => {
     const designPlan = inferSearchIntentPlan({
       name: "Проектирование электроснабжения и электрооборудования",

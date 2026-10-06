@@ -163,7 +163,11 @@ export function stemWord(raw: string): string {
       }
     }
   }
-  if (stem.endsWith("нн") && stem.length > 5) stem = stem.slice(0, -2);
+  // The adjective suffix is a single «н» («бетонный» → «бетон»). Taking both
+  // letters of «нн» eats a root that itself ends in «н»: «электронный» would
+  // become the bound prefix «электро», which is a prefix of every
+  // электро-compound («электрооборудование», «электромонтажные»).
+  if (stem.endsWith("нн") && stem.length > 5) stem = stem.slice(0, -1);
   else if (stem.endsWith("н") && stem.length > 5) {
     const stripped = stem.slice(0, -1);
     // Keep «проектн» (проектной документации). Stripping «н» would

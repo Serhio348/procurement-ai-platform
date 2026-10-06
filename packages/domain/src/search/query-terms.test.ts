@@ -26,6 +26,18 @@ describe("stemWord", () => {
     expect(termOccurs("пуско-наладочные работы насоса", "пусконаладка")).toBe(true);
     expect(termOccurs("пусконаладочные работы", "пуско-наладка")).toBe(true);
   });
+
+  it("keeps a root that ends in н instead of leaving a bound prefix", () => {
+    // «электронный» must not collapse to «электро», which is a prefix of
+    // every электро-compound and would match электрооборудование.
+    expect(stemWord("электронный")).toBe("электрон");
+    expect(stemWord("бетонный")).toBe("бетон");
+    expect(stemsShareRoot(stemWord("электрооборудование"), stemWord("электронный"))).toBe(false);
+    expect(termOccurs("поверка электронный термометр", "электрооборудование")).toBe(false);
+    expect(termOccurs("Электронная торговая площадка", "электромонтажные работы")).toBe(false);
+    // The real compound still matches its own inflections.
+    expect(termOccurs("Поставка электрооборудования", "электрооборудование")).toBe(true);
+  });
 });
 
 describe("поставка vs поставщик", () => {

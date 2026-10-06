@@ -2166,6 +2166,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     // Drop the run slot first: a background scoring job of this profile
     // turns into a no-op instead of finishing against a deleted owner.
     searchProgress.clear(params.id);
+    const hasDecision = (sourceProcurementId: string): boolean =>
+      workspace().latestKind(sourceProcurementId) !== undefined;
+    catalog().releaseProfile(params.id, hasDecision);
     workspace().removeProfile(params.id);
     await cabinets.deleteProfile(currentCabinet(), params.id);
     logger.info("Specialist working profile removed", { id: params.id });

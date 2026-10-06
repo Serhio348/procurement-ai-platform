@@ -292,6 +292,71 @@ describe("SpecialistCatalog", () => {
     expect(catalog.procurement(card.id)?.title).toBe("НКУ щитовое");
   });
 
+  it("forgets an undecided card of a deleted profile and refuses to recreate it", () => {
+    const catalog = new SpecialistCatalog();
+    const profileId = "00000000-0000-4000-8000-000000000901";
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000030",
+      title: "поверка медицинского оборудования",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/marketing/view/3722849",
+      sourceProcurementId: "marketing/3722849",
+      foundAs: "review",
+      profileIds: [profileId],
+    });
+    catalog.upsertCase(card);
+    catalog.record(inboxItemFromFoundCard(card, "2026-10-05T10:00:00.000Z"));
+    catalog.releaseProfile(profileId, () => false);
+
+    expect(catalog.storedCases()).toEqual([]);
+    expect(catalog.inboxItems()).toEqual([]);
+
+    catalog.upsertCase(card);
+    expect(catalog.storedCases()).toEqual([]);
+  });
+
+  it("keeps a decided card when its profile is deleted and strips that profile", () => {
+    const catalog = new SpecialistCatalog();
+    const gone = "00000000-0000-4000-8000-000000000901";
+    const kept = "00000000-0000-4000-8000-000000000902";
+    catalog.upsertCase(
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000031",
+        title: "Поставка КТП",
+        status: "accepting_bids",
+        statusLabel: "приём",
+        url: "https://goszakupki.by/auction/view/031",
+        sourceProcurementId: "auction/031",
+        triage: "participate",
+        profileIds: [gone],
+        foundAs: "match",
+        relevanceScore: 90,
+      }),
+    );
+    catalog.upsertCase(
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000032",
+        title: "Монтаж НКУ",
+        status: "accepting_bids",
+        statusLabel: "приём",
+        url: "https://goszakupki.by/auction/view/032",
+        sourceProcurementId: "auction/032",
+        profileIds: [gone, kept],
+        foundAs: "match",
+      }),
+    );
+
+    catalog.releaseProfile(gone, () => false);
+
+    const decided = catalog.storedCases().find((item) => item.sourceProcurementId === "auction/031");
+    const shared = catalog.storedCases().find((item) => item.sourceProcurementId === "auction/032");
+    expect(decided?.triage).toBe("participate");
+    expect(decided?.profileIds).toEqual([]);
+    expect(decided?.foundAs).toBeUndefined();
+    expect(shared?.profileIds).toEqual([kept]);
+  });
+
   it("does not treat inbox stubs as stored cases for persist", () => {
     const catalog = SpecialistCatalog.parse(fixture);
     expect(catalog.storedCases()).toEqual([]);

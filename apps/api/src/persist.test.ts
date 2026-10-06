@@ -292,4 +292,60 @@ describe("openSpecialistPersistence", () => {
     expect(catalog.storedCases()).toEqual([]);
     await persistence.close();
   });
+
+  it("drops an undecided card of a deleted profile and keeps a decided one", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "workspace-"));
+    tmpDirs.push(directory);
+    const workspacePath = path.join(directory, "specialist-workspace.json");
+    const persistence = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const cabinet = await persistence.cabinets.open(TEST_WORKSPACE_ID);
+    const gone = cabinet.workspace.profile().id;
+    cabinet.workspace.addProfile();
+    const review = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000931",
+      title: "поверка медицинского оборудования",
+      status: "accepting_bids",
+      statusLabel: "приём предложений",
+      url: "https://goszakupki.by/marketing/view/3722849",
+      sourceProcurementId: "marketing/3722849",
+      foundAs: "review",
+      profileIds: [gone],
+    });
+    const decided = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000932",
+      title: "Поставка КТП",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/932",
+      sourceProcurementId: "auction/932",
+      triage: "participate",
+      profileIds: [gone],
+      foundAs: "match",
+      relevanceScore: 90,
+    });
+    cabinet.catalog.upsertCase(review);
+    cabinet.catalog.upsertCase(decided);
+    cabinet.catalog.record(inboxItemFromFoundCard(review, "2026-10-05T10:00:00.000Z"));
+    cabinet.workspace.removeProfile(gone);
+    await persistence.cabinets.deleteProfile(cabinet, gone);
+    await persistence.close();
+
+    const restarted = await openSpecialistPersistence({
+      workspacePath,
+      databaseUrl: undefined,
+      logger: silentLogger,
+    });
+    const restored = await restarted.cabinets.open(TEST_WORKSPACE_ID);
+    const titles = restored.catalog.storedCases().map((item) => item.title);
+    expect(titles).toEqual(["Поставка КТП"]);
+    expect(restored.catalog.storedCases()[0]?.triage).toBe("participate");
+    expect(restored.catalog.storedCases()[0]?.profileIds).toEqual([]);
+    expect(restored.catalog.inboxItems()).toEqual([]);
+    expect(restored.workspace.profiles().some((item) => item.id === gone)).toBe(false);
+    await restarted.close();
+  });
 });

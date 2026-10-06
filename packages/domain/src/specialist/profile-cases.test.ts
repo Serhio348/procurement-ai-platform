@@ -3,6 +3,7 @@ import { SpecialistProcurementCard, SpecialistWorkingProfile } from "@procuremen
 import {
   attachProfileToCard,
   cardAssessmentVerdictFor,
+  releaseProfileFromCard,
   procurementBelongsToProfile,
   procurementsForProfile,
   projectCardForProfile,
@@ -117,5 +118,56 @@ describe("profile-owned procurements", () => {
     expect(cardAssessmentVerdictFor(afterB, water.id)).toBe("review");
     expect(projectCardForProfile(afterB, substations.id).relevanceScore).toBe(77);
     expect(afterB.foundAs).toBe("match");
+  });
+});
+
+describe("releaseProfileFromCard", () => {
+  const gone = substations.id;
+  const other = water.id;
+
+  it("drops an undecided card that only the deleted profile held", () => {
+    const owned = attachProfileToCard(card("поверка медицинского оборудования"), gone);
+    expect(releaseProfileFromCard(owned, gone).action).toBe("drop");
+  });
+
+  it("keeps a card another profile still holds, without the deleted profile", () => {
+    const shared = attachProfileToCard(attachProfileToCard(card("НКУ"), gone), other);
+    const released = releaseProfileFromCard(shared, gone);
+    expect(released.action).toBe("keep");
+    if (released.action !== "keep") return;
+    expect(released.card.profileIds).toEqual([other]);
+  });
+
+  it("keeps a specialist decision and drops the deleted profile's verdict", () => {
+    const decided = withCardAssessment(
+      SpecialistProcurementCard.parse({
+        ...attachProfileToCard(card("КТП"), gone),
+        triage: "participate",
+        foundAs: "match",
+        relevanceScore: 90,
+        relevanceReason: "Лот 2: Совпадает оборудование: электрооборудование.",
+      }),
+      gone,
+      { verdict: "match", score: 90, reason: "причина", evaluatedAt: "2026-10-05T10:00:00.000Z" },
+    );
+    const released = releaseProfileFromCard(decided, gone);
+    expect(released.action).toBe("keep");
+    if (released.action !== "keep") return;
+    expect(released.card.triage).toBe("participate");
+    expect(released.card.profileIds).toEqual([]);
+    expect(released.card.assessments[gone]).toBeUndefined();
+    expect(released.card.foundAs).toBeUndefined();
+    expect(released.card.relevanceScore).toBeUndefined();
+  });
+
+  it("keeps the card when the decision lives only in the journal", () => {
+    const owned = attachProfileToCard(card("КТП"), gone);
+    const released = releaseProfileFromCard(owned, gone, true);
+    expect(released.action).toBe("keep");
+  });
+
+  it("leaves a card the profile never held", () => {
+    const owned = attachProfileToCard(card("Вода"), other);
+    expect(releaseProfileFromCard(owned, gone).action).toBe("untouched");
   });
 });

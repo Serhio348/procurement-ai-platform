@@ -32,6 +32,12 @@ import {
 import { withRlsBypass, withUser, withWorkspace, withWorkspaceWrite } from "./workspace-scope.js";
 
 export const DEFAULT_SPECIALIST_WORKSPACE_ID = "console";
+
+/** Result of detaching one profile from a card. The rule lives in domain; the store only applies it. */
+export type ProfileCaseRelease =
+  | { action: "untouched" }
+  | { action: "drop" }
+  | { action: "keep"; card: SpecialistProcurementCardValue };
 export const PERSONAL_WORKSPACE_BACKFILL_ID = "personal_workspaces.v1";
 export const DEFAULT_CASE_LIST_LIMIT = 100;
 
@@ -329,6 +335,7 @@ export function createSpecialistStore(db: Database) {
       profileId: string,
       activeProfileId: string,
       searchIdsByProfile: Record<string, string[]>,
+      classify: (card: SpecialistProcurementCardValue) => ProfileCaseRelease,
     ): Promise<void> {
       const now = new Date().toISOString();
       await withWorkspaceWrite(db, workspaceId, async (tx) => {
@@ -337,6 +344,48 @@ export function createSpecialistStore(db: Database) {
           .from(workspaceSettings)
           .where(eq(workspaceSettings.workspaceId, workspaceId))
           .limit(1);
+        const caseRows = await tx
+          .select({
+            id: workspaceProcurements.id,
+            procurementId: workspaceProcurements.procurementId,
+            triage: workspaceProcurements.triage,
+            foundAs: workspaceProcurements.foundAs,
+            archived: workspaceProcurements.archived,
+            lastSeenAt: workspaceProcurements.lastSeenAt,
+            card: workspaceProcurements.card,
+          })
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        const dropIds: string[] = [];
+        const keep: SpecialistProcurementCardValue[] = [];
+        for (const row of caseRows) {
+          const card = parseCaseRow(row);
+          if (card === undefined) continue;
+          const released = classify(card);
+          if (released.action === "drop") dropIds.push(card.id);
+          else if (released.action === "keep") keep.push(released.card);
+        }
+        // This cabinet only. Card ids are shared across cabinets; the
+        // workspace filter is what keeps the other cabinet's row.
+        await deleteWorkspaceCaseRows(tx, workspaceId, dropIds);
+        for (const card of keep) {
+          await saveWorkspaceCase(tx, workspaceId, card);
+        }
+        const ownRows = await tx
+          .select({ id: workspaceProcurements.id })
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        const ownIds = ownRows.map((row) => row.id);
+        if (ownIds.length > 0) {
+          await tx
+            .delete(workspaceProcurementProfiles)
+            .where(
+              and(
+                eq(workspaceProcurementProfiles.domainProfileId, profileId),
+                inArray(workspaceProcurementProfiles.workspaceProcurementId, ownIds),
+              ),
+            );
+        }
         const deletedProfileIds = [
           ...new Set([
             ...deletedProfileIdsFromSettings(settingRows[0]?.settings),
@@ -1529,6 +1578,36 @@ function caseIdentityMatch(ids: string | readonly string[]) {
 }
 
 type StoreTx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+async function deleteWorkspaceCaseRows(
+  tx: StoreTx,
+  workspaceId: string,
+  ids: readonly string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  const matched = await tx
+    .select({ id: workspaceProcurements.id })
+    .from(workspaceProcurements)
+    .where(and(eq(workspaceProcurements.workspaceId, workspaceId), caseIdentityMatch(ids)));
+  const rowIds = matched.map((row) => row.id);
+  if (rowIds.length === 0) return;
+  await tx
+    .delete(workspaceProcurementProfiles)
+    .where(inArray(workspaceProcurementProfiles.workspaceProcurementId, rowIds));
+  await tx
+    .delete(workspaceInbox)
+    .where(
+      and(
+        eq(workspaceInbox.workspaceId, workspaceId),
+        inArray(workspaceInbox.workspaceProcurementId, rowIds),
+      ),
+    );
+  await tx
+    .delete(workspaceProcurements)
+    .where(
+      and(eq(workspaceProcurements.workspaceId, workspaceId), inArray(workspaceProcurements.id, rowIds)),
+    );
+}
 
 export function caseListTimeShouldBump(
   previous:

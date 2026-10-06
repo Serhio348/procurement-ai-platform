@@ -9,7 +9,7 @@ import {
 import { compileChangeAlert } from "../notification/message.js";
 import { isPrunableUndecidedCase, statusLabel } from "./case.js";
 import { inboxTopic, inboxTopicLabel } from "./inbox-action.js";
-import { mergeProfileIds } from "./profile-cases.js";
+import { mergeProfileIds, releaseProfileFromCard } from "./profile-cases.js";
 
 export class SpecialistCatalog {
   readonly #byChangeId = new Map<string, InboxFixtureItemValue>();
@@ -17,6 +17,8 @@ export class SpecialistCatalog {
   readonly #cases = new Map<string, SpecialistProcurementCardValue>();
   readonly #dismissed = new Set<string>();
   readonly #pruned = new Set<string>();
+  /** Profiles deleted in this process. A later upsert must not reattach them. */
+  readonly #goneProfiles = new Set<string>();
 
   static parse(raw: unknown): SpecialistCatalog {
     const fixture = InboxFixture.parse(raw);
@@ -45,13 +47,50 @@ export class SpecialistCatalog {
     if (this.#pruned.has(card.id)) return;
     const previous = this.#cases.get(card.id);
     const parsed = SpecialistProcurementCard.parse(card);
+    const profileIds = mergeProfileIds(previous?.profileIds, parsed.profileIds).filter(
+      (id) => !this.#goneProfiles.has(id),
+    );
+    const assessments = Object.fromEntries(
+      Object.entries(parsed.assessments).filter(([id]) => !this.#goneProfiles.has(id)),
+    );
+    // An in-flight search of a deleted profile still holds the old card. Do not
+    // recreate an undecided case that belonged only to that profile.
+    const onlyGone =
+      parsed.profileIds.some((id) => this.#goneProfiles.has(id)) &&
+      profileIds.length === 0 &&
+      parsed.triage === undefined &&
+      parsed.archived !== true;
+    if (onlyGone && previous === undefined) return;
     this.#cases.set(
       card.id,
       SpecialistProcurementCard.parse({
         ...parsed,
-        profileIds: mergeProfileIds(previous?.profileIds, parsed.profileIds),
+        profileIds,
+        assessments,
       }),
     );
+  }
+
+  /**
+   * Detach one profile from every stored card. Undecided cards that no other
+   * profile holds are forgotten (the same source may be found again). A
+   * specialist decision stays, without that profile's verdict.
+   */
+  releaseProfile(profileId: string, hasDecision: (sourceProcurementId: string) => boolean): void {
+    this.#goneProfiles.add(profileId);
+    for (const card of [...this.#cases.values()]) {
+      const released = releaseProfileFromCard(
+        card,
+        profileId,
+        hasDecision(card.sourceProcurementId),
+      );
+      if (released.action === "drop") {
+        this.#cases.delete(card.id);
+        this.#forgetInbox(card.id);
+        continue;
+      }
+      if (released.action === "keep") this.#cases.set(card.id, released.card);
+    }
   }
 
   dropCase(id: string): void {
@@ -89,6 +128,17 @@ export class SpecialistCatalog {
   dismissMany(ids: readonly string[]): void {
     for (const id of ids) {
       this.dismiss(id);
+    }
+  }
+
+  /** Removes inbox rows of a dropped case so the next persist cannot write them back. */
+  #forgetInbox(procurementId: string): void {
+    for (let index = this.#order.length - 1; index >= 0; index -= 1) {
+      const item = this.#order[index];
+      if (item === undefined || item.change.procurementId !== procurementId) continue;
+      this.#order.splice(index, 1);
+      this.#byChangeId.delete(item.change.id);
+      this.#dismissed.delete(item.change.id);
     }
   }
 

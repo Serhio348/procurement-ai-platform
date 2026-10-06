@@ -19,6 +19,7 @@ import {
   isPrunableUndecidedCase,
   isWatchedTriage,
   pageListedCases,
+  releaseProfileFromCard,
   SpecialistCatalog,
   SpecialistWorkspace,
 } from "@procurement/domain";
@@ -491,6 +492,9 @@ export async function openSpecialistPersistence(options: {
       // and the row came back after reload.
       rememberDeletedProfile(cabinet.workspaceId, profileId);
       cache.set(cabinet.workspaceId, Promise.resolve(cabinet));
+      const hasDecision = (sourceProcurementId: string): boolean =>
+        cabinet.workspace.latestKind(sourceProcurementId) !== undefined;
+      cabinet.catalog.releaseProfile(profileId, hasDecision);
       const snapshot = scrubDeletedProfiles(
         cabinet.workspaceId,
         cabinet.workspace.snapshot(),
@@ -505,12 +509,21 @@ export async function openSpecialistPersistence(options: {
           profileId,
           durable.snapshot().activeProfileId,
           durable.snapshot().searchIdsByProfile,
+          (card) => releaseProfileFromCard(card, profileId, hasDecision(card.sourceProcurementId)),
         );
         return;
       }
       await saveWorkspaceFile(
         workspaceFilePath(options.workspacePath, cabinet.workspaceId),
         durable,
+      );
+      await writeJson(
+        casesFilePath(options.workspacePath, cabinet.workspaceId),
+        cabinet.catalog.storedCases(),
+      );
+      await writeJson(
+        inboxFilePath(options.workspacePath, cabinet.workspaceId),
+        cabinet.catalog.inboxItems(),
       );
     },
     async removeCases(workspaceId, ids) {

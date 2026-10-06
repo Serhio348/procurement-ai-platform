@@ -98,6 +98,60 @@ export function attachProfileToCard(
   });
 }
 
+export type ProfileRelease =
+  | { action: "untouched" }
+  | { action: "drop" }
+  | { action: "keep"; card: SpecialistProcurementCardValue };
+
+/**
+ * What remains of a card after one profile is deleted.
+ * A specialist decision (triage, archive, or a journal entry the caller
+ * reports as `hasDecision`) keeps the card and only detaches that profile.
+ * Another profile's link keeps it too. An undecided card that belonged only
+ * to the deleted profile is dropped — a dead id would hide it from every
+ * living profile. The shared catalogue row is not this function's concern.
+ */
+export function releaseProfileFromCard(
+  card: SpecialistProcurementCardValue,
+  profileId: string,
+  hasDecision = false,
+): ProfileRelease {
+  const linked =
+    card.profileIds.includes(profileId) ||
+    Object.prototype.hasOwnProperty.call(card.assessments, profileId);
+  if (!linked) return { action: "untouched" };
+  const next = cardWithoutProfile(card, profileId);
+  const decided = hasDecision || card.triage !== undefined || card.archived === true;
+  if (!decided && next.profileIds.length === 0) return { action: "drop" };
+  return { action: "keep", card: next };
+}
+
+function cardWithoutProfile(
+  card: SpecialistProcurementCardValue,
+  profileId: string,
+): SpecialistProcurementCardValue {
+  const profileIds = card.profileIds.filter((id) => id !== profileId);
+  const assessments = { ...card.assessments };
+  delete assessments[profileId];
+  const derived = deriveAssessmentView(assessments);
+  const rest = { ...card };
+  delete rest.foundAs;
+  delete rest.relevanceScore;
+  delete rest.relevanceReason;
+  return SpecialistProcurementCard.parse({
+    ...rest,
+    profileIds,
+    assessments,
+    ...(derived === undefined
+      ? {}
+      : {
+          foundAs: derived.verdict,
+          ...(derived.score === undefined ? {} : { relevanceScore: derived.score }),
+          ...(derived.reason === undefined ? {} : { relevanceReason: derived.reason }),
+        }),
+  });
+}
+
 export function mergeProfileIds(
   previous: readonly string[] | undefined,
   incoming: readonly string[],

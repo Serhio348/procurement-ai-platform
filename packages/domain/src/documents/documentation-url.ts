@@ -19,6 +19,15 @@ export function isBlockedDocumentationHost(hostname: string): boolean {
     return true;
   }
   if (host === "metadata.google.internal") return true;
+  if (host.startsWith("[") && host.endsWith("]")) {
+    const inner = host.slice(1, -1);
+    if (inner === "::1") return true;
+    if (/^fe[89ab]/i.test(inner)) return true;
+    if (/^f[cd]/i.test(inner)) return true;
+    const mapped = inner.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+    if (mapped?.[1] !== undefined) return isBlockedDocumentationHost(mapped[1]);
+    return false;
+  }
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4 === null) return false;
   const octets = ipv4.slice(1).map((part) => Number(part));
@@ -36,6 +45,9 @@ export function isPublicDocumentationUrl(url: URL): boolean {
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
   if (isBlockedDocumentationHost(url.hostname)) return false;
   if (isGiasHost(url.hostname)) return false;
+  // A label without a dot can resolve through search domains into the LAN;
+  // public documentation never lives on a single-label or literal-v6 host.
+  if (!url.hostname.includes(".")) return false;
   return true;
 }
 

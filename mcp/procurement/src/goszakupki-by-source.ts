@@ -26,7 +26,11 @@ import {
   type GoszakupkiStatusOption,
 } from "./goszakupki-by-filters.js";
 import type { GoszakupkiPageClient } from "./goszakupki-by-http.js";
-import { downloadPublicDocumentation, type PublicDocumentationFetch } from "./public-download.js";
+import {
+  createSafePublicFetch,
+  downloadPublicDocumentation,
+  type PublicDocumentationFetch,
+} from "./public-download.js";
 import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.js";
 
 export interface GoszakupkiBySourceOptions {
@@ -63,7 +67,7 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     this.#cacheTtlMs = options.cacheTtlMs ?? 30_000;
     this.#cacheMaxEntries = options.cacheMaxEntries ?? 512;
     this.#now = options.now ?? (() => new Date());
-    this.#publicFetch = options.publicFetch ?? fetch;
+    this.#publicFetch = options.publicFetch ?? createSafePublicFetch();
     this.#logger = options.logger ?? silentLogger;
   }
 

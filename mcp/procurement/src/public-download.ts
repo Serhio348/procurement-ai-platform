@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import type { ProcurementFileBytes } from "@procurement/contracts";
 import {
   isBlockedDocumentationHost,
@@ -6,13 +7,37 @@ import {
   isYandexDiskHost,
 } from "@procurement/domain";
 import { SourceAccessError } from "./source-registry.js";
+import { request as undiciRequest } from "undici";
 
 export interface PublicDocumentationFetch {
   (url: string | URL, init?: RequestInit): Promise<Response>;
 }
 
+/**
+ * Global `fetch` hides 3xx responses under `redirect:"manual"` (the spec's
+ * opaqueredirect filter), which makes per-hop SSRF validation impossible.
+ * This adapter exposes the raw status and Location header instead.
+ */
+export function createSafePublicFetch(): PublicDocumentationFetch {
+  return async (url, init) => {
+    const { statusCode, headers, body } = await undiciRequest(String(url), {
+      method: (init?.method ?? "GET") as "GET",
+      ...(init?.headers === undefined ? {} : { headers: init.headers as Record<string, string> }),
+      ...(init?.signal === undefined ? {} : { signal: init.signal }),
+    });
+    const responseHeaders = new Headers();
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value === "string") responseHeaders.set(name, value);
+      else if (Array.isArray(value)) responseHeaders.set(name, value.join(", "));
+    }
+    const webBody = Readable.toWeb(body as unknown as Readable) as ReadableStream;
+    return new Response(webBody, { status: statusCode, headers: responseHeaders });
+  };
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
+const MAX_REDIRECT_HOPS = 5;
 
 export async function downloadPublicDocumentation(
   downloadUrl: string,
@@ -31,12 +56,7 @@ export async function downloadPublicDocumentation(
   const timeoutMs = limits.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = limits.maxBytes ?? DEFAULT_MAX_BYTES;
   const target = await resolvePublicDownloadUrl(parsed, fetchImpl, timeoutMs);
-  const response = await fetchImpl(target, {
-    method: "GET",
-    redirect: "follow",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: { accept: "*/*", "user-agent": "ProcurementAIPlatform/0.1 (documentation fetch)" },
-  });
+  const response = await fetchWithValidatedRedirects(fetchImpl, target, timeoutMs);
   if (response.status < 200 || response.status >= 300) {
     throw new SourceAccessError(
       "goszakupki_by",
@@ -46,6 +66,46 @@ export async function downloadPublicDocumentation(
   const bytes = await readCappedBytes(response, maxBytes);
   const contentType = response.headers.get("content-type") ?? "application/octet-stream";
   return { bytes, contentType };
+}
+
+/**
+ * Document links come from untrusted file contents: a public-looking URL may
+ * redirect to an internal address. `redirect:"follow"` cannot vet hops, so
+ * each Location is validated before the next request goes out.
+ */
+export async function fetchWithValidatedRedirects(
+  fetchImpl: PublicDocumentationFetch,
+  url: URL,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxHops = MAX_REDIRECT_HOPS,
+): Promise<Response> {
+  let current = url;
+  for (let hop = 0; hop <= maxHops; hop += 1) {
+    const response = await fetchImpl(current, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { accept: "*/*", "user-agent": "ProcurementAIPlatform/0.1 (documentation fetch)" },
+    });
+    const location = response.headers.get("location");
+    const isRedirect = response.status >= 300 && response.status < 400;
+    if (!isRedirect || location === null) return response;
+    await response.arrayBuffer().catch(() => {});
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new SourceAccessError("goszakupki_by", "document download returned an invalid redirect");
+    }
+    if (!isPublicDocumentationUrl(next) || isGoszakupkiHost(next.hostname)) {
+      throw new SourceAccessError(
+        "goszakupki_by",
+        `document download redirected to a blocked host ${next.hostname}`,
+      );
+    }
+    current = next;
+  }
+  throw new SourceAccessError("goszakupki_by", "document download exceeded the redirect limit");
 }
 
 export async function resolvePublicDownloadUrl(

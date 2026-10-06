@@ -405,6 +405,295 @@ describe("createProcurementDocumentIngest", () => {
     expect(next.documents.find((item) => item.sourceUrl.endsWith("/2"))?.hash).toBe(newHash);
   });
 
+  it("follows a hidden docx hyperlink and indexes the linked file", async () => {
+    const linkDocx = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>Скачать документацию</w:t></w:r></w:p></w:document>',
+      "word/_rels/document.xml.rels":
+        '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://files.by/docs/tz.pdf" TargetMode="External"/></Relationships>',
+    });
+    const docxHash = createHash("sha256").update(linkDocx).digest("hex");
+    const linkedBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x39]);
+    const linkedHash = createHash("sha256").update(linkedBytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-link-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, docxHash, linkDocx);
+    await putBlob(blobDirectory, linkedHash, linkedBytes);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName, args) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "link.docx",
+                sourceUrl: "https://goszakupki.by/files/link.docx",
+                downloadUrl: "https://goszakupki.by/files/link.docx?download=1",
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        const url = (args as { downloadUrl?: string }).downloadUrl ?? "";
+        const isLink = url === "https://files.by/docs/tz.pdf";
+        return {
+          structuredContent: {
+            hash: isLink ? linkedHash : docxHash,
+            storageKey: `blobs/${isLink ? linkedHash : docxHash}`,
+            sizeBytes: 1,
+            contentType: isLink ? "application/pdf" : "application/octet-stream",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const progress = createIngestProgressHub();
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+      progress,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    progress.begin(WS, card.id);
+    const next = await port.ingest(card, WS);
+    progress.done(WS, card.id);
+
+    const linked = next.documents.find((item) => item.sourceUrl.includes("#link/"));
+    expect(linked?.name).toContain("tz.pdf");
+    expect(linked?.name).toContain("link.docx");
+    expect(linked?.downloadUrl).toBe("https://files.by/docs/tz.pdf");
+    expect(linked?.hash).toBe(linkedHash);
+    expect(linked?.status).toBe("hashed");
+    expect(callTool.mock.calls.map((item) => item[1])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ downloadUrl: "https://files.by/docs/tz.pdf" }),
+      ]),
+    );
+    expect(progress.snapshot(WS, card.id).files.some((f) => f.sourceUrl.includes("#link/"))).toBe(
+      true,
+    );
+  });
+
+  it("marks a dead link failed without stalling the sibling document", async () => {
+    const linkDocx = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>текст</w:t></w:r></w:p></w:document>',
+      "word/_rels/document.xml.rels":
+        '<Relationships><Relationship Type="http://x/hyperlink" Target="https://files.by/gone.pdf"/></Relationships>',
+    });
+    const docxHash = createHash("sha256").update(linkDocx).digest("hex");
+    const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const pdfHash = createHash("sha256").update(pdfBytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-deadlink-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, docxHash, linkDocx);
+    await putBlob(blobDirectory, pdfHash, pdfBytes);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName, args) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "link.docx",
+                sourceUrl: "https://goszakupki.by/files/link.docx",
+                downloadUrl: "https://goszakupki.by/files/link.docx?download=1",
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+              {
+                name: "sibling.pdf",
+                sourceUrl: "https://goszakupki.by/files/sibling.pdf",
+                downloadUrl: "https://goszakupki.by/files/sibling.pdf?download=1",
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        const url = (args as { downloadUrl?: string }).downloadUrl ?? "";
+        if (url === "https://files.by/gone.pdf") throw new Error("HTTP 404");
+        return {
+          structuredContent: {
+            hash: url.includes("sibling") ? pdfHash : docxHash,
+            storageKey: `blobs/${url.includes("sibling") ? pdfHash : docxHash}`,
+            sizeBytes: 1,
+            contentType: "application/octet-stream",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    const dead = next.documents.find((item) => item.sourceUrl.includes("#link/"));
+    expect(dead?.status).toBe("download_failed");
+    expect(dead?.note).toContain("Не удалось скачать файл по ссылке");
+    expect(
+      next.documents.find((item) => item.name === "sibling.pdf")?.status,
+    ).toBe("hashed");
+  });
+
+  it("never fetches a link to an internal address from document text", async () => {
+    const inner = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>Схема: http://192.168.0.5/secret.pdf</w:t></w:r></w:p></w:document>',
+    });
+    const docxHash = createHash("sha256").update(inner).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-ssrf-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, docxHash, inner);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "plan.docx",
+                sourceUrl: "https://goszakupki.by/files/plan.docx",
+                downloadUrl: "https://goszakupki.by/files/plan.docx?download=1",
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        return {
+          structuredContent: {
+            hash: docxHash,
+            storageKey: `blobs/${docxHash}`,
+            sizeBytes: inner.byteLength,
+            contentType: "application/octet-stream",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    const downloads = callTool.mock.calls
+      .filter((call) => call[0] === "procurement.download")
+      .map((call) => (call[1] as { downloadUrl?: string }).downloadUrl);
+    expect(downloads).toEqual(["https://goszakupki.by/files/plan.docx?download=1"]);
+    expect(next.documents[0]?.extraction?.notes.join(" ")).toContain("192.168.0.5");
+  });
+
+  it("does not refetch a link that is already a listed document", async () => {
+    const inner = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>см https://files.by/tz.pdf тут</w:t></w:r></w:p></w:document>',
+    });
+    const docxHash = createHash("sha256").update(inner).digest("hex");
+    const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const pdfHash = createHash("sha256").update(pdfBytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-dedup-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, docxHash, inner);
+    await putBlob(blobDirectory, pdfHash, pdfBytes);
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName, args) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "tz.pdf",
+                sourceUrl: "https://files.by/tz.pdf",
+                downloadUrl: "https://files.by/tz.pdf",
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+              {
+                name: "plan.docx",
+                sourceUrl: "https://goszakupki.by/files/plan.docx",
+                downloadUrl: "https://goszakupki.by/files/plan.docx?download=1",
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-09-05T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        const url = (args as { downloadUrl?: string }).downloadUrl ?? "";
+        return {
+          structuredContent: {
+            hash: url.includes("plan") ? docxHash : pdfHash,
+            storageKey: `blobs/${url.includes("plan") ? docxHash : pdfHash}`,
+            sizeBytes: 1,
+            contentType: "application/octet-stream",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({
+      caller: { callTool },
+      blobDirectory,
+    });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "Кабель силовой",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    const downloads = callTool.mock.calls
+      .filter((call) => call[0] === "procurement.download")
+      .map((call) => (call[1] as { downloadUrl?: string }).downloadUrl);
+    expect(downloads?.sort()).toEqual([
+      "https://files.by/tz.pdf",
+      "https://goszakupki.by/files/plan.docx?download=1",
+    ]);
+    expect(next.documents.some((item) => item.sourceUrl.includes("#link/"))).toBe(false);
+  });
+
   it("does not report a download as hashed when the blob cannot be read back", async () => {
     const hash = "a".repeat(64);
     const port = createProcurementDocumentIngest({

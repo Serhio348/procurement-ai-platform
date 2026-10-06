@@ -17,13 +17,20 @@ import {
   archiveMemberSourceUrl,
   ingestFileFinishState,
   isArchiveMemberSourceUrl,
+  isLinkedDocumentSourceUrl,
+  linkedDocumentDisplayName,
+  linkedDocumentSourceUrl,
   looksLikeHtmlPage,
   keepTrustedClaims,
   MAX_ARCHIVE_UNPACK_DEPTH,
+  MAX_DOCUMENT_LINK_DEPTH,
+  MAX_LINKED_DOCUMENTS_PER_JOB,
   missingCommercialKeys,
+  normalizeLinkUrl,
   participateReadablePages,
   participateRuleClaims,
   rankCommercialPages,
+  selectDocumentLinkCandidates,
 } from "@procurement/domain";
 import {
   McpToolCallError,
@@ -33,6 +40,7 @@ import {
 } from "@procurement/mcp-client";
 import {
   archiveContainerExtraction,
+  collectDocumentLinks,
   createDocumentScanEngine,
   recognizeSpecialistDocument,
   resolveDocumentFormat,
@@ -77,6 +85,18 @@ export interface ProcurementDocumentIngestOptions {
 /** Model pages are capped: payment wording sits on a handful of pages, not everywhere. */
 export const DEFAULT_COMMERCIAL_READER_PAGE_LIMIT = 12;
 
+/** Job-wide link state: one dedupe set, one fetch budget, one download path. */
+interface DocumentLinkJob {
+  client: ProcurementMcpClient;
+  requestId: ReturnType<typeof RequestId.parse>;
+  sourceId: ReturnType<typeof SourceId.parse>;
+  /** Processed entry sourceUrls — `#link/` entries land here too. */
+  seen: Set<string>;
+  /** Normalized external URLs already fetched or listed in this job. */
+  fetched: Set<string>;
+  budget: { remaining: number };
+}
+
 export function createProcurementDocumentIngest(
   options: ProcurementDocumentIngestOptions,
 ): SpecialistDocumentIngestPort {
@@ -117,8 +137,22 @@ export function createProcurementDocumentIngest(
           .filter((item) => item.status === "hashed")
           .map((item) => [item.sourceUrl, item] as const),
       );
+      // Links found inside documents join the same job: dedup against the
+      // listed pack so an attachment is never fetched twice through a link.
       const documents: SpecialistCaseDocumentValue[] = [];
       const seen = new Set<string>();
+      const links: DocumentLinkJob = {
+        client,
+        requestId,
+        sourceId,
+        seen,
+        fetched: new Set(
+          listed.documents
+            .map((source) => normalizeLinkUrl(source.downloadUrl ?? source.sourceUrl))
+            .filter((url): url is string => url !== undefined),
+        ),
+        budget: { remaining: MAX_LINKED_DOCUMENTS_PER_JOB },
+      };
       try {
         for (const source of listed.documents) {
           const existing = known.get(source.sourceUrl);
@@ -143,6 +177,8 @@ export function createProcurementDocumentIngest(
             logger,
             ...(progress === undefined ? {} : { progress }),
             procurementId: card.id,
+            links,
+            linkDepth: 0,
           });
           documents.push(...ingested);
           seen.add(source.sourceUrl);
@@ -152,7 +188,7 @@ export function createProcurementDocumentIngest(
       }
       for (const previous of card.documents) {
         if (seen.has(previous.sourceUrl)) continue;
-        if (!isArchiveMemberSourceUrl(previous.sourceUrl)) continue;
+        if (!isArchiveMemberSourceUrl(previous.sourceUrl) && !isLinkedDocumentSourceUrl(previous.sourceUrl)) continue;
         documents.push(previous);
       }
       return finishCommercialRead(card, documents, options, logger);
@@ -301,6 +337,8 @@ async function ingestOne(input: {
   logger: Logger;
   progress?: ScopedIngestProgress;
   procurementId: string;
+  links?: DocumentLinkJob;
+  linkDepth?: number;
 }): Promise<SpecialistCaseDocumentValue[]> {
   const listed = {
     name: input.name,
@@ -386,6 +424,8 @@ async function ingestOne(input: {
       ...(input.progress === undefined ? {} : { progress: input.progress }),
       procurementId: input.procurementId,
       depth: 0,
+      ...(input.links === undefined ? {} : { links: input.links }),
+      linkDepth: input.linkDepth ?? 0,
     });
   } catch (error) {
     input.logger.error("Participate document download failed", error, {
@@ -463,6 +503,8 @@ async function indexStoredFile(input: {
   progress?: ScopedIngestProgress;
   procurementId: string;
   depth: number;
+  links?: DocumentLinkJob;
+  linkDepth?: number;
 }): Promise<SpecialistCaseDocumentValue[]> {
   const format = resolveDocumentFormat(input.bytes, input.name, input.contentType);
   const isArchive = format === "zip" || format === "rar" || format === "7z";
@@ -511,6 +553,8 @@ async function indexStoredFile(input: {
           ...(input.progress === undefined ? {} : { progress: input.progress }),
           procurementId: input.procurementId,
           depth: input.depth + 1,
+          ...(input.links === undefined ? {} : { links: input.links }),
+          linkDepth: input.linkDepth ?? 0,
         })),
       );
     }
@@ -534,6 +578,31 @@ async function indexStoredFile(input: {
       hash: input.hash,
     });
   }
+  // A file is a map to more files: links in its text or hidden hyperlinks get
+  // the same bounded pipeline, with provenance kept in the fragment.
+  const linkScan =
+    input.links === undefined || (input.linkDepth ?? 0) >= MAX_DOCUMENT_LINK_DEPTH
+      ? { documents: [], notes: [] as string[] }
+      : await followDocumentLinks({
+          parent: { name: input.name, sourceUrl: input.sourceUrl },
+          bytes: input.bytes,
+          format,
+          text: extraction?.pages.map((page) => page.text).join("\n") ?? "",
+          links: input.links,
+          linkDepth: (input.linkDepth ?? 0) + 1,
+          blobDirectory: input.blobDirectory,
+          ...(input.blobStore === undefined ? {} : { blobStore: input.blobStore }),
+          nativeExtractor: input.nativeExtractor,
+          scanExtractor: input.scanExtractor,
+          usesVision: input.usesVision,
+          logger: input.logger,
+          ...(input.progress === undefined ? {} : { progress: input.progress }),
+          procurementId: input.procurementId,
+        });
+  const noted =
+    extraction === undefined || linkScan.notes.length === 0
+      ? extraction
+      : { ...extraction, notes: [...extraction.notes, ...linkScan.notes] };
   return [
     finishIndexed(
       input,
@@ -543,10 +612,153 @@ async function indexStoredFile(input: {
         ...(input.sizeBytes === undefined ? {} : { sizeBytes: input.sizeBytes }),
         status: "hashed",
         note: input.contentType,
-        ...(extraction === undefined ? {} : { extraction }),
+        ...(noted === undefined ? {} : { extraction: noted }),
       }),
     ),
+    ...linkScan.documents,
   ];
+}
+
+async function followDocumentLinks(input: {
+  parent: { name: string; sourceUrl: string };
+  bytes: Uint8Array;
+  format: ReturnType<typeof resolveDocumentFormat>;
+  text: string;
+  links: DocumentLinkJob;
+  linkDepth: number;
+  blobDirectory: string;
+  blobStore?: BlobStore;
+  nativeExtractor: RoutingDocumentExtractor;
+  scanExtractor: RoutingDocumentExtractor;
+  usesVision: boolean;
+  logger: Logger;
+  progress?: ScopedIngestProgress;
+  procurementId: string;
+}): Promise<{ documents: SpecialistCaseDocumentValue[]; notes: string[] }> {
+  const candidates = await collectDocumentLinks({
+    name: input.parent.name,
+    bytes: input.bytes,
+    format: input.format,
+    text: input.text,
+  }).catch(() => []);
+  if (candidates.length === 0) return { documents: [], notes: [] };
+  const { accepted, rejected } = selectDocumentLinkCandidates(candidates, {
+    excludeUrls: input.links.fetched,
+  });
+  const notes = rejectionNotes(rejected);
+  const documents: SpecialistCaseDocumentValue[] = [];
+  for (const link of accepted) {
+    const normalized = normalizeLinkUrl(link);
+    if (normalized === undefined || input.links.fetched.has(normalized)) continue;
+    input.links.fetched.add(normalized);
+    const sourceUrl = linkedDocumentSourceUrl(input.parent.sourceUrl, normalized);
+    const name = linkedDocumentDisplayName(input.parent.name, normalized);
+    input.links.seen.add(sourceUrl);
+    if (input.links.budget.remaining <= 0) {
+      notes.push("Лимит переходов по ссылкам исчерпан — часть документации не скачана.");
+      break;
+    }
+    input.links.budget.remaining -= 1;
+    input.progress?.fileDiscovered(input.procurementId, { name, sourceUrl });
+    input.progress?.fileDownloading(input.procurementId, sourceUrl);
+    documents.push(
+      ...(await fetchLinkedDocument({
+        name,
+        sourceUrl,
+        link: normalized,
+        input,
+      })),
+    );
+  }
+  if (accepted.length > 0) {
+    notes.unshift(`По ссылкам из документа найдено файлов: ${String(accepted.length)}.`);
+  }
+  return { documents, notes };
+}
+
+async function fetchLinkedDocument(input: {
+  name: string;
+  sourceUrl: string;
+  link: string;
+  input: Parameters<typeof followDocumentLinks>[0];
+}): Promise<SpecialistCaseDocumentValue[]> {
+  const { input: ctx } = input;
+  const listed = { name: input.name, sourceUrl: input.sourceUrl, downloadUrl: input.link };
+  const failed = (note: string): SpecialistCaseDocumentValue[] => {
+    ctx.progress?.fileFinished(ctx.procurementId, input.sourceUrl, "failed");
+    return [SpecialistCaseDocument.parse({ ...listed, status: "download_failed", note })];
+  };
+  try {
+    const downloaded = await ctx.links.client.download(
+      { sourceId: ctx.links.sourceId, downloadUrl: input.link },
+      ctx.links.requestId,
+    );
+    const bytes = await getBlob(ctx.blobDirectory, downloaded.hash);
+    if (bytes === undefined) {
+      return failed("Файл скачан по ссылке, но не найден в хранилище.");
+    }
+    if (ctx.blobStore !== undefined) {
+      await ctx.blobStore.put(downloaded.hash, bytes);
+    }
+    if (looksLikeHtmlPage(bytes, downloaded.contentType, input.name)) {
+      ctx.logger.error(
+        "Linked document download returned an HTML page",
+        new Error("html_instead_of_file"),
+        { name: input.name, link: input.link },
+      );
+      return failed("По ссылке вернулась HTML-страница вместо файла.");
+    }
+    ctx.progress?.fileIndexing(ctx.procurementId, input.sourceUrl, 0, downloaded.hash);
+    return await indexStoredFile({
+      name: input.name,
+      sourceUrl: input.sourceUrl,
+      listed,
+      hash: downloaded.hash,
+      sizeBytes: downloaded.sizeBytes,
+      bytes,
+      contentType: downloaded.contentType,
+      blobDirectory: ctx.blobDirectory,
+      ...(ctx.blobStore === undefined ? {} : { blobStore: ctx.blobStore }),
+      nativeExtractor: ctx.nativeExtractor,
+      scanExtractor: ctx.scanExtractor,
+      usesVision: ctx.usesVision,
+      logger: ctx.logger,
+      ...(ctx.progress === undefined ? {} : { progress: ctx.progress }),
+      procurementId: ctx.procurementId,
+      depth: 0,
+      links: ctx.links,
+      linkDepth: ctx.linkDepth,
+    });
+  } catch (error) {
+    ctx.logger.error("Linked document download failed", error, {
+      name: input.name,
+      link: input.link,
+    });
+    return failed(`Не удалось скачать файл по ссылке: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const LINK_REJECT_REASONS: Record<string, string> = {
+  blocked_host: "внутренний адрес",
+  platform_page: "страница площадки, не файл",
+  unsupported_scheme: "неподдерживаемая схема",
+};
+
+function rejectionNotes(
+  rejected: readonly { url: string; reason: string }[],
+): string[] {
+  return rejected
+    .filter((item) => LINK_REJECT_REASONS[item.reason] !== undefined)
+    .slice(0, 5)
+    .map((item) => {
+      let host = item.url;
+      try {
+        host = new URL(item.url).hostname;
+      } catch {
+        // keep the raw url as the note target
+      }
+      return `Пропущена ссылка ${host} — ${LINK_REJECT_REASONS[item.reason]}.`;
+    });
 }
 
 function finishIndexed(

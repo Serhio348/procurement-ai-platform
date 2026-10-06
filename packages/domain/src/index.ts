@@ -11,6 +11,7 @@ export * from "./commercial/trust.js";
 export * from "./documents/archive.js";
 export * from "./documents/attachment-role.js";
 export * from "./documents/documentation-url.js";
+export * from "./documents/document-links.js";
 export * from "./documents/file-format.js";
 export * from "./documents/ocr-gate.js";
 export * from "./documents/text-quality.js";

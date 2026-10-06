@@ -22,6 +22,11 @@ export interface IngestProgressHub {
     procurementId: string,
     files: readonly { name: string; sourceUrl: string }[],
   ) => void;
+  fileDiscovered: (
+    workspaceId: string,
+    procurementId: string,
+    file: { name: string; sourceUrl: string },
+  ) => void;
   fileDownloading: (workspaceId: string, procurementId: string, sourceUrl: string) => void;
   fileIndexing: (
     workspaceId: string,
@@ -127,6 +132,20 @@ export function createIngestProgressHub(): IngestProgressHub {
         files.length === 0 ? "done" : "downloading",
       );
     },
+    fileDiscovered(workspaceId, procurementId, file) {
+      const previous = current(workspaceId, procurementId);
+      if (previous.files.some((item) => item.sourceUrl === file.sourceUrl)) return;
+      publish(
+        workspaceId,
+        procurementId,
+        [
+          ...previous.files,
+          { name: file.name, sourceUrl: file.sourceUrl, state: "pending", percent: 0 },
+        ],
+        "downloading",
+        file.name,
+      );
+    },
     fileDownloading(workspaceId, procurementId, sourceUrl) {
       replaceFile(workspaceId, procurementId, sourceUrl, { state: "downloading", percent: 10 }, "downloading");
     },
@@ -176,6 +195,10 @@ export interface ScopedIngestProgress {
     procurementId: string,
     files: readonly { name: string; sourceUrl: string }[],
   ) => void;
+  fileDiscovered: (
+    procurementId: string,
+    file: { name: string; sourceUrl: string },
+  ) => void;
   fileDownloading: (procurementId: string, sourceUrl: string) => void;
   fileIndexing: (
     procurementId: string,
@@ -207,6 +230,8 @@ export function bindIngestScope(
     snapshot: (procurementId) => hub.snapshot(workspaceId, procurementId),
     begin: (procurementId) => hub.begin(workspaceId, procurementId),
     listed: (procurementId, files) => hub.listed(workspaceId, procurementId, files),
+    fileDiscovered: (procurementId, file) =>
+      hub.fileDiscovered(workspaceId, procurementId, file),
     fileDownloading: (procurementId, sourceUrl) =>
       hub.fileDownloading(workspaceId, procurementId, sourceUrl),
     fileIndexing: (procurementId, sourceUrl, percent, hash) =>

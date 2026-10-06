@@ -1,5 +1,6 @@
 export * from "./blob-store.js";
 export * from "./deepseek-vision-ocr.js";
+export * from "./document-links.js";
 export * from "./document-scan-engine.js";
 export * from "./extractor-port.js";
 export * from "./fallback-ocr.js";

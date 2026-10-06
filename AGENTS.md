@@ -123,6 +123,7 @@
 - [`docs/architecture/STAGE-114.md`](docs/architecture/STAGE-114.md) — PWA-оболочка: manifest, иконки, service worker кэширует только shell, `/api/` никогда не в кэше (R66)
 - [`docs/architecture/STAGE-115.md`](docs/architecture/STAGE-115.md) — Telegram-бот: push без домена через long polling, одноразовые коды привязки, inbox→chat с дедупом, команды и кнопки «Разобрано» (R67)
 - [`docs/architecture/STAGE-116.md`](docs/architecture/STAGE-116.md) — удаление профиля забирает свои нерешённые карточки; решение и чужой кабинет не трогаются
+- [`docs/architecture/STAGE-117.md`](docs/architecture/STAGE-117.md) — ссылки на документацию внутри вложений: URL из текста/OOXML-rels/PDF-аннотаций, по-хопная валидация редиректов, происхождение в `#link/` фрагменте, per-link failure (R72)
 
 ---
 
@@ -332,6 +333,8 @@ docs/architecture/ Документы этапов
 OCR / vision электрических схем и чертежей — отдельная фича (не этапы 17–21).
 
 При чтении изображений PDF.js объекты с префиксом `g_` принадлежат `page.commonObjs`, остальные — `page.objs`. Ожидание общего объекта через локальный пул не вызывает callback и оставляет ingest незавершённым. Регрессии: `mcp/documents/src/pdfjs-images.test.ts` (R71, дополнение STAGE-103).
+
+Ссылки внутри скачанных документов — untrusted ввод: `fetch` с `redirect:"follow"` не проверяет промежуточные hop'ы, поэтому публичная загрузка идёт через `undici.request` с валидацией каждого `Location`. Односегментный хост и IPv6 ULA/link-local/v4-mapped считаются внутренними. Регрессии: `mcp/procurement/src/public-download.test.ts` (R72, STAGE-117).
 
 ### План этапов
 

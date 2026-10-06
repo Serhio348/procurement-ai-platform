@@ -1,0 +1,80 @@
+# STAGE-117 · Документация по ссылкам внутри вложений (R72)
+
+## Проблема
+
+Заказчики goszakupki.by нередко выкладывают проектную документацию не
+вложением, а ссылкой внутри файла: DOCX с надписью «Скачать документацию»,
+где адрес спрятан в гиперссылке, или PDF с link-аннотацией. Конвейер читал
+только сами вложения — файл-указатель распознавался, а документация за ним
+терялась. Пример: `request/3677151`, ссылка `cloud.beloil.by/s/<id>`.
+
+При этом скачивание по ссылкам из содержимого файлов — это загрузка по
+адресам, которые контролирует автор документа: ссылка может вести во
+внутреннюю сеть, а публичный URL — через 302 редирект туда же. До R72
+`downloadPublicDocumentation` отдавал редиректы на `redirect:"follow"` без
+проверки каждого перехода.
+
+## Решение
+
+**Извлечение ссылок** (`mcp/documents/src/document-links.ts`,
+`pdf-links.ts`). Три источника кандидатов:
+
+- видимые `http(s)://…` в извлечённом тексте любого формата;
+- скрытые гиперссылки OOXML — `<Relationship Type="…/hyperlink">` в
+  `*/_rels/*.rels` (DOCX/XLSX/PPTX), `TargetMode="External"`;
+- link-аннотации PDF через `pdf.getPage(n).getAnnotations()` — отдельный
+  дешёвый проход, ограничен 300 страницами и не трогает OCR.
+
+**Отбор** (`packages/domain/src/documents/document-links.ts`, чистый).
+`selectDocumentLinkCandidates`: embedded-ссылки (намеренные гиперссылки)
+принимаются как есть; обычные URL в тексте — только если выглядят как
+документация (расширение файла, share-форма `host/s/<id>`, известные
+облака). Ссылки на goszakupki.by без file-endpoint отсекаются как
+навигационный шум (`platform_page`). Причины отказа (`blocked_host`,
+`platform_page`, `duplicate`…) попадают в `extraction.notes` — видно,
+почему ссылка пропущена.
+
+**Граница SSRF** (`mcp/procurement/src/public-download.ts`). Глобальный
+`fetch` прячет 3xx под `redirect:"manual"`, поэтому добавлен
+`createSafePublicFetch()` на `undici.request` — он отдаёт настоящие
+status/headers. `fetchWithValidatedRedirects` проверяет `Location` каждого
+hop (≤5), блокируя непубличные хосты и возврат на goszakupki.by.
+`isBlockedDocumentationHost` дополнен IPv6: `::1`, ULA `fc00::/7`,
+link-local `fe80::/10`, v4-mapped. `isPublicDocumentationUrl` теперь
+требует точку в hostname — односегментный хост (`\\intranet`) не может
+резолвиться через search-domains в LAN.
+
+**Оркестрация** (`apps/api/src/document-ingest.ts`). После распознавания
+файла `followDocumentLinks` качает принятые ссылки тем же
+`procurement.download`/`indexStoredFile`-конвейером: linked-файл —
+архив? → распаковывается, внутри ещё ссылки? → глубина ≤ 2.
+`sourceUrl` linked-файла = `parent#link/<enc>` — происхождение цепочки
+сохраняется во фрагменте и читается как `архив → документ → ссылка`.
+Дедуп: нормализованный URL в `links.fetched` (посев из перечисленных
+документов — файл не качается дважды через ссылку), `seen` по sourceUrl.
+Бюджеты: ≤ 8 ссылок на файл, ≤ 24 linked-файлов на прогон. Ошибка одной
+ссылки — `download_failed` с конкретной note («Не удалось скачать…»,
+«HTML-страница вместо файла»), соседние документы не страдают.
+`progress.fileDiscovered` добавляет linked-файл в список прогресса
+сразу при обнаружении.
+
+## Проверки
+
+- `document-ingest.test.ts` (5 новых): скрытая DOCX-гиперссылка → файл
+  прошёл конвейер; мёртвая ссылка → `download_failed`, sibling `hashed`;
+  `http://192.168.0.5` в тексте → fetch не вызывался, причина в notes;
+  ссылка-дубликат перечисленного файла → повторного fetch нет.
+- `public-download.test.ts` (9): редирект на публичный хост следуется,
+  на 192.168.x / goszakupki.by / `[fd00::]` / односегментный —
+  `SourceAccessError`, лимит hop'ов, non-2xx, переполнение тела.
+- `document-links.test.ts` ×2 (domain + mcp): URL в тексте, OOXML rels,
+  отбор, нормализация, provenance-фрагмент.
+- Полный `npm run verify` зелёный: 794 backend + 137 web.
+
+## Ограничения
+
+- Share-страница хранилища (Nextcloud `/s/<id>`) пока возвращает HTML —
+  ссылка будет `download_failed` с честной note; resolver конкретных
+  облачных UI — отдельная работа (Yandex/Google уже поддержаны).
+- DNS-rebinding (публичный хост, резолвящийся в приватный IP) не ловится —
+  проверка идёт до резолва; полноценный DNS-проб — известный остаток.

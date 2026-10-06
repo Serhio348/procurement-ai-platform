@@ -124,6 +124,7 @@ interface PdfJsPage {
   getTextContent: () => Promise<{ items: unknown[] }>;
   getOperatorList: () => Promise<{ fnArray: number[]; argsArray: unknown[] }>;
   objs: { get: (name: string, callback: (value: unknown) => void) => void };
+  commonObjs: { get: (name: string, callback: (value: unknown) => void) => void };
 }
 
 async function readTextItems(page: PdfJsPage): Promise<PdfTextItem[]> {
@@ -169,8 +170,11 @@ async function readPageImages(page: PdfJsPage): Promise<PdfDecodedImage[]> {
 }
 
 function imageObject(page: PdfJsPage, name: string): Promise<PdfDecodedImage | undefined> {
-  return new Promise((resolve) => {
-    page.objs.get(name, (value: unknown) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return new Promise<PdfDecodedImage | undefined>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`Не удалось дождаться изображения PDF: ${name}`)), 10_000);
+    const objects = name.startsWith("g_") ? page.commonObjs : page.objs;
+    objects.get(name, (value: unknown) => {
       if (value === undefined || typeof value !== "object" || value === null) {
         resolve(undefined);
         return;
@@ -192,7 +196,7 @@ function imageObject(page: PdfJsPage, name: string): Promise<PdfDecodedImage | u
         data,
       });
     });
-  });
+  }).finally(() => clearTimeout(timer));
 }
 
 function largestImage(images: readonly PdfDecodedImage[]): PdfDecodedImage {

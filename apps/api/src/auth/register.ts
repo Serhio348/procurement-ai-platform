@@ -134,7 +134,8 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
 
   app.addHook("onRequest", async (request, reply) => {
     const path = requestPath(request.url);
-    if (path === "/api/health") return;
+    // Liveness and readiness answer an uptime probe, which carries no session.
+    if (path === "/api/health" || path === "/api/live") return;
     if (path.startsWith("/api/auth")) {
       // The session poll (GET) is frequent and harmless; only credential and
       // sign-up writes count against the per-source budget.

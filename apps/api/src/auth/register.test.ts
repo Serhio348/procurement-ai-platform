@@ -26,6 +26,19 @@ describe("specialist auth API", () => {
     await app.close();
   });
 
+  it("answers liveness and readiness without a session once a directory is wired", async () => {
+    const app = await buildSpecialistApi({ authDirectory: createMemoryAuthDirectory() });
+
+    const live = await app.inject({ method: "GET", url: "/api/live" });
+    expect(live.statusCode).toBe(200);
+    expect(JSON.parse(live.body)).toEqual({ ok: true });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).not.toBe(401);
+
+    await app.close();
+  });
+
   it("registers as pending and hides procurements until an admin approves", async () => {
     const directory = createMemoryAuthDirectory();
     await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");

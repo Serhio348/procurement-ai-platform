@@ -63,7 +63,13 @@ export function isDocumentationShareLink(url: URL): boolean {
 export function isGoszakupkiFileLink(url: URL): boolean {
   if (!isGoszakupkiHost(url.hostname)) return false;
   const path = url.pathname.toLocaleLowerCase("en-US");
-  if (path.includes("/get-file") || path.includes("/files/get")) return true;
+  if (
+    path.includes("/get-file") ||
+    path.includes("/files/get") ||
+    path.includes("/get-archive")
+  ) {
+    return true;
+  }
   return url.searchParams.has("download") || url.searchParams.has("downloadzip");
 }
 

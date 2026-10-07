@@ -14,6 +14,7 @@ import {
 } from "@procurement/contracts";
 import {
   isGiasHost,
+  isGoszakupkiFileLink,
   isGoszakupkiHost,
   isPublicDocumentationUrl,
   isYandexDiskHost,
@@ -595,6 +596,11 @@ function documentFromAnchor(
   }
   const label = text(link);
   if (isGoszakupkiHost(absolute.hostname)) {
+    // Only file-serving endpoints are attachments — a «постоянная ссылка»
+    // on the card itself (*/view/<id>) is a page, not a document. It would
+    // be probed as a dynamic HTML response and produce a document_updated
+    // inbox event on every watch pass.
+    if (!isGoszakupkiFileLink(absolute)) return undefined;
     const name = label.length > 0 ? label : (absolute.pathname.split("/").at(-1) ?? "document");
     if (name.length === 0) return undefined;
     const sourceFileKey = absolute.searchParams.get("f") ?? undefined;

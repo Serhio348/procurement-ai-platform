@@ -337,6 +337,33 @@ describe("parseGoszakupkiCard", () => {
     expect(pack?.downloadUrl).toContain("download=1");
   });
 
+  it("skips a documents-panel link that points back to a card page", () => {
+    const parsed = parseGoszakupkiCard({
+      html: `
+        <div id="print-area">
+          <div class="page-header"><h1>Карточка auc0003725362</h1></div>
+          <div class="panel">
+            <div class="panel-heading">Общая информация</div>
+            <table><tr><th>Название</th><td>Поставка щита</td></tr></table>
+          </div>
+          <div class="panel panel-default">
+            <div class="panel-heading"><b>Документы</b></div>
+            <table class="table">
+              <tr><td><a class="modal-link" href="/request/get-file/3725362?c=detail&amp;f=0">ТЗ.pdf</a></td></tr>
+              <tr><td><a href="/request/view/3725362">3725362</a></td></tr>
+              <tr><td><a href="/request/view/3725999">другая карточка</a></td></tr>
+            </table>
+          </div>
+        </div>`,
+      url: "https://goszakupki.by/request/view/3725362",
+      fetchedAt,
+    });
+
+    const urls = parsed.documents.map((item) => item.sourceUrl);
+    expect(urls).toEqual(["https://goszakupki.by/request/get-file/3725362?c=detail&f=0"]);
+    expect(urls.some((u) => u.includes("/view/"))).toBe(false);
+  });
+
   it("maps buying-organisation labels and an indicative amount", async () => {
     const html = await readFile(
       fileURLToPath(new URL("request-buying-org.html", fixtureDirectory)),

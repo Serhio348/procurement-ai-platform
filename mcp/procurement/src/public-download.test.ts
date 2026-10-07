@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  createSafePublicFetch,
   downloadPublicDocumentation,
   fetchWithValidatedRedirects,
+  resolvePublicAddresses,
   type PublicDocumentationFetch,
 } from "./public-download.js";
 import { SourceAccessError } from "./source-registry.js";
@@ -169,5 +171,50 @@ describe("fetchWithValidatedRedirects", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("data");
+  });
+});
+
+describe("resolvePublicAddresses (DNS-rebinding guard)", () => {
+  it("rejects a hostname that resolves to a private address", async () => {
+    await expect(
+      resolvePublicAddresses("files.evil.example", async () => [
+        { address: "10.0.0.9", family: 4 },
+      ]),
+    ).rejects.toBeInstanceOf(SourceAccessError);
+  });
+
+  it("rejects when any address is internal even if others are public", async () => {
+    await expect(
+      resolvePublicAddresses("files.evil.example", async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "fd00::5", family: 6 },
+      ]),
+    ).rejects.toBeInstanceOf(SourceAccessError);
+  });
+
+  it("rejects an empty answer and propagates resolver failures", async () => {
+    await expect(
+      resolvePublicAddresses("files.by", async () => []),
+    ).rejects.toBeInstanceOf(SourceAccessError);
+    await expect(
+      resolvePublicAddresses("files.by", async () => {
+        throw new Error("ENOTFOUND");
+      }),
+    ).rejects.toThrow("ENOTFOUND");
+  });
+
+  it("passes public answers through unchanged", async () => {
+    const addresses = await resolvePublicAddresses("cdn.example.by", async () => [
+      { address: "93.184.216.34", family: 4 },
+      { address: "2606:4700:4700::1111", family: 6 },
+    ]);
+    expect(addresses).toHaveLength(2);
+  });
+
+  it("makes the socket connect fail before any network I/O when DNS is hostile", async () => {
+    const fetchImpl = createSafePublicFetch(async () => [
+      { address: "169.254.169.254", family: 4 },
+    ]);
+    await expect(fetchImpl("https://files.evil.example/tz.pdf")).rejects.toThrow();
   });
 });

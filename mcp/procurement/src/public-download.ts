@@ -1,27 +1,107 @@
+import { lookup as dnsLookup } from "node:dns";
+import type { LookupFunction } from "node:net";
 import { Readable } from "node:stream";
 import type { ProcurementFileBytes } from "@procurement/contracts";
 import {
   isBlockedDocumentationHost,
+  isBlockedIpAddress,
   isGoszakupkiHost,
   isPublicDocumentationUrl,
   isYandexDiskHost,
 } from "@procurement/domain";
 import { SourceAccessError } from "./source-registry.js";
-import { request as undiciRequest } from "undici";
+import { Agent, request as undiciRequest } from "undici";
 
 export interface PublicDocumentationFetch {
   (url: string | URL, init?: RequestInit): Promise<Response>;
 }
 
+export interface ResolvedAddress {
+  address: string;
+  family: number;
+}
+
+export type PublicAddressResolver = (hostname: string) => Promise<ResolvedAddress[]>;
+
+const systemResolver: PublicAddressResolver = (hostname) =>
+  new Promise((resolvePromise, reject) => {
+    dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+      if (error !== null) reject(error);
+      else resolvePromise(addresses);
+    });
+  });
+
+/**
+ * A public-looking hostname may resolve to an internal address (DNS
+ * rebinding). Every resolved address is vetted, and any private or
+ * unrecognised answer fails the whole lookup — a CDN legitimately returns
+ * public addresses only.
+ */
+export async function resolvePublicAddresses(
+  hostname: string,
+  resolve: PublicAddressResolver = systemResolver,
+): Promise<ResolvedAddress[]> {
+  const addresses = await resolve(hostname);
+  if (addresses.length === 0) {
+    throw new SourceAccessError(
+      "goszakupki_by",
+      `DNS lookup for ${hostname} returned no addresses`,
+    );
+  }
+  const blocked = addresses.find((entry) => isBlockedIpAddress(entry.address));
+  if (blocked !== undefined) {
+    throw new SourceAccessError(
+      "goszakupki_by",
+      `DNS lookup for ${hostname} resolved to a blocked address`,
+    );
+  }
+  return addresses;
+}
+
+/**
+ * The socket connects to an already-validated address from the single
+ * lookup above, so a TTL-flip between "check" and "connect" cannot smuggle
+ * an internal target past the vetting.
+ */
+function createPinnedLookup(resolve: PublicAddressResolver): LookupFunction {
+  return (hostname, options, callback) => {
+    void resolvePublicAddresses(hostname, resolve).then(
+      (addresses) => {
+        if ("all" in options && options.all === true) {
+          callback(null, addresses, 0);
+          return;
+        }
+        const first = addresses[0];
+        if (first === undefined) {
+          callback(new Error(`DNS lookup for ${hostname} returned no addresses`), "", 0);
+          return;
+        }
+        callback(null, first.address, first.family);
+      },
+      (error: unknown) => {
+        callback(error instanceof Error ? error : new Error(String(error)), "", 0);
+      },
+    );
+  };
+}
+
 /**
  * Global `fetch` hides 3xx responses under `redirect:"manual"` (the spec's
  * opaqueredirect filter), which makes per-hop SSRF validation impossible.
- * This adapter exposes the raw status and Location header instead.
+ * This adapter exposes the raw status and Location header instead, and its
+ * dispatcher pins connections to DNS answers vetted by
+ * `resolvePublicAddresses`.
  */
-export function createSafePublicFetch(): PublicDocumentationFetch {
+export function createSafePublicFetch(
+  resolve: PublicAddressResolver = systemResolver,
+): PublicDocumentationFetch {
+  const dispatcher = new Agent({
+    connect: { lookup: createPinnedLookup(resolve) as LookupFunction },
+  });
   return async (url, init) => {
     const { statusCode, headers, body } = await undiciRequest(String(url), {
       method: (init?.method ?? "GET") as "GET",
+      dispatcher,
       ...(init?.headers === undefined ? {} : { headers: init.headers as Record<string, string> }),
       ...(init?.signal === undefined ? {} : { signal: init.signal }),
     });

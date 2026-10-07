@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isBlockedDocumentationHost,
+  isBlockedIpAddress,
   isGiasHost,
   isPublicDocumentationUrl,
   isYandexDiskHost,
@@ -24,5 +25,34 @@ describe("documentation URLs", () => {
     expect(isYandexDiskHost("disk.yandex.ru")).toBe(true);
     expect(looksLikeDocumentationFileName("ТЗ.zip")).toBe(true);
     expect(looksLikeDocumentationFileName("readme")).toBe(false);
+  });
+
+  it("blocks resolved addresses an attacker DNS could return", () => {
+    for (const blocked of [
+      "10.0.0.5",
+      "192.168.1.20",
+      "169.254.169.254",
+      "172.16.0.8",
+      "127.0.0.1",
+      "::1",
+      "::",
+      "fd00::5",
+      "fe80::a00:27ff:fe8e:1234",
+      "fec0::5",
+      "ff02::1",
+      "::ffff:10.0.0.5",
+      "::ffff:7f00:1",
+      "64:ff9b::a00:1",
+      "64:ff9b::10.0.0.1",
+      "2002:0a00:0001::",
+      "fe80::5%eth0",
+      "not-an-ip",
+      "",
+    ]) {
+      expect(isBlockedIpAddress(blocked), blocked).toBe(true);
+    }
+    for (const allowed of ["93.184.216.34", "178.124.130.200", "2606:4700:4700::1111"]) {
+      expect(isBlockedIpAddress(allowed), allowed).toBe(false);
+    }
   });
 });

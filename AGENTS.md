@@ -46,7 +46,7 @@
 - [`docs/architecture/STAGE-25.md`](docs/architecture/STAGE-25.md) — PostgreSQL, MinIO и Redis для консоли
 - [`docs/architecture/STAGE-26.md`](docs/architecture/STAGE-26.md) — вход, регистрация и одобрение доступа
 - [`docs/architecture/STAGE-27.md`](docs/architecture/STAGE-27.md) — разбор входящих, а не склад сообщений
-- [`docs/architecture/STAGE-28.md`](docs/architecture/STAGE-28.md) — журнал: доступ, вход/выход, ошибки
+- [`docs/architecture/STAGE-28.md`](docs/architecture/STAGE-28.md) — журнал: доступ, вход/выход, ошибки; рутинные нулевые проходы поиска/слежения не журналируются (R77)
 - [`docs/architecture/STAGE-38.md`](docs/architecture/STAGE-38.md) — карточка площадки при «Участвовать»
 - [`docs/architecture/STAGE-39.md`](docs/architecture/STAGE-39.md) — несостоявшиеся процедуры и закупки из одного источника
 - [`docs/architecture/STAGE-40.md`](docs/architecture/STAGE-40.md) — архив «Моих закупок» и один флажок одного источника

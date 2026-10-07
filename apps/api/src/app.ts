@@ -1582,6 +1582,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   }): Promise<void> {
     if (monitored.monitoredCount === 0) return;
     await persist();
+    // Routine silence is not an event: four cabinets × every-2-hours of
+    // «проверено N, изменилось 0» would drown real journal rows. The pass
+    // is still traceable in pino; the journal hears about changes (R77).
+    logger.info("Specialist watch pass completed", monitored);
+    if (monitored.changedCount === 0) return;
     await recordJournal(journal, {
       kind: "discovery",
       level: "info",
@@ -1806,16 +1811,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       if (succeeded.length === 0) {
         throw failed[0]?.error ?? new Error("discovery found no profile to search");
       }
-      await recordJournal(journal, {
-        kind: "discovery",
-        level: "info",
-        message: discoveryDoneMessage({
-          profileNames: succeeded.map((item) => profileDisplayName(item)),
-          addedCount,
-          skippedDecidedCount,
-          ...monitored,
-        }),
-      });
+      // Journal-worthy means somebody has something to look at: a new
+      // procurement found or a watched case moved. A clean zero pass stays
+      // in pino only (R77).
+      if (addedCount > 0 || monitored.changedCount > 0) {
+        await recordJournal(journal, {
+          kind: "discovery",
+          level: "info",
+          message: discoveryDoneMessage({
+            profileNames: succeeded.map((item) => profileDisplayName(item)),
+            addedCount,
+            skippedDecidedCount,
+            ...monitored,
+          }),
+        });
+      }
       const result: DiscoveryResult = {
         ran: true,
         reason: "ok",

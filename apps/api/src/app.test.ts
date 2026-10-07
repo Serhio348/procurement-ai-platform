@@ -3330,6 +3330,9 @@ describe("specialist API", () => {
       url: `/api/procurements/${substation?.id ?? ""}/decision`,
       payload: { kind: "monitor" },
     });
+    const rowsBeforeSecond = (await journal.list()).filter(
+      (item) => item.kind === "discovery",
+    ).length;
     const second = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
 
     expect(idle.statusCode).toBe(200);
@@ -3361,6 +3364,9 @@ describe("specialist API", () => {
     expect(log.some((item) => item.kind === "discovery" && item.message.includes("Фоновый поиск выполнен"))).toBe(
       true,
     );
+    // The second pass found nothing and moved nothing — a clean zero run is
+    // pino trace, not a journal row (R77).
+    expect(log.filter((item) => item.kind === "discovery")).toHaveLength(rowsBeforeSecond);
     expect(log.some((item) => item.message.includes("watch_off"))).toBe(false);
 
     await app.close();
@@ -3447,7 +3453,9 @@ describe("specialist API", () => {
     expect(rows.some((item) => item.topic === "card_update")).toBe(true);
     expect(rows.some((item) => item.summary.includes("Статус"))).toBe(true);
     const log = await journal.list();
-    expect(log.some((item) => item.message.includes("Проверено отслеживаемых"))).toBe(true);
+    // Only the pass that saw the status change earns a journal row; the
+    // silent second pass stays out (R77).
+    expect(log.filter((item) => item.message.includes("Проверено отслеживаемых"))).toHaveLength(1);
 
     await app.close();
   });

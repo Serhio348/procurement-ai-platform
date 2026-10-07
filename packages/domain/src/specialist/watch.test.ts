@@ -22,6 +22,7 @@ function sourceCard(input: {
     contentHash?: string;
     checkedAt?: string;
   }>;
+  history?: Array<{ question: string; sourceUrl?: string }>;
 }) {
   return ProcedureCard.parse({
     sourceId: "goszakupki_by",
@@ -37,6 +38,7 @@ function sourceCard(input: {
         : {}),
     ...(input.bidsDeadline === undefined ? {} : { bidsDeadline: input.bidsDeadline }),
     ...(input.listedDocuments === undefined ? {} : { listedDocuments: input.listedDocuments }),
+    ...(input.history === undefined ? {} : { history: input.history }),
   });
 }
 
@@ -339,5 +341,81 @@ describe("document content probes (R24)", () => {
       { name: "Б.pdf", sourceUrl: urlB, checkedAt: "2026-09-10T00:00:00.000Z" },
     ];
     expect(nextDocumentProbeTarget(bothChecked, current)?.sourceUrl).toBe(urlB);
+  });
+});
+
+describe("chronology watch", () => {
+  const invite = "06.10.2026 09:48:18 Размещение приглашения к участию в процедуре закупки";
+
+  it("records chronology rows in the snapshot, normalized and deduplicated", () => {
+    const snapshot = cardSnapshot(
+      sourceCard({
+        history: [
+          { question: `  ${invite}  ` },
+          { question: "07.10.2026\nРазмещён протокол рассмотрения заявок" },
+          { question: invite },
+        ],
+      }),
+      "2026-10-07T00:00:00.000Z",
+    );
+    expect(snapshot.history).toEqual([
+      "06.10.2026 09:48:18 Размещение приглашения к участию в процедуре закупки",
+      "07.10.2026 Размещён протокол рассмотрения заявок",
+    ]);
+  });
+
+  it("stays silent on the first pass that carries no chronology baseline", () => {
+    const previous = cardSnapshot(sourceCard({}), "2026-10-06T00:00:00.000Z");
+    delete (previous as { history?: string[] }).history; // snapshot from before R76
+    const current = cardSnapshot(
+      sourceCard({ history: [{ question: invite }] }),
+      "2026-10-07T00:00:00.000Z",
+    );
+    expect(diffCardSnapshots(previous, current)).toEqual([]);
+  });
+
+  it("reports a new chronology row with the event text as its identity", () => {
+    const protocol = "07.10.2026 12:30 Размещён протокол рассмотрения заявок";
+    const previous = cardSnapshot(
+      sourceCard({ history: [{ question: invite }] }),
+      "2026-10-06T00:00:00.000Z",
+    );
+    const current = cardSnapshot(
+      sourceCard({ history: [{ question: invite }, { question: protocol }] }),
+      "2026-10-07T00:00:00.000Z",
+    );
+    expect(diffCardSnapshots(previous, current)).toEqual([
+      {
+        kind: "other",
+        field: "chronology",
+        previous: null,
+        current: protocol,
+        dedupeKey: `chronology:${protocol}`,
+      },
+    ]);
+  });
+
+  it("maps clarification rows to clarification kinds", () => {
+    const ask = "07.10.2026 10:00 Запрос о разъяснении документации";
+    const answer = "07.10.2026 14:00 Ответ на запрос о разъяснении";
+    const previous = cardSnapshot(
+      sourceCard({ history: [{ question: invite }] }),
+      "2026-10-06T00:00:00.000Z",
+    );
+    const current = cardSnapshot(
+      sourceCard({
+        history: [
+          { question: invite },
+          { question: ask },
+          { question: answer },
+        ],
+      }),
+      "2026-10-07T00:00:00.000Z",
+    );
+    const changes = diffCardSnapshots(previous, current);
+    expect(changes.map((change) => change.kind)).toEqual([
+      "clarification_added",
+      "clarification_answered",
+    ]);
   });
 });

@@ -286,6 +286,7 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
     ...(singleSourceBasis === undefined ? {} : { singleSourceBasis }),
     ...(precedingProcedureNumber === undefined ? {} : { precedingProcedureNumber }),
     lots,
+    history: parseHistory($, input.url),
     rawFields: Object.fromEntries(fields),
     fetchedAt: input.fetchedAt,
     listedDocuments: documents.map((item) => ({ name: item.name, sourceUrl: item.sourceUrl })),
@@ -294,7 +295,7 @@ export function parseGoszakupkiCard(input: ParseGoszakupkiCardInput): ParsedGosz
   return {
     card,
     documents,
-    history: parseHistory($, input.url),
+    history: card.history,
   };
 }
 

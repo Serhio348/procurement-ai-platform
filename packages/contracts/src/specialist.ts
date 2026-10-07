@@ -259,6 +259,12 @@ export const SpecialistCardSnapshot = z.object({
    * document watch: the next pass records the list and does not alert.
    */
   documents: z.array(ListedSourceAttachment).optional(),
+  /**
+   * Chronology row texts as listed on the page (verbatim, «Дата — событие»).
+   * Absent on snapshots taken before chronology watch: the next pass records
+   * the list and does not alert — same convention as `documents` (R76).
+   */
+  history: z.array(z.string().min(1)).optional(),
 });
 export type SpecialistCardSnapshot = z.infer<typeof SpecialistCardSnapshot>;
 

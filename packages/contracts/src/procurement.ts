@@ -156,6 +156,15 @@ export type ListedSourceAttachment = z.infer<typeof ListedSourceAttachment>;
  * optional: a scraped page is allowed to be incomplete, and the pipeline must
  * survive that rather than throw.
  */
+export const SourceClarification = z.object({
+  question: z.string().min(1),
+  answer: z.string().optional(),
+  askedAt: IsoDateTime.optional(),
+  answeredAt: IsoDateTime.optional(),
+  sourceUrl: z.string().url().optional(),
+});
+export type SourceClarification = z.infer<typeof SourceClarification>;
+
 export const ProcedureCard = z.object({
   listedDocuments: z.array(ListedSourceAttachment).default([]),
   sourceId: SourceId,
@@ -185,6 +194,12 @@ export const ProcedureCard = z.object({
   /** Source number of the failed procedure this single-source purchase replaces. */
   precedingProcedureNumber: z.string().optional(),
   lots: z.array(SourceLot).default([]),
+  /**
+   * Chronology rows verbatim («События в хронологическом порядке»):
+   * invitations, clarification answers, protocols, contracts. This is the
+   * semantic layer behind watch events — it names what actually happened.
+   */
+  history: z.array(SourceClarification).default([]),
   /** Raw platform fields kept verbatim for provenance and later re-parsing. */
   rawFields: z.record(z.string(), z.string()).default({}),
   fetchedAt: IsoDateTime,
@@ -330,15 +345,6 @@ export const RawArtifact = z.object({
   capturedAt: IsoDateTime,
 });
 export type RawArtifact = z.infer<typeof RawArtifact>;
-
-export const SourceClarification = z.object({
-  question: z.string().min(1),
-  answer: z.string().optional(),
-  askedAt: IsoDateTime.optional(),
-  answeredAt: IsoDateTime.optional(),
-  sourceUrl: z.string().url().optional(),
-});
-export type SourceClarification = z.infer<typeof SourceClarification>;
 
 export const Clarification = SourceClarification.extend({
   id: ClarificationId,

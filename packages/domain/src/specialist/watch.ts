@@ -52,7 +52,27 @@ export function cardSnapshot(
     ...(priceLabel === undefined ? {} : { priceLabel }),
     ...(deadline === undefined ? {} : { bidsDeadline: deadline }),
     documents: listedAttachmentsForSnapshot(card.listedDocuments),
+    history: chronologyForSnapshot(card.history),
   });
+}
+
+/**
+ * Chronology rows verbatim, deduplicated and sorted: the page may reshuffle
+ * rows between renders, and order must not look like a change (R76).
+ */
+export function chronologyForSnapshot(
+  history: readonly { question: string }[] | undefined,
+): string[] {
+  if (history === undefined) return [];
+  const seen = new Set<string>();
+  const rows: string[] = [];
+  for (const item of history) {
+    const row = item.question.replaceAll(/\s+/g, " ").trim();
+    if (row.length === 0 || seen.has(row)) continue;
+    seen.add(row);
+    rows.push(row);
+  }
+  return rows.sort((left, right) => left.localeCompare(right, "ru-RU"));
 }
 
 /** Stable order so a reshuffled block on the page is not a change. */
@@ -171,7 +191,42 @@ export function diffCardSnapshots(
       ...diffListedDocuments(previous.documents, current.documents, current.capturedAt),
     );
   }
+  if (previous.history !== undefined && current.history !== undefined) {
+    changes.push(...diffChronology(previous.history, current.history));
+  }
   return changes;
+}
+
+/**
+ * Chronology is append-only: a row absent from the previous snapshot is an
+ * event («Размещён протокол», «Ответ на запрос…», «Подписан договор»). The
+ * event text is its own identity — dedupeKey carries it, not the capture
+ * time, so a re-detected same row can never produce a second inbox item.
+ */
+function diffChronology(
+  previous: readonly string[],
+  current: readonly string[],
+): WatchChange[] {
+  const seen = new Set(previous);
+  const changes: WatchChange[] = [];
+  for (const row of current) {
+    if (seen.has(row)) continue;
+    changes.push({
+      kind: chronologyEventKind(row),
+      field: "chronology",
+      previous: null,
+      current: row,
+      dedupeKey: `chronology:${row}`,
+    });
+  }
+  return changes;
+}
+
+function chronologyEventKind(row: string): ChangeKind {
+  const lower = row.toLocaleLowerCase("ru-RU");
+  if (lower.includes("ответ")) return "clarification_answered";
+  if (lower.includes("запрос")) return "clarification_added";
+  return "other";
 }
 
 function diffListedDocuments(

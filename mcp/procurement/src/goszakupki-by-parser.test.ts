@@ -277,6 +277,9 @@ describe("parseGoszakupkiCard", () => {
     });
     expect(parsed.history).toHaveLength(1);
     expect(parsed.history[0]?.sourceUrl).toBe("https://goszakupki.by/questions/9001");
+    // Chronology rides on the card itself: watch snapshots read it from
+    // there without a second history call (R76).
+    expect(parsed.card.history).toEqual(parsed.history);
   });
 
   it("lists a documentation storage link from the documents panel", () => {

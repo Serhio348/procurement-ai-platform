@@ -51,6 +51,36 @@ export function isPublicDocumentationUrl(url: URL): boolean {
   return true;
 }
 
+/**
+ * Legal-reference and standards portals: a document may link to them
+ * deliberately («нормативная база»), but they serve HTML pages, never the
+ * procurement file pack. Skipping them avoids «HTML вместо файла» noise.
+ */
+const REFERENCE_HOST_SUFFIXES = [
+  "bii.by",
+  "pravo.by",
+  "pravo.gov.ru",
+  "tnpa.by",
+  "etalonline.by",
+  "tehinformer.by",
+  "belstat.gov.by",
+  "oos.by",
+  "bss.by",
+  "fundament.ru",
+  "cntd.ru",
+  "consultant.ru",
+  "garant.ru",
+  "kodeksy.by",
+  "levonevski.net",
+];
+
+export function isReferenceDocumentationHost(hostname: string): boolean {
+  const host = normalizeHost(hostname);
+  return REFERENCE_HOST_SUFFIXES.some(
+    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+  );
+}
+
 export function isYandexDiskHost(hostname: string): boolean {
   const host = normalizeHost(hostname);
   return (

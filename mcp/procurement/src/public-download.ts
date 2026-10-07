@@ -117,6 +117,8 @@ export async function resolvePublicDownloadUrl(
   if (driveId !== undefined) {
     return new URL(`https://drive.google.com/uc?export=download&id=${driveId}`);
   }
+  const direct = directShareDownloadUrl(url);
+  if (direct !== undefined) return direct;
   if (!isYandexDiskHost(url.hostname)) return url;
   const api = new URL("https://cloud-api.yandex.net/v1/disk/public/resources/download");
   api.searchParams.set("public_key", url.href);
@@ -136,6 +138,29 @@ export async function resolvePublicDownloadUrl(
   } catch {
     return url;
   }
+}
+
+/**
+ * Share pages show a «Скачать» button to a browser; each supported shape has
+ * a deterministic direct form, so no HTML/JS is ever executed.
+ * - Nextcloud/ownCloud `host/s/<token>` → `host/s/<token>/download` returns
+ *   the file (or a zip of the shared folder).
+ * - Dropbox preview `?dl=0` → `?dl=1`.
+ */
+function directShareDownloadUrl(url: URL): URL | undefined {
+  const host = url.hostname.toLocaleLowerCase("en-US");
+  if (host === "dropbox.com" || host === "www.dropbox.com") {
+    if (url.searchParams.get("dl") === "1") return url;
+    const next = new URL(url.href);
+    next.searchParams.set("dl", "1");
+    return next;
+  }
+  if (/^\/(?:index\.php\/)?s\/[A-Za-z0-9]{8,}\/?$/.test(url.pathname)) {
+    const next = new URL(url.href);
+    next.pathname = `${url.pathname.replace(/\/$/, "")}/download`;
+    return next;
+  }
+  return undefined;
 }
 
 function googleDriveFileId(url: URL): string | undefined {

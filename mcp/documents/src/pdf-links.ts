@@ -7,6 +7,21 @@ interface PdfLinkAnnotation {
   subtype?: unknown;
   url?: unknown;
   unsafeUrl?: unknown;
+  uri?: unknown;
+  a?: { URI?: unknown };
+  aa?: Record<string, { URI?: unknown }>;
+}
+
+/** «Скачать» в PDF бывает Link-аннотацией или кнопкой формы (Widget + URI action). */
+function annotationUrls(annotation: PdfLinkAnnotation): string[] {
+  const raw: unknown[] = [
+    annotation.url,
+    annotation.unsafeUrl,
+    annotation.uri,
+    annotation.a?.URI,
+    ...Object.values(annotation.aa ?? {}).map((action) => action?.URI),
+  ];
+  return raw.filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
 interface PdfAnnotationPage {
@@ -32,9 +47,8 @@ export async function extractPdfLinkAnnotations(bytes: Uint8Array): Promise<stri
       const annotations = await page.getAnnotations();
       for (const raw of annotations) {
         const annotation = raw as PdfLinkAnnotation;
-        if (annotation.subtype !== "Link") continue;
-        const url = annotation.url ?? annotation.unsafeUrl;
-        if (typeof url === "string" && url.length > 0) urls.push(url);
+        if (annotation.subtype !== "Link" && annotation.subtype !== "Widget") continue;
+        urls.push(...annotationUrls(annotation));
       }
     }
     return urls;

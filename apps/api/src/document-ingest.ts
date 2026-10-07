@@ -741,6 +741,7 @@ async function fetchLinkedDocument(input: {
 const LINK_REJECT_REASONS: Record<string, string> = {
   blocked_host: "внутренний адрес",
   platform_page: "страница площадки, не файл",
+  reference_page: "справочная страница, не файл документации",
   unsupported_scheme: "неподдерживаемая схема",
 };
 

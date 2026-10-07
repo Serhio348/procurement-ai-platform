@@ -120,6 +120,44 @@ describe("downloadPublicDocumentation", () => {
   });
 });
 
+describe("share-form resolution", () => {
+  it("turns a nextcloud share page into its /download endpoint", async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    const calls: string[] = [];
+    const fetchImpl = fetchFrom(
+      {
+        "https://cloud.beloil.by/s/STkDLdaRzEGropD/download": respond(200, bytes, {
+          "content-type": "application/zip",
+        }),
+      },
+      calls,
+    );
+    const result = await downloadPublicDocumentation(
+      "https://cloud.beloil.by/s/STkDLdaRzEGropD",
+      fetchImpl,
+    );
+    expect(result.bytes).toEqual(bytes);
+    expect(calls).toEqual(["https://cloud.beloil.by/s/STkDLdaRzEGropD/download"]);
+  });
+
+  it("rewrites a dropbox preview link to dl=1", async () => {
+    const calls: string[] = [];
+    const fetchImpl = fetchFrom(
+      { "https://www.dropbox.com/s/abc123/tz.zip?dl=1": respond(200, "PK") },
+      calls,
+    );
+    await downloadPublicDocumentation("https://www.dropbox.com/s/abc123/tz.zip?dl=0", fetchImpl);
+    expect(calls).toEqual(["https://www.dropbox.com/s/abc123/tz.zip?dl=1"]);
+  });
+
+  it("does not transform a short /s/ path that is not a share token", async () => {
+    const calls: string[] = [];
+    const fetchImpl = fetchFrom({ "https://files.by/s/ab": respond(200, "x") }, calls);
+    await downloadPublicDocumentation("https://files.by/s/ab", fetchImpl);
+    expect(calls).toEqual(["https://files.by/s/ab"]);
+  });
+});
+
 describe("fetchWithValidatedRedirects", () => {
   it("returns the terminal response without consuming its body", async () => {
     const fetchImpl = fetchFrom({

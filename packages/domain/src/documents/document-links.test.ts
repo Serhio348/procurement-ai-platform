@@ -95,6 +95,21 @@ describe("selectDocumentLinkCandidates", () => {
     expect(rejected.map((item) => item.reason)).toEqual(["duplicate", "duplicate"]);
   });
 
+  it("rejects legal-reference portals even from embedded hyperlinks", () => {
+    const { accepted, rejected } = selectDocumentLinkCandidates([
+      { url: "https://bii.by/tx.dll?d=447159&a=508", embedded: true },
+      { url: "http://www.pravo.by/webnpa/text.asp?RN=H11200419", embedded: false },
+      { url: "https://etalonline.by/webnpa/text.asp?RN=H12300296", embedded: true },
+      { url: "https://files.by/docs/real.pdf", embedded: true },
+    ]);
+    expect(accepted).toEqual(["https://files.by/docs/real.pdf"]);
+    expect(rejected.map((item) => item.reason)).toEqual([
+      "reference_page",
+      "reference_page",
+      "reference_page",
+    ]);
+  });
+
   it("excludes links already listed for the job", () => {
     const { rejected } = selectDocumentLinkCandidates(
       [{ url: "https://files.by/tz.pdf", embedded: true }],

@@ -65,6 +65,19 @@ describe("collectDocumentLinks", () => {
     expect(candidates).toContainEqual({ url: "https://files.by/spec.pdf", embedded: true });
   });
 
+  it("reads pdf widget buttons with a URI action", async () => {
+    const bytes = new TextEncoder().encode(
+      "%PDF-1.4\n/WIDGET (https://files.by/docs/tz.zip)\n%%EOF",
+    );
+    const candidates = await collectDocumentLinks({
+      name: "form.pdf",
+      bytes,
+      format: "pdf",
+      text: "",
+    });
+    expect(candidates).toContainEqual({ url: "https://files.by/docs/tz.zip", embedded: true });
+  });
+
   it("survives a malformed pdf during the annotation pass", async () => {
     const candidates = await collectDocumentLinks({
       name: "broken.pdf",
@@ -84,8 +97,15 @@ vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
       return {
         numPages: 1,
         getPage: async () => ({
-          getAnnotations: async () =>
-            url === undefined ? [] : [{ subtype: "Link", url }],
+          getAnnotations: async () => {
+            const annotations: object[] =
+              url === undefined ? [] : [{ subtype: "Link", url }];
+            const widget = marker.match(/\/WIDGET\s*\((https?:[^)]+)\)/)?.[1];
+            if (widget !== undefined) {
+              annotations.push({ subtype: "Widget", a: { URI: widget } });
+            }
+            return annotations;
+          },
         }),
         destroy: async () => {},
       };

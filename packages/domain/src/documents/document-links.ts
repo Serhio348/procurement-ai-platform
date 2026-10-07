@@ -9,6 +9,7 @@ import {
   isBlockedDocumentationHost,
   isGoszakupkiHost,
   isPublicDocumentationUrl,
+  isReferenceDocumentationHost,
   isYandexDiskHost,
   looksLikeDocumentationFileName,
 } from "./documentation-url.js";
@@ -70,6 +71,7 @@ export type DocumentLinkRejectReason =
   | "not_documentation"
   | "blocked_host"
   | "platform_page"
+  | "reference_page"
   | "unsupported_scheme"
   | "duplicate"
   | "self";
@@ -111,6 +113,9 @@ export function selectDocumentLinkCandidates(
         rejected.push({ url: normalized, reason: "platform_page" });
         continue;
       }
+    } else if (isReferenceDocumentationHost(url.hostname)) {
+      rejected.push({ url: normalized, reason: "reference_page" });
+      continue;
     } else if (!isPublicDocumentationUrl(url)) {
       rejected.push({ url: normalized, reason: "blocked_host" });
       continue;

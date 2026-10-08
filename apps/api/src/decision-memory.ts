@@ -1,4 +1,5 @@
 import {
+  AssistantSuggestion,
   DecisionMemoryEntry,
   type SpecialistProcurementCard,
   type SpecialistTriageKind,
@@ -11,10 +12,54 @@ export interface DecisionMemoryPort {
   list(workspaceId: string): Promise<DecisionMemoryEntry[]>;
 }
 
+/** Same contract as the PostgreSQL suggestion store. */
+export interface AssistantSuggestionPort {
+  list(workspaceId: string): Promise<AssistantSuggestion[]>;
+  offer(workspaceId: string, suggestion: AssistantSuggestion): Promise<boolean>;
+  resolve(
+    workspaceId: string,
+    id: string,
+    state: "accepted" | "dismissed",
+    resolvedAt: string,
+  ): Promise<AssistantSuggestion | undefined>;
+}
+
 export interface CabinetAssistantOptions {
   memory: DecisionMemoryPort;
+  suggestions: AssistantSuggestionPort;
   /** Pilot gate: cabinets outside it neither record nor expose memory. */
   enabledFor: (workspaceId: string) => boolean;
+}
+
+export function createMemoryAssistantSuggestions(): AssistantSuggestionPort {
+  const byWorkspace = new Map<string, AssistantSuggestion[]>();
+  return {
+    async list(workspaceId) {
+      return [...(byWorkspace.get(workspaceId) ?? [])];
+    },
+    async offer(workspaceId, suggestion) {
+      const rows = byWorkspace.get(workspaceId) ?? [];
+      if (
+        rows.some(
+          (row) => row.profileId === suggestion.profileId && row.termKey === suggestion.termKey,
+        )
+      ) {
+        return false;
+      }
+      rows.push(AssistantSuggestion.parse(suggestion));
+      byWorkspace.set(workspaceId, rows);
+      return true;
+    },
+    async resolve(workspaceId, id, state) {
+      const rows = byWorkspace.get(workspaceId) ?? [];
+      const index = rows.findIndex((row) => row.id === id && row.state === "open");
+      const row = rows[index];
+      if (row === undefined) return undefined;
+      const next = { ...row, state };
+      rows[index] = next;
+      return next;
+    },
+  };
 }
 
 export function createMemoryDecisionMemory(): DecisionMemoryPort {

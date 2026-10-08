@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyBootstrap } from "./bootstrap.js";
 import { createDatabase, type Database } from "./client.js";
+import { createPostgresAssistantSuggestionStore } from "./assistant-suggestion-store.js";
 import { createPostgresDecisionMemoryStore } from "./decision-memory-store.js";
 import { migrateDatabase } from "./migrate.js";
 import { createRepositories } from "./repositories.js";
@@ -389,6 +390,50 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(await memory.list(workspaceA)).toHaveLength(1);
     await memory.forget(workspaceA, card.sourceProcurementId);
     expect(await memory.list(workspaceA)).toEqual([]);
+  });
+
+  it("offers an assistant term once per profile and closes it only in its cabinet", async () => {
+    const store = createSpecialistStore(db);
+    const suggestions = createPostgresAssistantSuggestionStore(db);
+    const userA = "00000000-0000-4000-8000-000000000971";
+    const userB = "00000000-0000-4000-8000-000000000972";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values
+        (${userA}, 'a-suggest@test.local', 'A', 'x', 'specialist', 'active'),
+        (${userB}, 'b-suggest@test.local', 'B', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceA = await store.ensurePersonalWorkspace(userA, "A");
+    const workspaceB = await store.ensurePersonalWorkspace(userB, "B");
+    const offer = {
+      id: "00000000-0000-4000-8000-000000000973",
+      profileId: "00000000-0000-4000-8000-000000000974",
+      termKey: "наруж освеще",
+      label: "наружного освещения",
+      rejectCount: 5,
+      examples: ["Ремонт наружного освещения"],
+      state: "open" as const,
+      createdAt: "2026-10-08T10:00:00.000Z",
+    };
+    expect(await suggestions.offer(workspaceA, offer)).toBe(true);
+    expect(
+      await suggestions.offer(workspaceA, { ...offer, id: "00000000-0000-4000-8000-000000000975" }),
+    ).toBe(false);
+    expect(await suggestions.list(workspaceB)).toEqual([]);
+    expect(
+      await suggestions.resolve(workspaceB, offer.id, "accepted", "2026-10-08T11:00:00.000Z"),
+    ).toBeUndefined();
+    const dismissed = await suggestions.resolve(
+      workspaceA,
+      offer.id,
+      "dismissed",
+      "2026-10-08T11:00:00.000Z",
+    );
+    expect(dismissed?.state).toBe("dismissed");
+    expect(
+      await suggestions.resolve(workspaceA, offer.id, "accepted", "2026-10-08T12:00:00.000Z"),
+    ).toBeUndefined();
   });
 
   it("lets two cabinets persist the same listing card UUID", async () => {

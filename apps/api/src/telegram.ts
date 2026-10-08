@@ -1,9 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type {
+  AssistantSuggestionEntry,
   InboxFixtureItem as InboxFixtureItemValue,
   SpecialistTriageKind as SpecialistTriageKindValue,
 } from "@procurement/contracts";
-import { compileChangeAlert, compileTelegramText } from "@procurement/domain";
+import {
+  assistantSuggestionText,
+  compileChangeAlert,
+  compileTelegramText,
+} from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type { TelegramLink, TelegramStore } from "@procurement/db";
 
@@ -62,6 +67,9 @@ const LINK_CODE_TTL_MS = 10 * 60_000;
 const DISMISS_PREFIX = "d:";
 /** "t:<cardId>:<kind>" — a triage decision straight from the chat. */
 const DECIDE_PREFIX = "t:";
+/** "s:<suggestionId>:a|d" — accept or dismiss an assistant rule. */
+const SUGGESTION_PREFIX = "s:";
+const SUGGESTION_ACTION = { a: "accept", d: "dismiss" } as const;
 const DECIDE_LABEL: Record<SpecialistTriageKindValue, string> = {
   monitor: "Следить",
   participate: "Участвовать",
@@ -242,6 +250,11 @@ export interface TelegramNotifierOptions {
     dismiss(id: string): Promise<boolean>;
     /** Applies «Следить»/«Участвовать»/«Не нужно» inside the linked cabinet. */
     decide?(cardId: string, kind: SpecialistTriageKindValue): Promise<"ok" | "not_found" | "unavailable">;
+    /** «Принять» / «Отклонить» on an assistant rule inside the linked cabinet. */
+    resolveSuggestion?(
+      suggestionId: string,
+      action: "accept" | "dismiss",
+    ): Promise<"ok" | "not_found" | "unavailable">;
   } | undefined>;
 }
 
@@ -253,6 +266,8 @@ export interface TelegramNotifier {
   setMode(userId: string, mode: "all" | "urgent"): Promise<void>;
   /** Called when a new inbox event is recorded; never throws into the caller. */
   notifyInbox(workspaceId: string, item: InboxFixtureItemValue): Promise<void>;
+  /** An assistant rule offered once; not urgent, so «только срочные» skips it. */
+  notifySuggestion(workspaceId: string, suggestion: AssistantSuggestionEntry): Promise<void>;
   handleUpdate(update: TelegramUpdate): Promise<void>;
   pollOnce(offset: number): Promise<number>;
 }
@@ -302,6 +317,35 @@ export function formatInboxMessage(
         { text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl },
         { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${item.change.id}` },
       ],
+    ],
+  };
+}
+
+export function formatSuggestionMessage(
+  suggestion: AssistantSuggestionEntry,
+  publicUrl: string,
+): { text: string; buttons: TelegramButton[][] } {
+  const text = assistantSuggestionText(suggestion);
+  const examples = suggestion.examples
+    .slice(0, 3)
+    .map((title) => `• ${escapeHtml(title)}`)
+    .join("\n");
+  return {
+    text: [
+      `<b>${escapeHtml(text.title)}</b>`,
+      escapeHtml(text.body),
+      examples.length === 0 ? "" : `Например:\n${examples}`,
+      escapeHtml(text.question),
+      `<i>${escapeHtml(text.acceptEffect)}</i>`,
+    ]
+      .filter((part) => part.length > 0)
+      .join("\n\n"),
+    buttons: [
+      [
+        { text: "Принять", callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:a` },
+        { text: "Отклонить", callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:d` },
+      ],
+      [{ text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl }],
     ],
   };
 }
@@ -484,6 +528,17 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
         logger.error("Telegram notify failed", error, { workspaceId });
       }
     },
+    async notifySuggestion(workspaceId, suggestion) {
+      try {
+        const link = await store.linkForWorkspace(workspaceId);
+        if (link === undefined || link.mode === "urgent") return;
+        const fresh = await store.markSent(workspaceId, `assistant:${suggestion.id}`);
+        if (!fresh) return;
+        await safeSend(link, formatSuggestionMessage(suggestion, publicUrl));
+      } catch (error) {
+        logger.error("Telegram suggestion notify failed", error, { workspaceId });
+      }
+    },
     async handleUpdate(update) {
       try {
         if (update.message !== undefined) await handleMessage(update.message);
@@ -518,6 +573,37 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
                   chatId,
                   messageId,
                   text: `${messageText}\n\nРешение: «${label}»`,
+                  buttons: [[{ text: "Открыть в консоли", url: publicUrl }]],
+                });
+              } catch (error) {
+                logger.error("Telegram message edit failed", error, { chatId, messageId });
+              }
+            }
+          } else if (data.startsWith(SUGGESTION_PREFIX)) {
+            const [suggestionId = "", code = ""] = data.slice(SUGGESTION_PREFIX.length).split(":");
+            const action = SUGGESTION_ACTION[code as keyof typeof SUGGESTION_ACTION];
+            const link = await store.linkByChat(chatId);
+            const cabinet = link === undefined ? undefined : await options.openCabinet?.(link.userId);
+            const result =
+              cabinet?.resolveSuggestion === undefined || action === undefined
+                ? "unavailable"
+                : await cabinet.resolveSuggestion(suggestionId, action);
+            const verdict =
+              action === "accept" ? "добавлено в исключения профиля" : "отклонено, больше не предложу";
+            await bot.answerCallbackQuery(
+              id,
+              result === "ok"
+                ? `Готово: ${verdict}`
+                : result === "not_found"
+                  ? "Предложение уже разобрано"
+                  : "Сейчас недоступно",
+            );
+            if (result === "ok" && messageId !== undefined && messageText !== undefined) {
+              try {
+                await bot.editMessageText({
+                  chatId,
+                  messageId,
+                  text: `${escapeHtml(messageText)}\n\nРешение: ${verdict}`,
                   buttons: [[{ text: "Открыть в консоли", url: publicUrl }]],
                 });
               } catch (error) {

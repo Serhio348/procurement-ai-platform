@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { SpecialistInboxAction, SpecialistInboxEntry } from "@procurement/contracts";
+import type {
+  AssistantSuggestionEntry,
+  SpecialistInboxAction,
+  SpecialistInboxEntry,
+} from "@procurement/contracts";
+import { assistantSuggestionText } from "@procurement/domain";
 import { ConfirmToast } from "../shell/ConfirmToast.js";
 
 const isNarrowViewport = () =>
@@ -22,6 +27,10 @@ export interface InboxPageProps {
   onSelect?: (id: string) => void;
   onResolve?: (id: string, action: SpecialistInboxAction) => void;
   onDismissAll?: () => void;
+  /** Open assistant rules; the tab shows only while there is one to answer. */
+  suggestions?: readonly AssistantSuggestionEntry[];
+  suggestionBusyId?: string;
+  onSuggestion?: (id: string, action: "accept" | "dismiss") => void;
 }
 
 const NEW_INBOX_TOPICS = new Set(["new_found", "review"]);
@@ -31,27 +40,40 @@ const INBOX_GROUPS = [
   { key: "watched", title: "Изменения в моих закупках", empty: "Изменений в отслеживаемых закупках нет" },
 ] as const;
 
-type InboxGroupKey = (typeof INBOX_GROUPS)[number]["key"];
+type InboxTab = (typeof INBOX_GROUPS)[number]["key"] | "assistant";
 
 export function InboxPage(props: InboxPageProps) {
+  const suggestions = props.suggestions ?? [];
   const groups = INBOX_GROUPS.map((group) => ({
     ...group,
     entries: props.entries.filter((entry) =>
       group.key === "new" ? NEW_INBOX_TOPICS.has(entry.topic) : !NEW_INBOX_TOPICS.has(entry.topic),
     ),
   }));
-  const [tab, setTab] = useState<InboxGroupKey>(() =>
-    props.entries.some((entry) => NEW_INBOX_TOPICS.has(entry.topic)) ? "new" : "watched",
+  const [tab, setTab] = useState<InboxTab>(() =>
+    props.entries.some((entry) => NEW_INBOX_TOPICS.has(entry.topic))
+      ? "new"
+      : props.entries.length === 0 && suggestions.length > 0
+        ? "assistant"
+        : "watched",
   );
-  const activeGroup = groups.find((group) => group.key === tab) ?? groups[0]!;
-  const selected =
-    activeGroup.entries.find((entry) => entry.id === props.selectedId) ??
-    activeGroup.entries[0];
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | undefined>();
+  const assistantTab = tab === "assistant" && suggestions.length > 0;
+  const activeGroup =
+    groups.find((group) => group.key === tab) ??
+    groups.find((group) => group.key === "watched")!;
+  const selected = assistantTab
+    ? undefined
+    : (activeGroup.entries.find((entry) => entry.id === props.selectedId) ??
+      activeGroup.entries[0]);
+  const selectedSuggestion = assistantTab
+    ? (suggestions.find((item) => item.id === selectedSuggestionId) ?? suggestions[0])
+    : undefined;
 
   // R32: on narrow screens the card renders above the list — tapping a row
   // deep in the list must bring the opened card (and its actions) into view.
   const detailRef = useRef<HTMLElement>(null);
-  const selectedId = selected?.id;
+  const selectedId = selected?.id ?? selectedSuggestion?.id;
   useEffect(() => {
     if (selectedId === undefined || !isNarrowViewport()) return;
     detailRef.current?.scrollIntoView({ block: "start" });
@@ -107,9 +129,11 @@ export function InboxPage(props: InboxPageProps) {
               key={group.key}
               type="button"
               role="tab"
-              aria-selected={activeGroup.key === group.key}
+              aria-selected={!assistantTab && activeGroup.key === group.key}
               className={
-                activeGroup.key === group.key ? "inbox-tab inbox-tab-active" : "inbox-tab"
+                !assistantTab && activeGroup.key === group.key
+                  ? "inbox-tab inbox-tab-active"
+                  : "inbox-tab"
               }
               onClick={() => {
                 setTab(group.key);
@@ -122,8 +146,44 @@ export function InboxPage(props: InboxPageProps) {
               {group.title} ({group.entries.length})
             </button>
           ))}
+          {suggestions.length === 0 ? null : (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={assistantTab}
+              className={assistantTab ? "inbox-tab inbox-tab-active" : "inbox-tab"}
+              onClick={() => setTab("assistant")}
+            >
+              Помощник ({suggestions.length})
+            </button>
+          )}
         </div>
-        {activeGroup.entries.length === 0 ? (
+        {assistantTab ? (
+          <ul className="inbox-list">
+            {suggestions.map((suggestion) => {
+              const text = assistantSuggestionText(suggestion);
+              const isSelected = selectedSuggestion?.id === suggestion.id;
+              return (
+                <li key={suggestion.id}>
+                  <button
+                    type="button"
+                    className={isSelected ? "inbox-row is-selected" : "inbox-row"}
+                    aria-current={isSelected ? "true" : undefined}
+                    onClick={() => setSelectedSuggestionId(suggestion.id)}
+                  >
+                    <span className="inbox-row-top">
+                      <span className="inbox-title">{text.title}</span>
+                      <span className="inbox-marks">
+                        <span className="inbox-topic is-assistant">Предложение</span>
+                      </span>
+                    </span>
+                    <span className="inbox-summary">{text.body}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : activeGroup.entries.length === 0 ? (
           <p className="empty">{activeGroup.empty}</p>
         ) : (
           <ul className="inbox-list">
@@ -158,7 +218,13 @@ export function InboxPage(props: InboxPageProps) {
       </section>
 
       <section ref={detailRef} className="detail" aria-labelledby="detail-heading">
-        {selected === undefined ? (
+        {selectedSuggestion !== undefined ? (
+          <SuggestionDetail
+            suggestion={selectedSuggestion}
+            busy={props.suggestionBusyId === selectedSuggestion.id}
+            {...(props.onSuggestion === undefined ? {} : { onAnswer: props.onSuggestion })}
+          />
+        ) : selected === undefined ? (
           <>
             <h2 id="detail-heading">Закупка</h2>
             <p className="empty">Новых изменений нет</p>
@@ -255,5 +321,53 @@ export function InboxPage(props: InboxPageProps) {
         )}
       </section>
     </main>
+  );
+}
+
+function SuggestionDetail({
+  suggestion,
+  busy,
+  onAnswer,
+}: {
+  suggestion: AssistantSuggestionEntry;
+  busy: boolean;
+  onAnswer?: (id: string, action: "accept" | "dismiss") => void;
+}) {
+  const text = assistantSuggestionText(suggestion);
+  return (
+    <>
+      <h2 id="detail-heading">{text.title}</h2>
+      <p>{text.body}</p>
+      {suggestion.examples.length === 0 ? null : (
+        <>
+          <h3>Например</h3>
+          <ul className="assistant-examples">
+            {suggestion.examples.map((title) => (
+              <li key={title}>{title}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      <h3>{text.question}</h3>
+      <p className="review-reason">{text.acceptEffect}</p>
+      <div className="inbox-actions">
+        <button
+          type="button"
+          className="profile-fill"
+          disabled={busy}
+          onClick={() => onAnswer?.(suggestion.id, "accept")}
+        >
+          Принять
+        </button>
+        <button
+          type="button"
+          className="inbox-open"
+          disabled={busy}
+          onClick={() => onAnswer?.(suggestion.id, "dismiss")}
+        >
+          Отклонить
+        </button>
+      </div>
+    </>
   );
 }

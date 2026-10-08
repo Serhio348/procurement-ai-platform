@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   AdminCabinetListResponse,
+  AssistantSuggestion,
+  AssistantSuggestionEntry,
+  AssistantSuggestionListResponse,
+  AssistantSuggestionResolveResponse,
+  AssistantSuggestionResolveWrite,
   AssistantTermsResponse,
+  type AssistantSuggestion as AssistantSuggestionValue,
   InboxFixtureItem,
   ProcedureCard,
   SearchQuery,
@@ -73,6 +79,7 @@ import {
   projectCardForProfile,
   withCardAssessment,
   profileDisplayName,
+  nextSuggestionTerm,
   profileTermTable,
   rejectSignals,
   scoreIntentCard,
@@ -148,6 +155,8 @@ export const DEFAULT_DISCOVERY_LIMIT = 200;
 export const DEFAULT_WATCH_LIMIT = 40;
 
 const ASSISTANT_TERMS_SHOWN = 50;
+/** Same ceiling as SpecialistWorkingProfile.excludeKeywords. */
+const PROFILE_EXCLUSION_LIMIT = 50;
 
 /** «За день» до дедлайна — окно предупреждения «истекает завтра». */
 const DEADLINE_SOON_MS = 36 * 60 * 60 * 1000;
@@ -175,6 +184,12 @@ export interface SpecialistApi extends FastifyInstance {
     cardId: string,
     kind: SpecialistTriageKindValue,
   ) => Promise<SpecialistProcurementCardValue | undefined>;
+  /** «Принять» / «Отклонить» on an assistant rule from the Telegram callback. */
+  resolveSuggestionForWorkspace: (
+    workspaceId: string,
+    suggestionId: string,
+    action: "accept" | "dismiss",
+  ) => Promise<"ok" | "not_found" | "exclusions_full">;
 }
 
 export interface BuildApiOptions {
@@ -2084,6 +2099,31 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   });
 
+  app.get("/api/assistant/suggestions", async () =>
+    AssistantSuggestionListResponse.parse({ items: await openSuggestions() }),
+  );
+
+  app.post("/api/assistant/suggestions/:id", async (request, reply) => {
+    const params = request.params as { id: string };
+    const parsed = AssistantSuggestionResolveWrite.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const profileId = (await openSuggestions()).find((item) => item.id === params.id)?.profileId;
+    const result = await resolveSuggestion(params.id, parsed.data.action);
+    if (result === "not_found") {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    if (result === "exclusions_full") {
+      return reply.code(409).send({ error: "exclusions_full" });
+    }
+    const profile = profileId === undefined ? undefined : workspace().findProfile(profileId);
+    return AssistantSuggestionResolveResponse.parse({
+      items: await openSuggestions(),
+      ...(profile === undefined ? {} : { profile }),
+    });
+  });
+
   function profileList() {
     return SpecialistProfileListResponse.parse({
       items: workspace().profiles(),
@@ -2576,12 +2616,111 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       } else {
         await assistant.memory.record(workspaceId, decisionMemoryEntry(card, kind, clock()));
       }
+      if (kind === "reject") {
+        for (const profileId of card.profileIds) await offerSuggestion(profileId);
+      }
     } catch (error) {
       logger.warn("Decision memory write failed", {
         sourceProcurementId: card.sourceProcurementId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  };
+
+  const suggestionEntry = (suggestion: AssistantSuggestionValue) => {
+    const profile = workspace().findProfile(suggestion.profileId);
+    return profile === undefined
+      ? undefined
+      : AssistantSuggestionEntry.parse({ ...suggestion, profileName: profileDisplayName(profile) });
+  };
+
+  /**
+   * At most one open rule per profile: the next one is offered only after
+   * the specialist answers the current one.
+   */
+  const offerSuggestion = async (profileId: string): Promise<void> => {
+    const workspaceId = currentCabinet().workspaceId;
+    const assistant = assistantFor(workspaceId);
+    const profile = workspace().findProfile(profileId);
+    if (assistant === undefined || profile === undefined) return;
+    const offered = (await assistant.suggestions.list(workspaceId)).filter(
+      (item) => item.profileId === profileId,
+    );
+    if (offered.some((item) => item.state === "open")) return;
+    const table = profileTermTable(await assistant.memory.list(workspaceId), profile);
+    const term = nextSuggestionTerm(
+      rejectSignals(table),
+      offered.map((item) => item.termKey),
+    );
+    if (term === undefined) return;
+    const suggestion = AssistantSuggestion.parse({
+      id: randomUUID(),
+      profileId,
+      termKey: term.key,
+      label: term.label,
+      rejectCount: term.rejectCount,
+      examples: term.rejectExamples,
+      state: "open",
+      createdAt: clock(),
+    });
+    if (!(await assistant.suggestions.offer(workspaceId, suggestion))) return;
+    logger.info("Assistant rule offered", { profileId, rejectCount: term.rejectCount });
+    const entry = suggestionEntry(suggestion);
+    if (entry !== undefined) await options.telegram?.notifySuggestion(workspaceId, entry);
+  };
+
+  const openSuggestions = async (): Promise<ReturnType<typeof AssistantSuggestionEntry.parse>[]> => {
+    const workspaceId = currentCabinet().workspaceId;
+    const assistant = assistantFor(workspaceId);
+    if (assistant === undefined) return [];
+    return (await assistant.suggestions.list(workspaceId))
+      .filter((item) => item.state === "open")
+      .map(suggestionEntry)
+      .filter((item) => item !== undefined);
+  };
+
+  /**
+   * «Принять» writes the term into the profile's exclusions first and closes
+   * the offer second: a failed profile save leaves the offer open to retry.
+   */
+  const resolveSuggestion = async (
+    suggestionId: string,
+    action: "accept" | "dismiss",
+  ): Promise<"ok" | "not_found" | "exclusions_full"> => {
+    const workspaceId = currentCabinet().workspaceId;
+    const assistant = assistantFor(workspaceId);
+    if (assistant === undefined) return "not_found";
+    const suggestion = (await assistant.suggestions.list(workspaceId)).find(
+      (item) => item.id === suggestionId && item.state === "open",
+    );
+    if (suggestion === undefined) return "not_found";
+    const profile = workspace().findProfile(suggestion.profileId);
+    if (action === "accept" && profile !== undefined) {
+      const known = profile.excludeKeywords.some(
+        (item) => item.trim().toLocaleLowerCase("ru-BY") === suggestion.label.toLocaleLowerCase("ru-BY"),
+      );
+      if (!known) {
+        if (profile.excludeKeywords.length >= PROFILE_EXCLUSION_LIMIT) return "exclusions_full";
+        workspace().replaceProfileById(
+          profile.id,
+          SpecialistProfileWrite.parse({
+            ...profile,
+            excludeKeywords: [...profile.excludeKeywords, suggestion.label],
+          }),
+        );
+        await persistWorkspaceOnly();
+      }
+    }
+    const closed = await assistant.suggestions.resolve(
+      workspaceId,
+      suggestion.id,
+      action === "accept" && profile !== undefined ? "accepted" : "dismissed",
+      clock(),
+    );
+    if (closed === undefined) return "not_found";
+    logger.info("Assistant rule resolved", { profileId: suggestion.profileId, action });
+    await offerSuggestion(suggestion.profileId);
+    return "ok";
   };
 
   /**
@@ -2922,7 +3061,20 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     return cabinetAls.run(cabinet, () => applyTriageDecision(cardId, kind));
   };
 
-  const api = Object.assign(app, { runDiscovery, decideForWorkspace }) as SpecialistApi;
+  const resolveSuggestionForWorkspace: SpecialistApi["resolveSuggestionForWorkspace"] = async (
+    workspaceId,
+    suggestionId,
+    action,
+  ) => {
+    const cabinet = await cabinets.open(workspaceId);
+    return cabinetAls.run(cabinet, () => resolveSuggestion(suggestionId, action));
+  };
+
+  const api = Object.assign(app, {
+    runDiscovery,
+    decideForWorkspace,
+    resolveSuggestionForWorkspace,
+  }) as SpecialistApi;
   return api;
 }
 

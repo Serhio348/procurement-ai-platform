@@ -5,9 +5,11 @@ import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
 import { createMemoryCabinetRegistry } from "./cabinets.js";
 import {
   assistantPilotFromEnv,
+  createMemoryAssistantSuggestions,
   createMemoryDecisionMemory,
   type DecisionMemoryPort,
 } from "./decision-memory.js";
+import type { TelegramNotifier } from "./telegram.js";
 
 type Api = Awaited<ReturnType<typeof buildSpecialistApi>>;
 
@@ -43,15 +45,39 @@ interface Member {
  * Admin and one approved specialist in separate cabinets. Only the cabinets
  * put into `pilot` after sign-in are in the assistant pilot.
  */
+function telegramStub(): TelegramNotifier & { suggestions: string[] } {
+  const suggestions: string[] = [];
+  return {
+    suggestions,
+    botUsername: () => undefined,
+    status: async () => ({ linked: false }),
+    createLinkCode: async () => ({ code: "x", expiresInSec: 600 }),
+    unlink: async () => undefined,
+    setMode: async () => undefined,
+    notifyInbox: async () => undefined,
+    notifySuggestion: async (_workspaceId, suggestion) => {
+      suggestions.push(suggestion.label);
+    },
+    handleUpdate: async () => undefined,
+    pollOnce: async (offset) => offset,
+  };
+}
+
 async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemory()) {
   const directory = createMemoryAuthDirectory();
   await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
   const cabinets = createMemoryCabinetRegistry();
   const pilot = new Set<string>();
+  const telegram = telegramStub();
   const app = await buildSpecialistApi({
     authDirectory: directory,
     cabinets,
-    assistant: { memory, enabledFor: (workspaceId) => pilot.has(workspaceId) },
+    telegram,
+    assistant: {
+      memory,
+      suggestions: createMemoryAssistantSuggestions(),
+      enabledFor: (workspaceId) => pilot.has(workspaceId),
+    },
   });
   const adminIn = await app.inject({
     method: "POST",
@@ -111,8 +137,55 @@ async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemo
       url: `/api/admin/assistant/terms?profileId=${who.profileId}`,
       headers: { cookie: who.cookie },
     });
-  return { app, memory, admin, specialist, decide, terms };
+  const suggestions = async (who: Member) =>
+    (
+      JSON.parse(
+        (
+          await app.inject({
+            method: "GET",
+            url: "/api/assistant/suggestions",
+            headers: { cookie: who.cookie },
+          })
+        ).body,
+      ) as { items: Array<{ id: string; label: string; profileName: string; rejectCount: number }> }
+    ).items;
+  const answer = (who: Member, id: string, action: "accept" | "dismiss") =>
+    app.inject({
+      method: "POST",
+      url: `/api/assistant/suggestions/${id}`,
+      headers: { cookie: who.cookie },
+      payload: { action },
+    });
+  const profileOf = async (who: Member) =>
+    JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/profile", headers: { cookie: who.cookie } })).body,
+    ) as { excludeKeywords: string[] };
+  return {
+    app,
+    memory,
+    telegram,
+    admin,
+    specialist,
+    decide,
+    terms,
+    suggestions,
+    answer,
+    profileOf,
+  };
 }
+
+const TAKEN = [
+  "Монтаж сетей 0,4 кВ в д. Озерцо",
+  "Выполнение работ по устройству сетей 0,4кВ",
+  "Реконструкция сетей 0,4 кВ подстанции",
+];
+const LIGHTING = [
+  "Капитальный ремонт наружного освещения ул. Ленина",
+  "Текущий ремонт сетей наружного освещения в г. Пинске",
+  "Монтаж наружного освещения парка",
+  "Устройство наружного освещения дворовой территории",
+  "Модернизация наружного освещения стадиона",
+];
 
 async function closing(app: Api, run: () => Promise<void>): Promise<void> {
   try {
@@ -209,6 +282,68 @@ describe("cabinet assistant decision memory", () => {
       expect(JSON.parse(trash.body).items).toEqual([
         expect.objectContaining({ id: item.id, triage: "reject" }),
       ]);
+    });
+  });
+});
+
+describe("assistant rule suggestions", () => {
+  it("offers one rule after repeated rejects and «Принять» adds it to the profile's exclusions", async () => {
+    const { app, telegram, admin, decide, suggestions, answer, profileOf } = await twoCabinets();
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      for (const title of LIGHTING.slice(0, 4)) await decide(admin, title, "reject");
+      expect(await suggestions(admin)).toEqual([]);
+
+      await decide(admin, LIGHTING[4]!, "reject");
+      await decide(admin, "Ремонт наружного освещения сквера", "reject");
+      const offered = await suggestions(admin);
+      expect(offered).toEqual([
+        expect.objectContaining({ label: "наружного освещения", profileName: "Сети", rejectCount: 5 }),
+      ]);
+      expect(telegram.suggestions).toEqual(["наружного освещения"]);
+      expect((await profileOf(admin)).excludeKeywords).toEqual([]);
+
+      const accepted = await answer(admin, offered[0]!.id, "accept");
+      expect(accepted.statusCode).toBe(200);
+      expect(
+        (JSON.parse(accepted.body) as { profile?: { excludeKeywords: string[] } }).profile
+          ?.excludeKeywords,
+      ).toEqual(["наружного освещения"]);
+      expect((await profileOf(admin)).excludeKeywords).toEqual(["наружного освещения"]);
+      expect(await suggestions(admin)).toEqual([]);
+      expect((await answer(admin, offered[0]!.id, "accept")).statusCode).toBe(404);
+    });
+  });
+
+  it("never offers a dismissed rule again, however many rejects follow", async () => {
+    const { app, telegram, admin, decide, suggestions, answer, profileOf } = await twoCabinets();
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      for (const title of LIGHTING) await decide(admin, title, "reject");
+      const offered = await suggestions(admin);
+      expect((await answer(admin, offered[0]!.id, "dismiss")).statusCode).toBe(200);
+
+      for (let index = 0; index < 4; index += 1) {
+        await decide(admin, `Обслуживание наружного освещения, участок ${index + 1}`, "reject");
+      }
+      expect(await suggestions(admin)).toEqual([]);
+      expect(telegram.suggestions).toEqual(["наружного освещения"]);
+      expect((await profileOf(admin)).excludeKeywords).toEqual([]);
+    });
+  });
+
+  it("does not show or resolve the pilot cabinet's rule from another cabinet", async () => {
+    const { app, admin, specialist, decide, suggestions, answer } = await twoCabinets();
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      for (const title of LIGHTING) await decide(admin, title, "reject");
+      for (const title of TAKEN) await decide(specialist, title, "monitor");
+      for (const title of LIGHTING) await decide(specialist, title, "reject");
+      const offered = await suggestions(admin);
+      expect(offered).toHaveLength(1);
+      expect(await suggestions(specialist)).toEqual([]);
+      expect((await answer(specialist, offered[0]!.id, "accept")).statusCode).toBe(404);
+      expect(await suggestions(admin)).toHaveLength(1);
     });
   });
 });

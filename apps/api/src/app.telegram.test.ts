@@ -27,6 +27,9 @@ function stubTelegram(): TelegramNotifier & { calls: string[] } {
     async notifyInbox() {
       calls.push("notify");
     },
+    async notifySuggestion() {
+      calls.push("suggestion");
+    },
     async handleUpdate() {},
     async pollOnce(offset) {
       return offset;

@@ -28,7 +28,11 @@ import {
   createTelegramNotifier,
   type TelegramNotifier,
 } from "./telegram.js";
-import { createPostgresDecisionMemoryStore, createPostgresTelegramStore } from "@procurement/db";
+import {
+  createPostgresAssistantSuggestionStore,
+  createPostgresDecisionMemoryStore,
+  createPostgresTelegramStore,
+} from "@procurement/db";
 import { assistantPilotFromEnv } from "./decision-memory.js";
 
 // /api/health reports the deployed revision so an operator can verify which
@@ -146,7 +150,10 @@ async function main(): Promise<void> {
   let telegramOk = false;
   // The notifier is built before the app (notifyInbox is an app option), but
   // triage callbacks only arrive via polling that starts after the app exists.
-  const decideBridge: { fn?: SpecialistApi["decideForWorkspace"] } = {};
+  const decideBridge: {
+    fn?: SpecialistApi["decideForWorkspace"];
+    suggestion?: SpecialistApi["resolveSuggestionForWorkspace"];
+  } = {};
   const telegramBot = createTelegramBotFromEnv(process.env);
   if (telegramBot !== undefined && persistence.db !== undefined) {
     try {
@@ -186,6 +193,12 @@ async function main(): Promise<void> {
               if (decideBridge.fn === undefined) return "unavailable";
               const card = await decideBridge.fn(workspaceId, cardId, kind);
               return card === undefined ? "not_found" : "ok";
+            },
+            async resolveSuggestion(suggestionId, action) {
+              if (decideBridge.suggestion === undefined) return "unavailable";
+              const result = await decideBridge.suggestion(workspaceId, suggestionId, action);
+              if (result === "ok") return "ok";
+              return result === "not_found" ? "not_found" : "unavailable";
             },
           };
         },
@@ -250,6 +263,7 @@ async function main(): Promise<void> {
       : {
           assistant: {
             memory: createPostgresDecisionMemoryStore(persistence.db),
+            suggestions: createPostgresAssistantSuggestionStore(persistence.db),
             enabledFor: assistantPilotFromEnv(process.env["ASSISTANT_WORKSPACE_IDS"]),
           },
         }),
@@ -288,6 +302,7 @@ async function main(): Promise<void> {
     },
   });
   decideBridge.fn = app.decideForWorkspace;
+  decideBridge.suggestion = app.resolveSuggestionForWorkspace;
   const port = Number.parseInt(process.env["API_PORT"] ?? "3001", 10);
   await app.listen({ port, host: "127.0.0.1" });
   const transport = discoveryTransport(process.env);

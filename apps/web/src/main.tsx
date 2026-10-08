@@ -9,6 +9,7 @@ import {
   createTelegramLink,
   decideProcurement,
   deleteProfile,
+  fetchAssistantSuggestions,
   fetchInbox,
   fetchIngestProgress,
   fetchProcurement,
@@ -21,6 +22,7 @@ import {
   emptyTrash,
   reindexProcurement,
   dismissAllInbox,
+  resolveAssistantSuggestion,
   resolveInbox,
   restoreProcurement,
   saveProfile,
@@ -184,6 +186,7 @@ function LiveConsole() {
       cancelSearch={cancelSearch}
       rejectSearchQueue={rejectSearchQueue}
       serviceHealth={fetchServiceHealth}
+      assistant={{ list: fetchAssistantSuggestions, resolve: resolveAssistantSuggestion }}
       telegram={{
         status: fetchTelegramStatus,
         link: createTelegramLink,

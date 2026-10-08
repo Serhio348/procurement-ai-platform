@@ -1,5 +1,9 @@
 import {
+  AssistantSuggestionListResponse,
+  AssistantSuggestionResolveResponse,
   ProcedureCard,
+  type AssistantSuggestionEntry,
+  type AssistantSuggestionResolveResponse as AssistantSuggestionResolveResponseValue,
   SpecialistInboxDismissAllResponse,
   SpecialistInboxListResponse,
   SpecialistInboxResolveResponse,
@@ -69,6 +73,40 @@ export async function deleteInbox(
     await throwApiError(response, "Не удалось удалить сообщение");
   }
   return SpecialistInboxListResponse.parse(await response.json()).items;
+}
+
+export async function fetchAssistantSuggestions(
+  fetcher: typeof fetch = fetch,
+): Promise<readonly AssistantSuggestionEntry[]> {
+  const response = await fetcher("/api/assistant/suggestions", withCredentials());
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось загрузить предложения помощника");
+  }
+  return AssistantSuggestionListResponse.parse(await response.json()).items;
+}
+
+export async function resolveAssistantSuggestion(
+  id: string,
+  action: "accept" | "dismiss",
+  fetcher: typeof fetch = fetch,
+): Promise<AssistantSuggestionResolveResponseValue> {
+  const response = await fetcher(
+    `/api/assistant/suggestions/${id}`,
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    }),
+  );
+  if (!response.ok) {
+    await throwApiError(
+      response,
+      response.status === 409
+        ? "В профиле уже 50 исключений — уберите лишние в редакторе профиля"
+        : "Не удалось применить предложение помощника",
+    );
+  }
+  return AssistantSuggestionResolveResponse.parse(await response.json());
 }
 
 export async function dismissAllInbox(

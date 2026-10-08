@@ -79,6 +79,7 @@ function setup(
   store.seedWorkspaceLink(workspaceId, userId);
   const dismissed: string[] = [];
   const decisions: { cardId: string; kind: string }[] = [];
+  const rules: { suggestionId: string; action: string }[] = [];
   const notifier = createTelegramNotifier({
     bot,
     store,
@@ -106,10 +107,14 @@ function setup(
               decisions.push({ cardId, kind });
               return cardId === "missing" ? "not_found" : "ok";
             },
+            async resolveSuggestion(suggestionId, action) {
+              rules.push({ suggestionId, action });
+              return "ok";
+            },
           }
         : undefined,
   });
-  return { bot, store, notifier, dismissed, decisions };
+  return { bot, store, notifier, dismissed, decisions, rules };
 }
 
 describe("telegram notifier", () => {
@@ -242,6 +247,51 @@ describe("telegram notifier", () => {
     expect(flatButtons(bot.edited[0] as SentMessage).map((button) => button.text)).toEqual([
       "Открыть в консоли",
     ]);
+  });
+
+  it("offers an assistant rule once with Принять / Отклонить and skips it in urgent mode", async () => {
+    const { bot, notifier, rules } = setup();
+    const { code } = await notifier.createLinkCode(userId);
+    await notifier.handleUpdate({ updateId: 1, message: { chatId: "777", text: `/start ${code}` } });
+    bot.sent.length = 0;
+    const suggestion = {
+      id: "00000000-0000-4000-8000-0000000000dd",
+      profileId: "00000000-0000-4000-8000-0000000000ee",
+      profileName: "Сети <0,4 кВ>",
+      termKey: "наруж освеще",
+      label: "наружного освещения",
+      rejectCount: 5,
+      examples: ["Ремонт наружного освещения"],
+      state: "open" as const,
+      createdAt: new Date().toISOString(),
+    };
+
+    await notifier.notifySuggestion(workspaceId, suggestion);
+    await notifier.notifySuggestion(workspaceId, suggestion);
+    expect(bot.sent).toHaveLength(1);
+    expect(bot.sent[0]?.text).toContain("Вы отклонили 5 закупок со словами «наружного освещения»");
+    expect(bot.sent[0]?.text).toContain("Сети &lt;0,4 кВ&gt;");
+    expect(flatButtons(bot.sent[0]).map((button) => button.callbackData)).toEqual(
+      expect.arrayContaining([`s:${suggestion.id}:a`, `s:${suggestion.id}:d`]),
+    );
+
+    await notifier.handleUpdate({
+      updateId: 2,
+      callbackQuery: {
+        id: "cb5",
+        chatId: "777",
+        data: `s:${suggestion.id}:a`,
+        messageId: 56,
+        messageText: "Помощник",
+      },
+    });
+    expect(rules).toEqual([{ suggestionId: suggestion.id, action: "accept" }]);
+    expect(bot.edited[0]?.text).toContain("добавлено в исключения профиля");
+
+    await notifier.handleUpdate({ updateId: 3, message: { chatId: "777", text: "/urgent" } });
+    bot.sent.length = 0;
+    await notifier.notifySuggestion(workspaceId, { ...suggestion, id: "00000000-0000-4000-8000-0000000000df" });
+    expect(bot.sent).toHaveLength(0);
   });
 
   it("does not decide for an unlinked chat or a missing card", async () => {

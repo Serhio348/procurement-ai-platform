@@ -99,6 +99,13 @@
       "when": 1791600000000,
       "tag": "0013_decision_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791700000000,
+      "tag": "0014_assistant_suggestions",
+      "breakpoints": true
     }
   ]
 }

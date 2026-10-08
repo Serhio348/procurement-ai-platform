@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDateTime } from "./common.js";
-import { SpecialistTriageKind } from "./specialist.js";
+import { SpecialistTriageKind, SpecialistWorkingProfile } from "./specialist.js";
 
 /**
  * What the cabinet assistant remembers about one specialist decision: the
@@ -30,6 +30,52 @@ export const AssistantTermStat = z.object({
   rejectExamples: z.array(z.string().min(1)).max(5).default([]),
 });
 export type AssistantTermStat = z.infer<typeof AssistantTermStat>;
+
+/**
+ * A rule the assistant offers once: exclude a term from one profile. Code
+ * picked it from the cabinet's own decisions; nothing changes until the
+ * specialist accepts. A dismissed term is never offered again for that
+ * profile, so the row stays as the memory of the refusal.
+ */
+export const AssistantSuggestionState = z.enum(["open", "accepted", "dismissed"]);
+export type AssistantSuggestionState = z.infer<typeof AssistantSuggestionState>;
+
+export const AssistantSuggestion = z.object({
+  id: z.string().uuid(),
+  profileId: z.string().uuid(),
+  termKey: z.string().min(1),
+  label: z.string().min(1),
+  rejectCount: z.number().int().nonnegative(),
+  examples: z.array(z.string().min(1)).max(5).default([]),
+  state: AssistantSuggestionState,
+  createdAt: IsoDateTime,
+});
+export type AssistantSuggestion = z.infer<typeof AssistantSuggestion>;
+
+/** Open suggestion as the console shows it: the profile name is resolved. */
+export const AssistantSuggestionEntry = AssistantSuggestion.extend({
+  profileName: z.string(),
+});
+export type AssistantSuggestionEntry = z.infer<typeof AssistantSuggestionEntry>;
+
+export const AssistantSuggestionListResponse = z.object({
+  items: z.array(AssistantSuggestionEntry),
+});
+export type AssistantSuggestionListResponse = z.infer<typeof AssistantSuggestionListResponse>;
+
+export const AssistantSuggestionResolveWrite = z.object({
+  action: z.enum(["accept", "dismiss"]),
+});
+export type AssistantSuggestionResolveWrite = z.infer<typeof AssistantSuggestionResolveWrite>;
+
+/**
+ * Open offers after the answer, plus the profile «Принять» changed: the
+ * console swaps its copy so a later editor save cannot drop the exclusion.
+ */
+export const AssistantSuggestionResolveResponse = AssistantSuggestionListResponse.extend({
+  profile: SpecialistWorkingProfile.optional(),
+});
+export type AssistantSuggestionResolveResponse = z.infer<typeof AssistantSuggestionResolveResponse>;
 
 /** Read-only view of one profile's decision memory for the pilot cabinet. */
 export const AssistantTermsResponse = z.object({

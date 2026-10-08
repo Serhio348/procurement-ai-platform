@@ -1049,6 +1049,36 @@ export const workspaceDecisionMemory = pgTable(
   (table) => [primaryKey({ columns: [table.workspaceId, table.sourceProcurementId] })],
 );
 
+/**
+ * Rules the assistant offered. One row per (profile, term) for good: a
+ * dismissed term must not be offered again, so the row is never deleted
+ * while the profile lives.
+ */
+export const workspaceAssistantSuggestions = pgTable(
+  "workspace_assistant_suggestions",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").notNull(),
+    termKey: varchar("term_key", { length: 256 }).notNull(),
+    label: varchar("label", { length: 256 }).notNull(),
+    rejectCount: integer("reject_count").notNull(),
+    examples: jsonb("examples").$type<string[]>().notNull().default([]),
+    state: varchar("state", { length: 16 }).notNull().default("open"),
+    createdAt: timestamptz("created_at").notNull(),
+    resolvedAt: timestamptz("resolved_at"),
+  },
+  (table) => [
+    uniqueIndex("workspace_assistant_suggestions_term_uq").on(
+      table.workspaceId,
+      table.profileId,
+      table.termKey,
+    ),
+  ],
+);
+
 export const workspaceBackfillRuns = pgTable("workspace_backfill_runs", {
   id: varchar("id", { length: 64 }).primaryKey(),
   appliedAt: timestamptz("applied_at").notNull().defaultNow(),

@@ -11,6 +11,54 @@ afterEach(() => {
   cleanup();
 });
 
+describe("InboxApp assistant tab", () => {
+  const suggestion = {
+    id: "00000000-0000-4000-8000-0000000000dd",
+    profileId: "00000000-0000-4000-8000-0000000000ee",
+    profileName: "Сети 0,4 кВ",
+    termKey: "наруж освеще",
+    label: "наружного освещения",
+    rejectCount: 5,
+    examples: ["Ремонт наружного освещения парка"],
+    state: "open" as const,
+    createdAt: "2026-10-08T10:00:00.000Z",
+  };
+
+  it("shows a rule only while there is one and answers it with Принять / Отклонить", async () => {
+    const user = userEvent.setup();
+    const answers: string[] = [];
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxApp entries={[]} suggestions={[]} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("tab", { name: /Помощник/ })).toBeNull();
+
+    rerender(
+      <MemoryRouter>
+        <InboxApp
+          entries={[]}
+          suggestions={[suggestion]}
+          onSuggestion={async (id, action) => {
+            answers.push(`${action}:${id}`);
+          }}
+        />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("tab", { name: "Помощник (1)" }));
+    expect(
+      screen.getAllByText("Вы отклонили 5 закупок со словами «наружного освещения» и не взяли ни одной.")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Ремонт наружного освещения парка")).toBeTruthy();
+    expect(screen.getByText("Не показывать такие закупки в профиле «Сети 0,4 кВ»?")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Принять" }));
+    await user.click(screen.getByRole("button", { name: "Отклонить" }));
+    expect(answers).toEqual([`accept:${suggestion.id}`, `dismiss:${suggestion.id}`]);
+  });
+});
+
 describe("InboxApp", () => {
   it("offers refresh, download or delete instead of leaving the change as unread mail", async () => {
     const user = userEvent.setup();

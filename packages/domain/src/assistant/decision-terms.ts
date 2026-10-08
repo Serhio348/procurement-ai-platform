@@ -137,6 +137,23 @@ export function rejectSignals(
   });
 }
 
+/**
+ * The one signal worth offering next. A term offered before — accepted or
+ * dismissed — is not offered again, and neither is a narrower or wider form
+ * of it: after «Отклонить» on «наружного освещения» the assistant must not
+ * come back with «освещения».
+ */
+export function nextSuggestionTerm(
+  signals: readonly AssistantTermStat[],
+  offeredKeys: Iterable<string>,
+): AssistantTermStat | undefined {
+  const offered = [...offeredKeys].map((key) => key.split(" "));
+  return signals.find((signal) => {
+    const stems = signal.key.split(" ");
+    return !offered.some((previous) => overlapsExclusion(stems, previous));
+  });
+}
+
 function isUnigramTerm(word: TokenizedWord): boolean {
   return word.stem.length >= 3 && !/^\d+$/u.test(word.stem);
 }

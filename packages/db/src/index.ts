@@ -1,3 +1,4 @@
+export * from "./assistant-suggestion-store.js";
 export * from "./bootstrap.js";
 export * from "./client.js";
 export * from "./decision-memory-store.js";

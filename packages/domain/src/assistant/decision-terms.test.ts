@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DecisionMemoryEntry } from "@procurement/contracts";
-import { stemWord } from "../search/query-terms.js";
-import { decisionTerms, profileTermTable, rejectSignals } from "./decision-terms.js";
+import { stemWord, termOccurs } from "../search/query-terms.js";
+import {
+  decisionTerms,
+  nextSuggestionTerm,
+  profileTermTable,
+  rejectSignals,
+} from "./decision-terms.js";
 
 const PROFILE = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -108,6 +113,29 @@ describe("profile term table", () => {
       false,
     );
     expect(table.terms.some((term) => term.key === "сет")).toBe(false);
+  });
+
+  it("does not offer a term again, nor a narrower or wider form of it", () => {
+    const table = profileTermTable([...taken, ...lightingRejects], profile);
+    const signals = rejectSignals(table);
+    const first = nextSuggestionTerm(signals, []);
+    expect(first?.label).toBe("наружного освещения");
+    expect(nextSuggestionTerm(signals, [first!.key])).toBeUndefined();
+    expect(nextSuggestionTerm(signals, [stemWord("освещения")])).toBeUndefined();
+    expect(nextSuggestionTerm(signals, ["кровл"])?.label).toBe("наружного освещения");
+  });
+
+  it("offers a label that, once excluded, cuts every reject it was counted from", () => {
+    const table = profileTermTable([...taken, ...lightingRejects], profile);
+    const offered = nextSuggestionTerm(rejectSignals(table), []);
+    expect(offered).toBeDefined();
+    for (const reject of lightingRejects) {
+      expect(termOccurs(reject.title, offered!.label)).toBe(true);
+    }
+    for (const accepted of taken) {
+      expect(termOccurs(accepted.title, offered!.label)).toBe(false);
+    }
+    expect(termOccurs("Обслуживание наружное освещение квартала", offered!.label)).toBe(true);
   });
 
   it("never counts another profile's decisions", () => {

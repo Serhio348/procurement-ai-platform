@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import type {
+  AssistantSuggestionEntry,
+  AssistantSuggestionResolveResponse,
   ProcedureCard,
   ProcurementId,
   SpecialistInboxAction,
@@ -89,6 +91,14 @@ export interface SpecialistAppProps {
   rejectSearchQueue?: (profileId: string) => Promise<readonly SpecialistProcurementCard[]>;
   serviceHealth?: () => Promise<SpecialistServiceHealth>;
   telegram?: TelegramApi | undefined;
+  /** Cabinet assistant rules; an empty list outside the pilot. */
+  assistant?: {
+    list: () => Promise<readonly AssistantSuggestionEntry[]>;
+    resolve: (
+      id: string,
+      action: "accept" | "dismiss",
+    ) => Promise<AssistantSuggestionResolveResponse>;
+  };
 }
 
 export function SpecialistApp(props: SpecialistAppProps): ReactElement {
@@ -170,6 +180,22 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     }
   }, []);
 
+  const [suggestions, setSuggestions] = useState<readonly AssistantSuggestionEntry[]>([]);
+  const assistantRef = useRef(props.assistant);
+  assistantRef.current = props.assistant;
+  // A failed refresh keeps the rules on screen; the inbox poll reports the link.
+  const refreshSuggestions = useCallback(() => {
+    const pull = assistantRef.current?.list;
+    if (pull === undefined) return;
+    void pull()
+      .then(setSuggestions)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refreshSuggestions();
+  }, [refreshSuggestions]);
+
   useEffect(() => {
     if (refreshInbox === undefined) return undefined;
     const timer = setInterval(() => {
@@ -179,9 +205,10 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           pollOk("inbox");
         })
         .catch(() => pollFailed("inbox"));
+      refreshSuggestions();
     }, 30_000);
     return () => clearInterval(timer);
-  }, [refreshInbox, applyInboxItems, pollOk, pollFailed]);
+  }, [refreshInbox, applyInboxItems, pollOk, pollFailed, refreshSuggestions]);
 
   // Readiness (R42): when /api/health reports not-ready, a persistent banner
   // names the degraded capabilities so the specialist does not trust a
@@ -279,6 +306,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           if (refreshInbox !== undefined) {
             applyInboxItems(await refreshInbox());
           }
+          refreshSuggestions();
           return items;
         };
 
@@ -300,6 +328,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           if (refreshInbox !== undefined) {
             applyInboxItems(await refreshInbox());
           }
+          if (kind === "reject") refreshSuggestions();
           return updated === undefined ? items : [updated];
         };
 
@@ -568,6 +597,30 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           element={
             <InboxRoute
               entries={inbox}
+              suggestions={suggestions}
+              {...(props.assistant === undefined
+                ? {}
+                : {
+                    answerSuggestion: async (id: string, action: "accept" | "dismiss") => {
+                      try {
+                        const result = await props.assistant!.resolve(id, action);
+                        setSuggestions(result.items);
+                        if (result.profile !== undefined) remember(result.profile);
+                        pushNotice(
+                          action === "accept" ? "Исключение добавлено" : "Предложение отклонено",
+                          action === "accept"
+                            ? "Такие закупки больше не будут приходить по этому профилю"
+                            : "Помощник больше не предложит это слово для профиля",
+                        );
+                      } catch (error) {
+                        pushNotice(
+                          "Не удалось применить предложение",
+                          error instanceof Error ? error.message : "Повторите попытку",
+                        );
+                        refreshSuggestions();
+                      }
+                    },
+                  })}
               {...(dismissAllInbox === undefined
                 ? {}
                 : {
@@ -815,6 +868,8 @@ function InboxRoute({
   entries,
   resolve,
   dismissAll,
+  suggestions,
+  answerSuggestion,
 }: {
   entries: readonly SpecialistInboxEntry[];
   resolve?: (
@@ -822,11 +877,15 @@ function InboxRoute({
     action: SpecialistInboxAction,
   ) => Promise<SpecialistInboxResolveResponse>;
   dismissAll?: () => Promise<void>;
+  suggestions: readonly AssistantSuggestionEntry[];
+  answerSuggestion?: (id: string, action: "accept" | "dismiss") => Promise<void>;
 }): ReactElement {
   const navigate = useNavigate();
   return (
     <InboxApp
       entries={entries}
+      suggestions={suggestions}
+      {...(answerSuggestion === undefined ? {} : { onSuggestion: answerSuggestion })}
       {...(dismissAll === undefined ? {} : { onDismissAll: dismissAll })}
       {...(resolve === undefined
         ? {}

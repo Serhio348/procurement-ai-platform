@@ -73,7 +73,9 @@ export function scoreSearchIntent(
   const extra = hit.extraText ?? "";
   const titleObjects = objectsIn(title, plan.objects);
   const extraObjects =
-    titleObjects.found.length === 0 ? objectsIn(extra, plan.objects) : { found: [], exact: false };
+    titleObjects.found.length === 0
+      ? objectsIn(extra, plan.objects)
+      : { found: [], exact: false, twoLetterOnly: false };
   const objectRole: IntentMatchRole =
     titleObjects.found.length > 0 ? "subject" : extraObjects.found.length > 0 ? "mention" : "none";
   const objects = objectRole === "mention" ? extraObjects.found : titleObjects.found;
@@ -82,6 +84,10 @@ export function scoreSearchIntent(
   // clear the match line; the decision must not, or "ТП" in "ЭТП" settles
   // a supply profile before the model sees the card.
   const objectEmbeddedOnly = objectRole !== "none" && !objectSource.exact;
+  // A two-letter keyword is never proof by itself, in any domain: "ТП" in
+  // "Ф-300 ТП" and "ЖБ" in "ЖБ-1" both need the model. A longer object on
+  // the same text can still settle the match.
+  const objectTwoLetterOnly = objectRole !== "none" && objectSource.twoLetterOnly;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
   const serviceHead =
@@ -134,6 +140,7 @@ export function scoreSearchIntent(
     matchedDesired.length,
     plan,
     objectEmbeddedOnly,
+    objectTwoLetterOnly,
   );
   return {
     score,
@@ -145,6 +152,7 @@ export function scoreSearchIntent(
       excludedRole,
       objectRole,
       objectEmbeddedOnly,
+      objectTwoLetterOnly,
       contextRole: context.role,
       matchedContext,
       decision,
@@ -429,12 +437,25 @@ function earliestIndex(text: string, terms: readonly string[]): number {
   return best;
 }
 
+function isTwoLetterTerm(term: string): boolean {
+  if (term.includes(" ")) return false;
+  const compact = term
+    .normalize("NFKC")
+    .toLocaleLowerCase("ru-BY")
+    .replace(/[\s\-‐‑‒–—]/gu, "");
+  return [...compact].length === 2;
+}
+
 function objectsIn(
   text: string,
   objects: readonly string[],
-): { found: string[]; exact: boolean } {
+): { found: string[]; exact: boolean; twoLetterOnly: boolean } {
   const found = objects.filter((item) => termOccurs(text, item));
-  return { found, exact: found.some((item) => termEvidence(text, item) === "exact") };
+  return {
+    found,
+    exact: found.some((item) => termEvidence(text, item) === "exact"),
+    twoLetterOnly: found.length > 0 && found.every(isTwoLetterTerm),
+  };
 }
 
 function decisionFor(
@@ -445,6 +466,7 @@ function decisionFor(
   desiredCount: number,
   plan: SearchIntentPlan,
   objectEmbeddedOnly: boolean,
+  objectTwoLetterOnly: boolean,
 ): IntentScoreDecision {
   if (excludedRole === "subject") return "veto";
   if (contextRole === "mismatch") return "discard";
@@ -458,7 +480,7 @@ function decisionFor(
     return "discard";
   }
   if (contextRole === "missing") return "review";
-  if (objectEmbeddedOnly) return "review";
+  if (objectEmbeddedOnly || objectTwoLetterOnly) return "review";
   if (score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) return "match";
   return "review";
 }
@@ -476,6 +498,7 @@ function relevanceReason(input: {
   excludedRole: IntentExcludedRole;
   objectRole: IntentMatchRole;
   objectEmbeddedOnly: boolean;
+  objectTwoLetterOnly: boolean;
   contextRole: IntentContextRole;
   matchedContext: readonly string[];
   decision: IntentScoreDecision;
@@ -504,6 +527,11 @@ function relevanceReason(input: {
       return `Слово ${quoted} встречается только внутри чужого кода — нужна проверка по смыслу.`;
     }
     return `Слова ${quoted} встречаются только внутри чужого кода — нужна проверка по смыслу.`;
+  }
+  if (input.objectTwoLetterOnly && input.decision === "review" && equipment !== undefined) {
+    const quoted = input.objects.map((item) => `«${item}»`).join(", ");
+    const word = input.objects.length === 1 ? `Слово ${quoted}` : `Слова ${quoted}`;
+    return `${word} из двух букв само по себе не доказывает совпадение — нужна проверка по смыслу.`;
   }
   if (input.objectRole === "mention" && equipment !== undefined) {
     return `Слово «${equipment}» есть только в дополнительном тексте, этого недостаточно.`;

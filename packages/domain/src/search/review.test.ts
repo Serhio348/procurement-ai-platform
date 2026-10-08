@@ -135,6 +135,9 @@ describe("reviewByIntentCard", () => {
     expect(
       reviewByIntentCard(card("Поставка КТП 10/0,4 кВ", [{ title: "КТП" }]), supplyPlan)?.decidedBy,
     ).toBe("card");
+    expect(
+      reviewByIntentCard(card("Реагенты Ф-300 ТП", [{ title: "анализатор Ф-300 ТП" }]), supplyPlan),
+    ).toBeUndefined();
   });
 });
 

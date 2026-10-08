@@ -47,7 +47,7 @@ export interface ProcurementSearchReviewOptions {
   classifier?: SearchClassifierPort;
   /** Below this the model's answer is only a hint for the specialist. */
   minConfidence?: number;
-  /** Model calls one search run may spend; the rest wait for a human. */
+  /** Model calls one profile pass may spend. Each pass starts again at zero. */
   maxModelCalls?: number;
   concurrency?: number;
   logger?: Logger;
@@ -55,7 +55,7 @@ export interface ProcurementSearchReviewOptions {
 }
 
 export const DEFAULT_REVIEW_MIN_CONFIDENCE = 0.7;
-export const DEFAULT_REVIEW_MAX_MODEL_CALLS = 50;
+export const DEFAULT_REVIEW_MAX_MODEL_CALLS = 500;
 
 /**
  * Card first, model second. The card is fetched through Procurement MCP with

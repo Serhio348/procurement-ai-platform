@@ -777,8 +777,29 @@ describe("embedded equipment codes", () => {
     expect(lotOnly.reason).toMatch(/внутри чужого кода/);
   });
 
+  it("sends a two-letter object to the model even when the token is exact", () => {
+    for (const title of ["Ф-300 ТП", "Монтаж ТП"]) {
+      const scored = scoreSearchIntent({ title }, title.startsWith("Монтаж") ? works : supply);
+      expect(scored.decision, title).toBe("review");
+      expect(scored.reason, title).toMatch(/двух букв/);
+    }
+    const panel = scoreSearchIntent(
+      { title: "Панель стеновая ПСТ60.9.2,0-ТП-1" },
+      supply,
+    );
+    expect(panel.decision).toBe("review");
+    const concrete = SearchIntentPlan.parse({
+      objects: ["ЖБ", "железобетонные конструкции"],
+      desired_actions: ["поставка"],
+      intent: "equipment_purchase",
+    });
+    expect(scoreSearchIntent({ title: "Панель ЖБ-1" }, concrete).decision).toBe("review");
+    expect(
+      scoreSearchIntent({ title: "Поставка железобетонные конструкции" }, concrete).decision,
+    ).toBe("match");
+  });
+
   it("still matches an exact token and a code the term itself leads", () => {
-    expect(scoreSearchIntent({ title: "Ф-300 ТП" }, supply).decision).toBe("match");
     expect(scoreSearchIntent({ title: "Поставка КТП 10/0,4 кВ" }, supply).decision).toBe("match");
     expect(scoreSearchIntent({ title: "КТПБ-250" }, supply).decision).toBe("match");
     expect(
@@ -794,7 +815,7 @@ describe("embedded equipment codes", () => {
 
   it("does not let an embedded object satisfy a works verb by itself", () => {
     expect(scoreSearchIntent({ title: "Монтаж ЭТП" }, works).decision).toBe("review");
-    expect(scoreSearchIntent({ title: "Монтаж ТП" }, works).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "Монтаж ТП" }, works).decision).toBe("review");
     expect(scoreSearchIntent({ title: "Сертификат ЭТП" }, works).decision).toBe("discard");
   });
 

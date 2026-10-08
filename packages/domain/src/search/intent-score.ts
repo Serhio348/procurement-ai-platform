@@ -1,6 +1,6 @@
 import type { ProcedureCard, SearchIntentPlan } from "@procurement/contracts";
 import { inferSearchIntentPlan, planAllowsBareObject } from "./intent-plan.js";
-import { firstTermIndex, termOccurs } from "./query-terms.js";
+import { firstTermIndex, termEvidence, termOccurs } from "./query-terms.js";
 
 /**
  * Listing score weights. Keep every number here; do not sprinkle magic
@@ -71,12 +71,17 @@ export function scoreSearchIntent(
 ): SearchIntentScore {
   const title = hit.title;
   const extra = hit.extraText ?? "";
-  const matchedObjects = plan.objects.filter((item) => termOccurs(title, item));
+  const titleObjects = objectsIn(title, plan.objects);
   const extraObjects =
-    matchedObjects.length === 0 ? plan.objects.filter((item) => termOccurs(extra, item)) : [];
+    titleObjects.found.length === 0 ? objectsIn(extra, plan.objects) : { found: [], exact: false };
   const objectRole: IntentMatchRole =
-    matchedObjects.length > 0 ? "subject" : extraObjects.length > 0 ? "mention" : "none";
-  const objects = objectRole === "mention" ? extraObjects : matchedObjects;
+    titleObjects.found.length > 0 ? "subject" : extraObjects.found.length > 0 ? "mention" : "none";
+  const objects = objectRole === "mention" ? extraObjects.found : titleObjects.found;
+  const objectSource = objectRole === "mention" ? extraObjects : titleObjects;
+  // Every found object is only inside a foreign code. The number can still
+  // clear the match line; the decision must not, or "ТП" in "ЭТП" settles
+  // a supply profile before the model sees the card.
+  const objectEmbeddedOnly = objectRole !== "none" && !objectSource.exact;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
   const serviceHead =
@@ -121,7 +126,15 @@ export function scoreSearchIntent(
   }
 
   score = clampScore(score);
-  const decision = decisionFor(score, excludedRole, objectRole, context.role, matchedDesired.length, plan);
+  const decision = decisionFor(
+    score,
+    excludedRole,
+    objectRole,
+    context.role,
+    matchedDesired.length,
+    plan,
+    objectEmbeddedOnly,
+  );
   return {
     score,
     decision,
@@ -131,6 +144,7 @@ export function scoreSearchIntent(
       excluded: excludedInTitle,
       excludedRole,
       objectRole,
+      objectEmbeddedOnly,
       contextRole: context.role,
       matchedContext,
       decision,
@@ -415,6 +429,14 @@ function earliestIndex(text: string, terms: readonly string[]): number {
   return best;
 }
 
+function objectsIn(
+  text: string,
+  objects: readonly string[],
+): { found: string[]; exact: boolean } {
+  const found = objects.filter((item) => termOccurs(text, item));
+  return { found, exact: found.some((item) => termEvidence(text, item) === "exact") };
+}
+
 function decisionFor(
   score: number,
   excludedRole: IntentExcludedRole,
@@ -422,6 +444,7 @@ function decisionFor(
   contextRole: IntentContextRole,
   desiredCount: number,
   plan: SearchIntentPlan,
+  objectEmbeddedOnly: boolean,
 ): IntentScoreDecision {
   if (excludedRole === "subject") return "veto";
   if (contextRole === "mismatch") return "discard";
@@ -435,6 +458,7 @@ function decisionFor(
     return "discard";
   }
   if (contextRole === "missing") return "review";
+  if (objectEmbeddedOnly) return "review";
   if (score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) return "match";
   return "review";
 }
@@ -451,6 +475,7 @@ function relevanceReason(input: {
   excluded: readonly string[];
   excludedRole: IntentExcludedRole;
   objectRole: IntentMatchRole;
+  objectEmbeddedOnly: boolean;
   contextRole: IntentContextRole;
   matchedContext: readonly string[];
   decision: IntentScoreDecision;
@@ -472,6 +497,13 @@ function relevanceReason(input: {
   }
   if (input.objectRole === "none") {
     return "Целевое оборудование в названии не найдено.";
+  }
+  if (input.objectEmbeddedOnly && input.decision === "review" && equipment !== undefined) {
+    const quoted = input.objects.map((item) => `«${item}»`).join(", ");
+    if (input.objects.length === 1) {
+      return `Слово ${quoted} встречается только внутри чужого кода — нужна проверка по смыслу.`;
+    }
+    return `Слова ${quoted} встречаются только внутри чужого кода — нужна проверка по смыслу.`;
   }
   if (input.objectRole === "mention" && equipment !== undefined) {
     return `Слово «${equipment}» есть только в дополнительном тексте, этого недостаточно.`;

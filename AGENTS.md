@@ -124,6 +124,7 @@
 - [`docs/architecture/STAGE-115.md`](docs/architecture/STAGE-115.md) — Telegram-бот: push без домена через long polling, одноразовые коды привязки, inbox→chat с дедупом, команды и кнопки «Разобрано» (R67)
 - [`docs/architecture/STAGE-116.md`](docs/architecture/STAGE-116.md) — удаление профиля забирает свои нерешённые карточки; решение и чужой кабинет не трогаются
 - [`docs/architecture/STAGE-117.md`](docs/architecture/STAGE-117.md) — ссылки на документацию внутри вложений: URL из текста/OOXML-rels/PDF-аннотаций+Widget, по-хопная валидация редиректов, происхождение в `#link/` фрагменте, per-link failure; share-формы Nextcloud/Dropbox резолвятся, справочные порталы не качаются, DNS-rebinding закрыт pinned-lookup, self-ссылка карточки не документ, события хронологии во входящих (R72–R76)
+- [`docs/architecture/STAGE-118.md`](docs/architecture/STAGE-118.md) — сокращение внутри чужого кода («ТП» в «ЭТП») не закрывает поиск: оценка уходит на проверку модели, точное слово и код, который термин начинает, по-прежнему решает код
 
 ---
 

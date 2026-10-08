@@ -4,6 +4,7 @@ import {
   listingMatchesAnyKeyword,
   stemWord,
   stemsShareRoot,
+  termEvidence,
   termOccurs,
 } from "./query-terms.js";
 
@@ -137,5 +138,20 @@ describe("listingKeepsPlatformHit", () => {
     expect(
       listingKeepsPlatformHit("Блочная комплектная подстанция БКТПБ №3", ["КТПБ"]),
     ).toBe(true);
+  });
+});
+
+describe("termEvidence", () => {
+  it("keeps a whole token and a leading model code exact", () => {
+    expect(termEvidence("Ф-300 ТП", "ТП")).toBe("exact");
+    expect(termEvidence("Поставка КТПБ-250", "КТПБ")).toBe("exact");
+    expect(termEvidence("Поставка электрооборудования", "электрооборудование")).toBe("exact");
+  });
+
+  it("marks an abbreviation inside a foreign code as a hint", () => {
+    expect(termEvidence("атрибутный сертификат ЭТП", "ТП")).toBe("embedded");
+    expect(termEvidence("Щетка ЩТП-13.04", "ТП")).toBe("embedded");
+    expect(termEvidence("2БКТПБ 400кВА", "КТПБ")).toBe("embedded");
+    expect(termEvidence("Поставка КТПБ для замены БКТПБ-746", "КТПБ")).toBe("exact");
   });
 });

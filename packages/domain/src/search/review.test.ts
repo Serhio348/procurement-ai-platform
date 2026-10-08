@@ -118,6 +118,24 @@ describe("reviewByIntentCard", () => {
       reviewByIntentCard(card("Поставка БКТПВ-630", [{ title: "БКТПВ-630 кВА" }]), supplyPlan),
     ).toBeUndefined();
   });
+
+  it("leaves an embedded abbreviation for the model and settles an exact token on the card", () => {
+    const supplyPlan = SearchIntentPlan.parse({
+      objects: ["ТП", "КТП"],
+      desired_actions: ["поставка"],
+      excluded_actions: ["монтаж"],
+      intent: "equipment_purchase",
+    });
+    expect(
+      reviewByIntentCard(
+        card("Сертификат ЭТП", [{ title: "атрибутный сертификат ЭТП" }]),
+        supplyPlan,
+      ),
+    ).toBeUndefined();
+    expect(
+      reviewByIntentCard(card("Поставка КТП 10/0,4 кВ", [{ title: "КТП" }]), supplyPlan)?.decidedBy,
+    ).toBe("card");
+  });
 });
 
 describe("outcomeFromModel", () => {

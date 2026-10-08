@@ -261,24 +261,37 @@ function textStemSequences(text: string): string[][] {
 }
 
 /**
- * True when every content stem of `term` appears in order in `text`.
- * Three-letter abbreviations still use the exact token matcher so "НКУ"
- * never hits "банку".
+ * How a profile term was found.
+ * "exact" is a whole token, a code the term leads ("КТПБ-250"), or an
+ * inflection. "embedded" is only inside a foreign code ("ТП" in "ЭТП"):
+ * a hint the scorer must not settle by itself.
  */
-export function termOccurs(text: string, term: string): boolean {
+export type TermEvidence = "exact" | "embedded" | "none";
+
+/**
+ * Three-letter abbreviations still use the token matcher so "НКУ" never
+ * hits "банку". A stem hit counts as exact: the word itself is there.
+ */
+export function termEvidence(text: string, term: string): TermEvidence {
   const needle = normaliseSearchText(term);
-  if (needle.length === 0) return false;
+  if (needle.length === 0) return "none";
   const strength = termMatchStrength(text, term);
-  if (strength === "exact" || strength === "embedded") return true;
+  if (strength === "exact") return "exact";
+  if (strength === "embedded") return "embedded";
   if (!needle.includes(" ") && withoutHyphens(needle, "").length <= 3) {
-    return false;
+    return "none";
   }
   for (const hay of textStemSequences(text)) {
     for (const needles of termStemSequences(term)) {
-      if (sequenceOccurs(hay, needles)) return true;
+      if (sequenceOccurs(hay, needles)) return "exact";
     }
   }
-  return false;
+  return "none";
+}
+
+/** True when the term is present at all, including a code-internal hint. */
+export function termOccurs(text: string, term: string): boolean {
+  return termEvidence(text, term) !== "none";
 }
 
 /** True when any profile/platform keyword is a real term in the listing text. */

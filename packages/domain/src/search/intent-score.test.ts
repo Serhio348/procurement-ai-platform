@@ -748,6 +748,61 @@ describe("parseSearchIntentPlan", () => {
   });
 });
 
+describe("embedded equipment codes", () => {
+  const supply = SearchIntentPlan.parse({
+    objects: ["ТП", "КТП", "КТПБ"],
+    desired_actions: ["поставка"],
+    excluded_actions: ["монтаж"],
+    intent: "equipment_purchase",
+  });
+  const works = SearchIntentPlan.parse({
+    objects: ["ТП", "ПС"],
+    desired_actions: ["монтаж"],
+    excluded_actions: [],
+    intent: "works",
+  });
+
+  it("sends a code-internal abbreviation to review even when the score clears the match line", () => {
+    for (const title of ["Сертификат ЭТП", "Щетка ЩТП-13.04", "Корзина ТПБ 5", "2БКТПБ 400 кВА"]) {
+      const scored = scoreSearchIntent({ title }, supply);
+      expect(scored.decision, title).toBe("review");
+      expect(scored.score, title).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
+      expect(scored.reason, title).toMatch(/внутри чужого кода/);
+    }
+    const lotOnly = scoreSearchIntentFromProcedure(
+      procedureCard("Поверка медицинского оборудования", "атрибутный сертификат ЭТП"),
+      supply,
+    );
+    expect(lotOnly.decision).toBe("review");
+    expect(lotOnly.reason).toMatch(/внутри чужого кода/);
+  });
+
+  it("still matches an exact token and a code the term itself leads", () => {
+    expect(scoreSearchIntent({ title: "Ф-300 ТП" }, supply).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "Поставка КТП 10/0,4 кВ" }, supply).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "КТПБ-250" }, supply).decision).toBe("match");
+    expect(
+      scoreSearchIntent({ title: "Поставка КТП и сертификат ЭТП" }, supply).decision,
+    ).toBe("match");
+    expect(
+      scoreSearchIntentFromProcedure(
+        procedureCard("Открытый конкурс", "Поставка КТП 10/0,4 кВ"),
+        supply,
+      ).decision,
+    ).toBe("match");
+  });
+
+  it("does not let an embedded object satisfy a works verb by itself", () => {
+    expect(scoreSearchIntent({ title: "Монтаж ЭТП" }, works).decision).toBe("review");
+    expect(scoreSearchIntent({ title: "Монтаж ТП" }, works).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "Сертификат ЭТП" }, works).decision).toBe("discard");
+  });
+
+  it("still vetoes a work-headed title when the equipment is only embedded", () => {
+    expect(scoreSearchIntent({ title: "Монтаж БКТПБ-746" }, supply).decision).toBe("veto");
+  });
+});
+
 describe("inferSearchIntentPlan", () => {
   it("turns an equipment profile into objects plus default work exclusions", () => {
     const plan = inferSearchIntentPlan({

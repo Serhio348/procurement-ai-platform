@@ -15,6 +15,15 @@ describe("stemWord", () => {
     expect(stemsShareRoot(stemWord("монтаж"), stemWord("монтажные"))).toBe(true);
   });
 
+  it("treats a glued voltage unit as the same term as a spaced one", () => {
+    expect(termOccurs("Выполнение работ по устройству сетей 0,4кВ", "сети 0,4 кВ")).toBe(true);
+    expect(termOccurs("Выполнение работ по устройству сетей 0,4 кВ", "сети 0,4 кВ")).toBe(true);
+    expect(termOccurs("Реконструкция сетей 10кВ", "сети 10 кВ")).toBe(true);
+    expect(termOccurs("Реконструкция ВЛ 10кВ", "10 кВ")).toBe(true);
+    expect(termOccurs("Трансформатор 400кВА", "400 кВА")).toBe(true);
+    expect(termOccurs("отчёт за 4квартал", "4 кВ")).toBe(false);
+  });
+
   it("treats short nouns in different cases as one term", () => {
     expect(termOccurs("Строительство сетей электроснабжения микрорайона", "сети электроснабжения")).toBe(true);
     expect(termOccurs("Ремонт сети электроснабжения", "сетей электроснабжения")).toBe(true);

@@ -233,6 +233,8 @@ function wordFamily(
   return undefined;
 }
 
+const GLUED_UNIT = /^(\d+(?:[.,]\d+)?)(ква|квт|мвт|кв)$/iu;
+
 export function tokenizeStems(text: string): string[] {
   const stems: string[] = [];
   const normalised = withoutHyphens(normaliseSearchText(text), " ");
@@ -241,6 +243,16 @@ export function tokenizeStems(text: string): string[] {
     if (token === undefined) continue;
     const lower = normaliseSearchText(token);
     if (FILLER.has(lower)) continue;
+    // "0,4кВ" and "10кВ" are the same term as "0,4 кВ" and "10 кВ".
+    // The comma already splits the decimal, so only the unit suffix is glued.
+    const glued = GLUED_UNIT.exec(lower);
+    const number = glued?.[1];
+    const unit = glued?.[2];
+    if (number !== undefined && unit !== undefined) {
+      stems.push(stemWord(number));
+      stems.push(stemWord(unit));
+      continue;
+    }
     stems.push(stemWord(token));
   }
   return stems;

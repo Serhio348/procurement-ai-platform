@@ -218,6 +218,58 @@ describe("scoreSearchIntent", () => {
     ).toBe("match");
   });
 
+  it("sends a generic contractor title to the model when a works profile already found its object", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: [
+        "монтаж электрооборудования",
+        "сети электроснабжения",
+        "электроснабжение",
+        "сети 0,4 кВ",
+      ],
+      excludeKeywords: [],
+    });
+    expect(plan.intent).toBe("works");
+    for (const title of [
+      "Выбор подрядчика для выполнения работ по сетям электроснабжения 0,4кВ.",
+      "Подрядные работы по сетям электроснабжения",
+      "Выполнение работ по устройству сетей электроснабжения",
+      "Выполнение работ по устройству сетей 0,4кВ",
+    ]) {
+      const scored = scoreSearchIntent({ title }, plan);
+      expect(scored.decision, title).toBe("review");
+      expect(scored.reason, title).toMatch(/общие работы/);
+    }
+    expect(scoreSearchIntent({ title: "Монтаж сетей электроснабжения" }, plan).decision).toBe("match");
+    expect(
+      scoreSearchIntent(
+        { title: "Выбор подрядчика для выполнения работ по благоустройству двора" },
+        plan,
+      ).decision,
+    ).toBe("veto");
+    expect(
+      scoreSearchIntent(
+        { title: "Выполнение работ по сетям электроснабжения для освещения склада" },
+        SearchIntentPlan.parse({
+          objects: ["сети электроснабжения"],
+          desired_actions: ["монтаж"],
+          excluded_actions: ["поставка"],
+          excluded_context: ["освещение"],
+          intent: "works",
+        }),
+      ).decision,
+    ).toBe("discard");
+    expect(
+      scoreSearchIntentFromProcedure(
+        procedureCard(
+          "Выбор подрядчика для выполнения работ по сетям электроснабжения 0,4кВ.",
+          "Сети электроснабжения 0,4 кВ",
+        ),
+        plan,
+      ).decision,
+    ).toBe("review");
+  });
+
   it("lets the model widen the cheap plan but never drop its exclusions or objects", () => {
     const inferred = inferSearchIntentPlan({ name: "КТП", keywords: ["КТП"], excludeKeywords: [] });
     const fromModel = SearchIntentPlan.parse({

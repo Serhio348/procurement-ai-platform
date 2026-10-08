@@ -139,6 +139,41 @@ describe("reviewByIntentCard", () => {
       reviewByIntentCard(card("Реагенты Ф-300 ТП", [{ title: "анализатор Ф-300 ТП" }]), supplyPlan),
     ).toBeUndefined();
   });
+
+  it("leaves a contractor title for electrical networks to the model on a works profile", () => {
+    const networkWorks = inferSearchIntentPlan({
+      name: "Монтаж и пусконаладка электросилового оборудования",
+      keywords: ["монтаж электрооборудования", "сети электроснабжения", "электроснабжение"],
+      excludeKeywords: [],
+    });
+    expect(
+      reviewByIntentCard(
+        card("Выбор подрядчика для выполнения работ по сетям электроснабжения 0,4кВ.", [
+          { title: "Сети электроснабжения 0,4 кВ" },
+        ]),
+        networkWorks,
+      ),
+    ).toBeUndefined();
+    expect(
+      reviewByIntentCard(
+        card("Монтаж сетей электроснабжения", [{ title: "Монтаж сетей электроснабжения 0,4 кВ" }]),
+        networkWorks,
+      )?.decidedBy,
+    ).toBe("card");
+    const supply = inferSearchIntentPlan({
+      name: "КТП",
+      keywords: ["КТП", "сети электроснабжения"],
+      excludeKeywords: [],
+    });
+    expect(
+      reviewByIntentCard(
+        card("Выполнение работ по устройству сетей электроснабжения", [
+          { title: "Устройство сетей электроснабжения" },
+        ]),
+        supply,
+      )?.verdict,
+    ).toBe("irrelevant");
+  });
 });
 
 describe("outcomeFromModel", () => {

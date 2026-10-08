@@ -92,12 +92,23 @@ export function scoreSearchIntent(
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
   const serviceHead =
     matchedDesired.length === 0 ? purchaseWorkHead(leadingClause(title)) : undefined;
+  // A works profile is looking for work. "Выбор подрядчика" / "выполнение
+  // работ" only says the trade is unnamed; with the profile object in the
+  // title the model has to decide. The same head on a supply profile stays
+  // a veto: that profile was not looking for work at all.
+  const genericWorkHead =
+    plan.intent === "works" &&
+    objectRole === "subject" &&
+    serviceHead !== undefined &&
+    isGenericWorkHead(serviceHead);
   const excludedInTitle = [
     ...plan.excluded_actions.filter((item) => termOccurs(title, item)),
-    ...(serviceHead === undefined ? [] : [serviceHead.trim()]),
+    ...(serviceHead === undefined || genericWorkHead ? [] : [serviceHead.trim()]),
   ];
   const excludedRole: IntentExcludedRole =
-    serviceHead !== undefined ? "subject" : excludedActionRole(title, plan, matchedDesired);
+    serviceHead !== undefined && !genericWorkHead
+      ? "subject"
+      : excludedActionRole(title, plan, matchedDesired);
   const context = contextRoleFor(title, extra, plan);
   const matchedContext = context.matched;
 
@@ -141,6 +152,7 @@ export function scoreSearchIntent(
     plan,
     objectEmbeddedOnly,
     objectTwoLetterOnly,
+    genericWorkHead,
   );
   return {
     score,
@@ -153,6 +165,7 @@ export function scoreSearchIntent(
       objectRole,
       objectEmbeddedOnly,
       objectTwoLetterOnly,
+      genericWorkHead,
       contextRole: context.role,
       matchedContext,
       decision,
@@ -382,6 +395,10 @@ function leadingClause(title: string): string {
  * «Реконструкция КТП» / «Выбор подрядчика … КТП» is works, not an implicit
  * supply of the equipment mentioned later or only in a lot line.
  */
+function isGenericWorkHead(label: string): boolean {
+  return label === "работы" || label === "подрядные работы";
+}
+
 function purchaseWorkHead(lead: string): string | undefined {
   const trimmed = lead.trim();
   if (trimmed.length === 0) return undefined;
@@ -467,10 +484,12 @@ function decisionFor(
   plan: SearchIntentPlan,
   objectEmbeddedOnly: boolean,
   objectTwoLetterOnly: boolean,
+  genericWorkHead: boolean,
 ): IntentScoreDecision {
   if (excludedRole === "subject") return "veto";
   if (contextRole === "mismatch") return "discard";
   if (excludedRole === "peer" && objectRole !== "none") return "review";
+  if (genericWorkHead) return "review";
   if (objectRole === "none") {
     if (plan.objects.length > 0) return "discard";
     if (desiredCount > 0) return "review";
@@ -499,6 +518,7 @@ function relevanceReason(input: {
   objectRole: IntentMatchRole;
   objectEmbeddedOnly: boolean;
   objectTwoLetterOnly: boolean;
+  genericWorkHead: boolean;
   contextRole: IntentContextRole;
   matchedContext: readonly string[];
   decision: IntentScoreDecision;
@@ -532,6 +552,9 @@ function relevanceReason(input: {
     const quoted = input.objects.map((item) => `«${item}»`).join(", ");
     const word = input.objects.length === 1 ? `Слово ${quoted}` : `Слова ${quoted}`;
     return `${word} из двух букв само по себе не доказывает совпадение — нужна проверка по смыслу.`;
+  }
+  if (input.genericWorkHead && input.decision === "review" && equipment !== undefined) {
+    return `Оборудование ${equipment} найдено, а в названии только общие работы — нужна проверка по смыслу.`;
   }
   if (input.objectRole === "mention" && equipment !== undefined) {
     return `Слово «${equipment}» есть только в дополнительном тексте, этого недостаточно.`;

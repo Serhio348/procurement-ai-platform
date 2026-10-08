@@ -86,6 +86,7 @@ export interface SpecialistAppProps {
   loadCard?: (id: string) => Promise<SpecialistProcurementCard>;
   searchProgress?: (profileId: string) => Promise<SpecialistSearchRun>;
   cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
+  rejectSearchQueue?: (profileId: string) => Promise<readonly SpecialistProcurementCard[]>;
   serviceHealth?: () => Promise<SpecialistServiceHealth>;
   telegram?: TelegramApi | undefined;
 }
@@ -267,6 +268,19 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
       !isWatchedTriage(item) &&
       !isRejectedTriage(item.triage),
   );
+
+  const rejectSearchQueue = props.rejectSearchQueue;
+  const rejectQueue =
+    rejectSearchQueue === undefined
+      ? undefined
+      : async (profileId: string) => {
+          const items = await rejectSearchQueue(profileId);
+          setProcurements((current) => mergeProcurementCards(current, items));
+          if (refreshInbox !== undefined) {
+            applyInboxItems(await refreshInbox());
+          }
+          return items;
+        };
 
   const decide =
     decideCase === undefined
@@ -691,6 +705,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(decide === undefined ? {} : { decide })}
               {...(searchRun === undefined ? {} : { searchRun })}
               {...(cancelSearch === undefined ? {} : { cancelSearch })}
+              {...(rejectQueue === undefined ? {} : { rejectQueue })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               notice={pushNotice}
             />
@@ -714,6 +729,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               {...(decide === undefined ? {} : { decide })}
               {...(searchRun === undefined ? {} : { searchRun })}
               {...(cancelSearch === undefined ? {} : { cancelSearch })}
+              {...(rejectQueue === undefined ? {} : { rejectQueue })}
               {...(props.ingestProgress === undefined ? {} : { ingestProgress: props.ingestProgress })}
               {...(props.loadCard === undefined ? {} : { fetchCase: props.loadCard })}
               onCardLoaded={rememberCard}

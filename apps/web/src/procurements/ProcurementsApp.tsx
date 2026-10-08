@@ -20,7 +20,7 @@ import {
   profileDisplayName,
   specialistDocumentWasRead,
 } from "@procurement/domain";
-import { ConfirmToast, TRASH_MOVE_PROMPT } from "../shell/ConfirmToast.js";
+import { ConfirmToast, QUEUE_REJECT_PROMPT, TRASH_MOVE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { RelevanceNote } from "./RelevanceNote.js";
 import { TermsEvidenceList } from "./TermsEvidenceList.js";
@@ -187,6 +187,7 @@ export function ProcurementsApp({
   ingestProgress,
   searchRun,
   cancelSearch,
+  rejectQueue,
   fetchCase,
   onCardLoaded,
   notice: pushNotice,
@@ -200,6 +201,7 @@ export function ProcurementsApp({
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
   searchRun?: SpecialistSearchRun;
   cancelSearch?: (profileId: string) => Promise<SpecialistSearchRun>;
+  rejectQueue?: (profileId: string) => Promise<readonly SpecialistProcurementCard[]>;
   fetchCase?: (id: string) => Promise<SpecialistProcurementCard>;
   onCardLoaded?: (card: SpecialistProcurementCard) => void;
   notice?: (title: string, message: string) => void;
@@ -212,6 +214,7 @@ export function ProcurementsApp({
   const [busyKind, setBusyKind] = useState<SpecialistTriageKind | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
   const [rejectConfirm, setRejectConfirm] = useState(false);
+  const [clearQueueConfirm, setClearQueueConfirm] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [searchPct, setSearchPct] = useState(0);
@@ -402,6 +405,27 @@ export function ProcurementsApp({
     }
   }
 
+  async function runClearQueue(): Promise<void> {
+    if (rejectQueue === undefined || chosenProfileId.length === 0 || busy) return;
+    setBusy(true);
+    try {
+      const rejected = await rejectQueue(chosenProfileId);
+      const gone = new Set(rejected.map((item) => item.id));
+      setCatalogItems((current) => current.filter((item) => !gone.has(item.id)));
+      if (rejected.length === 0) {
+        setNotice("В очереди не было закупок.");
+        return;
+      }
+      const count = String(rejected.length);
+      setNotice(`Убрано в корзину: ${count}. Вернуть можно в разделе «Корзина».`);
+      pushNotice?.("Корзина", `Убрано в корзину: ${count}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Не удалось убрать очередь в корзину.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runDecide(kind: SpecialistTriageKind): Promise<void> {
     if (decide === undefined || selected === undefined || busy) return;
     setBusy(true);
@@ -473,6 +497,19 @@ export function ProcurementsApp({
           }}
         />
       ) : null}
+      {clearQueueConfirm ? (
+        <ConfirmToast
+          message={QUEUE_REJECT_PROMPT}
+          confirmLabel="Убрать"
+          onConfirm={() => {
+            setClearQueueConfirm(false);
+            void runClearQueue();
+          }}
+          onCancel={() => {
+            setClearQueueConfirm(false);
+          }}
+        />
+      ) : null}
       <main className="workspace">
         <section className="inbox" aria-labelledby="procurements-heading">
           <div className="inbox-toolbar">
@@ -517,6 +554,18 @@ export function ProcurementsApp({
               >
                 {listing ? "Ищем…" : scoring ? "Дочитываем…" : "Искать по профилю"}
               </button>
+              {rejectQueue === undefined ? null : (
+                <button
+                  type="button"
+                  className="inbox-clear"
+                  disabled={busy || chosenProfileId.length === 0 || items.length === 0}
+                  onClick={() => {
+                    setClearQueueConfirm(true);
+                  }}
+                >
+                  Очистить очередь
+                </button>
+              )}
               {(listing || scoring) && cancelSearch !== undefined ? (
                 <button
                   type="button"

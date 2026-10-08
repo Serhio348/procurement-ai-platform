@@ -848,6 +848,70 @@ describe("ProcurementsApp", () => {
     });
   });
 
+  it("clears the search queue the same way as Не нужно on each card", async () => {
+    const user = userEvent.setup();
+    const profile = SpecialistWorkingProfile.parse({
+      id: "00000000-0000-4000-8000-000000000901",
+      name: "Подстанции",
+      keywords: ["подстанция"],
+    });
+    const first = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "КТПБ первая",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/001",
+      sourceProcurementId: "auction-001",
+      profileIds: [profile.id],
+    });
+    const second = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "КТПБ вторая",
+      status: "unknown",
+      statusLabel: "Прием предложений",
+      url: "https://example.test/auction/002",
+      sourceProcurementId: "auction-002",
+      profileIds: [profile.id],
+    });
+    const rejectQueue = vi.fn(async () => [
+      { ...first, triage: "reject" as const },
+      { ...second, triage: "reject" as const },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[first, second]}
+                profiles={[profile]}
+                activeProfileId={profile.id}
+                rejectQueue={rejectQueue}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Очистить очередь" }));
+    expect(screen.getByText(/Это то же, что «Не нужно»/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(rejectQueue).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /КТПБ первая/ })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Очистить очередь" }));
+    await user.click(screen.getByRole("button", { name: "Убрать" }));
+    await waitFor(() => {
+      expect(screen.getByText("Убрано в корзину: 2. Вернуть можно в разделе «Корзина».")).toBeTruthy();
+    });
+    expect(rejectQueue).toHaveBeenCalledWith(profile.id);
+    expect(screen.queryByRole("button", { name: /КТПБ первая/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /КТПБ вторая/ })).toBeNull();
+  });
+
   it("shows file indexing percent then a read mark after the agent finishes", async () => {
     const user = userEvent.setup();
     const found = SpecialistProcurementCard.parse({

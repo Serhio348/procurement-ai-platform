@@ -131,6 +131,24 @@ export async function searchProcurements(
   return SpecialistSearchResponse.parse(await response.json());
 }
 
+export async function rejectSearchQueue(
+  profileId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<readonly SpecialistProcurementCardValue[]> {
+  const response = await fetcher(
+    "/api/procurements/search/reject",
+    withCredentials({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profileId }),
+    }),
+  );
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось убрать очередь в корзину");
+  }
+  return SpecialistProcurementListResponse.parse(await response.json()).items;
+}
+
 export async function cancelSearch(
   profileId: string,
   fetcher: typeof fetch = fetch,

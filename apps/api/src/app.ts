@@ -64,6 +64,7 @@ import {
   isConsoleListedCase,
   partitionHitsByDecision,
   platformSearchTerms,
+  isListingPlaceholder,
   isRejectedTriage,
   isScoredSearchMatch,
   isWatchedTriage,
@@ -2527,6 +2528,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const applyTriageDecision = async (
     cardId: string,
     kind: SpecialistTriageKindValue,
+    write: { persist: boolean } = { persist: true },
   ): Promise<SpecialistProcurementCardValue | undefined> => {
     const card = await resolveCase(cardId);
     if (card === undefined) return undefined;
@@ -2545,7 +2547,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     catalog().upsertCase(next);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
-    await persistProgress([next.id]);
+    if (write.persist) {
+      await persistProgress([next.id]);
+    }
     if (kind === "participate") {
       startParticipateIngest(next);
     }
@@ -2568,6 +2572,49 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     return SpecialistProcurementListResponse.parse({ items: [next] });
+  });
+
+  // «Очистить очередь» is «Не нужно» for every undecided card in this
+  // profile's search queue: the same decision, the same trash, and the same
+  // skip on the next search. Another profile keeps a card that was only in
+  // its own queue.
+  app.post("/api/procurements/search/reject", async (request, reply) => {
+    const parsed = SpecialistSearchProgressQuery.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const profile = workspace().findProfile(parsed.data.profileId);
+    if (profile === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const live = searchProgress.snapshot(profile.id);
+    if (live?.status === "retrieving" || live?.status === "scoring") {
+      searchProgress.cancel(profile.id);
+    }
+    const queueIds = [...workspace().searchIds(profile.id)];
+    const rejected: SpecialistProcurementCardValue[] = [];
+    for (const id of queueIds) {
+      const card = await resolveCase(id);
+      if (card === undefined) continue;
+      if (isListingPlaceholder(card) || isWatchedTriage(card) || isRejectedTriage(card.triage)) {
+        continue;
+      }
+      if (workspace().latestKind(card.sourceProcurementId) !== undefined) continue;
+      const next = await applyTriageDecision(id, "reject", { persist: false });
+      if (next !== undefined) rejected.push(next);
+    }
+    if (rejected.length > 0) {
+      await persistProgress(rejected.map((card) => card.id));
+    }
+    logger.info("Specialist search queue rejected", {
+      profileId: profile.id,
+      count: rejected.length,
+    });
+    return SpecialistProcurementListResponse.parse({
+      items: rejected,
+      total: rejected.length,
+      tab: "search",
+    });
   });
 
   /**

@@ -533,6 +533,123 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("rejects a profile search queue the same way as Не нужно on each card", async () => {
+    const catalog = new SpecialistCatalog();
+    const workspace = new SpecialistWorkspace();
+    const first = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000911",
+      sourceProcurementId: "auction/clear-1",
+      url: "https://goszakupki.by/auction/view/clear-1",
+      title: "КТПБ первая",
+      status: "accepting_bids",
+      statusLabel: "Приём предложений",
+      foundAs: "match",
+      live: true,
+    });
+    const shared = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000912",
+      sourceProcurementId: "auction/clear-shared",
+      url: "https://goszakupki.by/auction/view/clear-shared",
+      title: "КТПБ общая",
+      status: "accepting_bids",
+      statusLabel: "Приём предложений",
+      foundAs: "match",
+      live: true,
+    });
+    const otherOnly = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000913",
+      sourceProcurementId: "auction/clear-other",
+      url: "https://goszakupki.by/auction/view/clear-other",
+      title: "КТПБ чужая",
+      status: "accepting_bids",
+      statusLabel: "Приём предложений",
+      foundAs: "match",
+      live: true,
+    });
+    catalog.upsertCase(first);
+    catalog.upsertCase(shared);
+    catalog.upsertCase(otherOnly);
+    const app = await buildSpecialistApi({
+      catalog,
+      workspace,
+      searchHits: {
+        search: async () => [
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: first.sourceProcurementId,
+            url: first.url,
+            title: first.title,
+          }),
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: shared.sourceProcurementId,
+            url: shared.url,
+            title: shared.title,
+          }),
+          SearchHit.parse({
+            sourceId: "goszakupki_by",
+            sourceProcurementId: "auction/clear-new",
+            url: "https://goszakupki.by/auction/view/clear-new",
+            title: "КТПБ новая",
+          }),
+        ],
+      },
+    });
+    try {
+      const profileId = await activeProfileId(app);
+      await app.inject({
+        method: "PUT",
+        url: `/api/profiles/${profileId}`,
+        payload: { name: "КТПБ", keywords: ["КТПБ"] },
+      });
+      const second = JSON.parse((await app.inject({ method: "POST", url: "/api/profiles" })).body) as {
+        id: string;
+      };
+      workspace.appendSearchId(profileId, first.id);
+      workspace.appendSearchId(profileId, shared.id);
+      workspace.appendSearchId(second.id, shared.id);
+      workspace.appendSearchId(second.id, otherOnly.id);
+
+      const missing = await app.inject({
+        method: "POST",
+        url: "/api/procurements/search/reject",
+        payload: { profileId: "00000000-0000-4000-8000-000000000099" },
+      });
+      expect(missing.statusCode).toBe(404);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/procurements/search/reject",
+        payload: { profileId },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as { items: Array<{ id: string; triage?: string }> };
+      expect(body.items.map((item) => item.id).sort()).toEqual([first.id, shared.id].sort());
+      expect(body.items.every((item) => item.triage === "reject")).toBe(true);
+      expect(workspace.searchIds(profileId)).toEqual([]);
+      expect([...workspace.searchIds(second.id)]).toEqual([otherOnly.id]);
+      expect(catalog.procurement(otherOnly.id)?.triage).toBeUndefined();
+      expect(workspace.latestKind(first.sourceProcurementId)).toBe("reject");
+      expect(workspace.latestKind(shared.sourceProcurementId)).toBe("reject");
+
+      const again = await app.inject({
+        method: "POST",
+        url: "/api/procurements/search",
+        payload: { profileId },
+      });
+      expect(again.statusCode).toBe(200);
+      const titles = (
+        JSON.parse(again.body) as { items: Array<{ title: string; sourceProcurementId: string }> }
+      ).items.map((item) => item.sourceProcurementId);
+      expect(titles).toEqual(["auction/clear-new"]);
+      expect(catalog.procurement(first.id)?.triage).toBe("reject");
+      expect(catalog.procurement(shared.id)?.triage).toBe("reject");
+      expect([...workspace.searchIds(second.id)]).toEqual([otherOnly.id]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("keeps each profile search queue when the specialist switches profile", async () => {
     const search = vi.fn(async (query: { keywords: string[] }) => {
       if (query.keywords.includes("кабель")) {

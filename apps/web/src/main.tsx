@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
   activateProfile,
   cancelSearch,
+  rejectSearchQueue,
   createProfile,
   createTelegramLink,
   decideProcurement,
@@ -181,6 +182,7 @@ function LiveConsole() {
       loadCard={fetchProcurement}
       searchProgress={fetchSearchProgress}
       cancelSearch={cancelSearch}
+      rejectSearchQueue={rejectSearchQueue}
       serviceHealth={fetchServiceHealth}
       telegram={{
         status: fetchTelegramStatus,

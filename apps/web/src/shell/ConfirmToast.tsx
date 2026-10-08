@@ -6,6 +6,8 @@ export const TRASH_EMPTY_PROMPT =
   "Очистить корзину безвозвратно? Вернуть закупки уже будет нельзя.";
 export const TRASH_MOVE_PROMPT =
   "Убрать закупку в корзину? Потом её можно вернуть или удалить.";
+export const QUEUE_REJECT_PROMPT =
+  "Убрать все закупки этой очереди в корзину? Это то же, что «Не нужно» для каждой: они не вернутся при следующем поиске. Вернуть можно в разделе «Корзина».";
 
 const FOCUSABLE =
   "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";

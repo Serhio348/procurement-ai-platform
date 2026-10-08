@@ -235,27 +235,44 @@ function wordFamily(
 
 const GLUED_UNIT = /^(\d+(?:[.,]\d+)?)(ква|квт|мвт|кв)$/iu;
 
-export function tokenizeStems(text: string): string[] {
-  const stems: string[] = [];
+export interface TokenizedWord {
+  stem: string;
+  /** The word as written, lower-cased. */
+  surface: string;
+  /** A preposition or conjunction: not a term, but it separates neighbours. */
+  filler: boolean;
+}
+
+export function tokenizeWords(text: string): TokenizedWord[] {
+  const words: TokenizedWord[] = [];
   const normalised = withoutHyphens(normaliseSearchText(text), " ");
   for (const match of normalised.matchAll(TOKEN_PATTERN)) {
     const token = match[0];
     if (token === undefined) continue;
     const lower = normaliseSearchText(token);
-    if (FILLER.has(lower)) continue;
+    if (FILLER.has(lower)) {
+      words.push({ stem: lower, surface: lower, filler: true });
+      continue;
+    }
     // "0,4кВ" and "10кВ" are the same term as "0,4 кВ" and "10 кВ".
     // The comma already splits the decimal, so only the unit suffix is glued.
     const glued = GLUED_UNIT.exec(lower);
     const number = glued?.[1];
     const unit = glued?.[2];
     if (number !== undefined && unit !== undefined) {
-      stems.push(stemWord(number));
-      stems.push(stemWord(unit));
+      words.push({ stem: stemWord(number), surface: number, filler: false });
+      words.push({ stem: stemWord(unit), surface: unit, filler: false });
       continue;
     }
-    stems.push(stemWord(token));
+    words.push({ stem: stemWord(token), surface: lower, filler: false });
   }
-  return stems;
+  return words;
+}
+
+export function tokenizeStems(text: string): string[] {
+  return tokenizeWords(text)
+    .filter((word) => !word.filler)
+    .map((word) => word.stem);
 }
 
 function termStemSequences(term: string): string[][] {

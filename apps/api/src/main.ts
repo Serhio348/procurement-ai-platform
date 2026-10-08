@@ -28,7 +28,8 @@ import {
   createTelegramNotifier,
   type TelegramNotifier,
 } from "./telegram.js";
-import { createPostgresTelegramStore } from "@procurement/db";
+import { createPostgresDecisionMemoryStore, createPostgresTelegramStore } from "@procurement/db";
+import { assistantPilotFromEnv } from "./decision-memory.js";
 
 // /api/health reports the deployed revision so an operator can verify which
 // build actually answers instead of inferring it from old inbox rows (R42).
@@ -244,6 +245,14 @@ async function main(): Promise<void> {
     ...(cardWatch === undefined ? {} : { cardWatch }),
     ...(monitorWatch === undefined ? {} : { monitorWatch }),
     ...(telegram === undefined ? {} : { telegram }),
+    ...(persistence.db === undefined
+      ? {}
+      : {
+          assistant: {
+            memory: createPostgresDecisionMemoryStore(persistence.db),
+            enabledFor: assistantPilotFromEnv(process.env["ASSISTANT_WORKSPACE_IDS"]),
+          },
+        }),
     ...(watchLimit === undefined ? {} : { watchLimit }),
     ...(mcp === undefined
       ? {}

@@ -30,6 +30,7 @@ export * from "./search/intent-plan.js";
 export * from "./search/intent-prompt.js";
 export * from "./search/intent-score.js";
 export * from "./search/query-terms.js";
+export * from "./assistant/decision-terms.js";
 export * from "./search/review.js";
 export * from "./search/search-cards.js";
 export * from "./search/term-match.js";

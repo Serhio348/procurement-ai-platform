@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyBootstrap } from "./bootstrap.js";
 import { createDatabase, type Database } from "./client.js";
+import { createPostgresDecisionMemoryStore } from "./decision-memory-store.js";
 import { migrateDatabase } from "./migrate.js";
 import { createRepositories } from "./repositories.js";
 import {
@@ -335,6 +336,59 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(loadedA[0]?.canonicalProcurementId).toBe(canonical[0]?.id);
     expect(loadedB[0]?.canonicalProcurementId).toBe(canonical[0]?.id);
     expect(await store.hasDocumentHash(workspaceB, "c".repeat(64))).toBe(false);
+  });
+
+  it("keeps decision memory per cabinet and past the deleted card", async () => {
+    const store = createSpecialistStore(db);
+    const memory = createPostgresDecisionMemoryStore(db);
+    const userA = "00000000-0000-4000-8000-000000000961";
+    const userB = "00000000-0000-4000-8000-000000000962";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values
+        (${userA}, 'a-memory@test.local', 'A', 'x', 'specialist', 'active'),
+        (${userB}, 'b-memory@test.local', 'B', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceA = await store.ensurePersonalWorkspace(userA, "A");
+    const workspaceB = await store.ensurePersonalWorkspace(userB, "B");
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000963",
+      title: "Ремонт наружного освещения",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/request/view/memory",
+      sourceProcurementId: "request/memory",
+      triage: "reject",
+    });
+    await store.saveCases([card], workspaceA);
+    await memory.record(workspaceA, {
+      sourceProcurementId: card.sourceProcurementId,
+      kind: "monitor",
+      profileIds: [],
+      title: card.title,
+      lotTitles: ["Светильники"],
+      decidedAt: "2026-10-08T09:00:00.000Z",
+    });
+    await memory.record(workspaceA, {
+      sourceProcurementId: card.sourceProcurementId,
+      kind: "reject",
+      profileIds: [],
+      title: card.title,
+      lotTitles: [],
+      decidedAt: "2026-10-08T10:00:00.000Z",
+    });
+    await store.removeCases([card.id], workspaceA);
+
+    const own = await memory.list(workspaceA);
+    expect(own).toHaveLength(1);
+    expect(own[0]?.kind).toBe("reject");
+    expect(own[0]?.lotTitles).toEqual([]);
+    expect(await memory.list(workspaceB)).toEqual([]);
+    await memory.forget(workspaceB, card.sourceProcurementId);
+    expect(await memory.list(workspaceA)).toHaveLength(1);
+    await memory.forget(workspaceA, card.sourceProcurementId);
+    expect(await memory.list(workspaceA)).toEqual([]);
   });
 
   it("lets two cabinets persist the same listing card UUID", async () => {

@@ -1028,6 +1028,27 @@ export const workspaceDecisions = pgTable(
   (table) => [index("workspace_decisions_workspace_idx").on(table.workspaceId, table.madeAt)],
 );
 
+/**
+ * Cabinet assistant memory: the wording of the latest decision per
+ * procedure. No foreign key to workspace_procurements — emptying the trash
+ * deletes the card, and the memory must outlive it.
+ */
+export const workspaceDecisionMemory = pgTable(
+  "workspace_decision_memory",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceProcurementId: varchar("source_procurement_id", { length: 256 }).notNull(),
+    kind: workspaceTriageKind("kind").notNull(),
+    profileIds: jsonb("profile_ids").$type<string[]>().notNull().default([]),
+    title: text("title").notNull(),
+    lotTitles: jsonb("lot_titles").$type<string[]>().notNull().default([]),
+    decidedAt: timestamptz("decided_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.sourceProcurementId] })],
+);
+
 export const workspaceBackfillRuns = pgTable("workspace_backfill_runs", {
   id: varchar("id", { length: 64 }).primaryKey(),
   appliedAt: timestamptz("applied_at").notNull().defaultNow(),

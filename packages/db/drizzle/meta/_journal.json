@@ -92,6 +92,13 @@
       "when": 1791500000000,
       "tag": "0012_release_deleted_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0013_decision_memory",
+      "breakpoints": true
     }
   ]
 }

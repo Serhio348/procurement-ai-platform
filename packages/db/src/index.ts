@@ -1,5 +1,6 @@
 export * from "./bootstrap.js";
 export * from "./client.js";
+export * from "./decision-memory-store.js";
 export * from "./migrate.js";
 export * from "./repositories.js";
 export * from "./schema.js";

@@ -2,6 +2,7 @@ export * from "./agent.js";
 export * from "./auth.js";
 
 export * from "./analysis.js";
+export * from "./assistant.js";
 export * from "./assessment.js";
 export * from "./capability.js";
 export * from "./commercial-terms.js";

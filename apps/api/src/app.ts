@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AdminCabinetListResponse,
+  AssistantTermsResponse,
   InboxFixtureItem,
   ProcedureCard,
   SearchQuery,
@@ -72,6 +73,8 @@ import {
   projectCardForProfile,
   withCardAssessment,
   profileDisplayName,
+  profileTermTable,
+  rejectSignals,
   scoreIntentCard,
   selectRelevantSearchCards,
   shouldRunDiscovery,
@@ -120,6 +123,7 @@ import type { ReviewBudget, SpecialistReviewPort } from "./search-review.js";
 import type { ProfileSuggestPort } from "./profile-suggest.js";
 import type { SearchIntentPort } from "./search-intent.js";
 import type { TelegramNotifier } from "./telegram.js";
+import { decisionMemoryEntry, type CabinetAssistantOptions } from "./decision-memory.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createMemoryCabinetRegistry,
@@ -142,6 +146,8 @@ export const DEFAULT_DISCOVERY_LIMIT = 200;
  * crawl of the whole source.
  */
 export const DEFAULT_WATCH_LIMIT = 40;
+
+const ASSISTANT_TERMS_SHOWN = 50;
 
 /** «За день» до дедлайна — окно предупреждения «истекает завтра». */
 const DEADLINE_SOON_MS = 36 * 60 * 60 * 1000;
@@ -218,6 +224,8 @@ export interface BuildApiOptions {
   authMail?: AuthMailPort;
   /** Telegram bot: inbox announcements + link/unlink endpoints. Absent: off. */
   telegram?: TelegramNotifier;
+  /** Cabinet assistant pilot: background decision memory. Absent: off. */
+  assistant?: CabinetAssistantOptions;
   authCookieSecure?: boolean;
   authPublicUrl?: string;
   internalApiToken?: string;
@@ -2050,6 +2058,32 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
   });
 
+  // Read-only look at the pilot cabinet's own memory. It reads only the
+  // caller's cabinet: there is no workspace parameter to point elsewhere.
+  app.get("/api/admin/assistant/terms", async (request, reply) => {
+    const parsed = SpecialistSearchProgressQuery.safeParse(request.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const workspaceId = currentCabinet().workspaceId;
+    const assistant = assistantFor(workspaceId);
+    if (assistant === undefined) {
+      return reply.code(404).send({ error: "assistant_off" });
+    }
+    const profile = workspace().findProfile(parsed.data.profileId);
+    if (profile === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const table = profileTermTable(await assistant.memory.list(workspaceId), profile);
+    return AssistantTermsResponse.parse({
+      profileId: profile.id,
+      rejectCount: table.rejectCount,
+      acceptCount: table.acceptCount,
+      signals: rejectSignals(table),
+      terms: table.terms.slice(0, ASSISTANT_TERMS_SHOWN),
+    });
+  });
+
   function profileList() {
     return SpecialistProfileListResponse.parse({
       items: workspace().profiles(),
@@ -2521,6 +2555,36 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   });
 
   /**
+   * Background memory of the cabinet assistant. A failed write must not undo
+   * or fail the decision the specialist already made.
+   */
+  const assistantFor = (workspaceId: string): CabinetAssistantOptions | undefined =>
+    options.assistant !== undefined && options.assistant.enabledFor(workspaceId)
+      ? options.assistant
+      : undefined;
+
+  const rememberDecision = async (
+    card: SpecialistProcurementCardValue,
+    kind: SpecialistTriageKindValue | undefined,
+  ): Promise<void> => {
+    const workspaceId = currentCabinet().workspaceId;
+    const assistant = assistantFor(workspaceId);
+    if (assistant === undefined) return;
+    try {
+      if (kind === undefined) {
+        await assistant.memory.forget(workspaceId, card.sourceProcurementId);
+      } else {
+        await assistant.memory.record(workspaceId, decisionMemoryEntry(card, kind, clock()));
+      }
+    } catch (error) {
+      logger.warn("Decision memory write failed", {
+        sourceProcurementId: card.sourceProcurementId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /**
    * One triage decision path for the console endpoint and the Telegram
    * callback: record the verdict, drop the case from every search queue,
    * close stale inbox rows, hydrate monitored cases and persist.
@@ -2553,6 +2617,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (kind === "participate") {
       startParticipateIngest(next);
     }
+    await rememberDecision(next, kind);
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,
       kind,
@@ -2680,6 +2745,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (next.triage === "participate") {
       startParticipateIngest(next);
     }
+    await rememberDecision(next, next.triage);
     logger.info("Specialist case restored from trash", {
       sourceProcurementId: card.sourceProcurementId,
       kind: next.triage ?? "candidate",

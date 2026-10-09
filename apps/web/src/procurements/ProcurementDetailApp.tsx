@@ -498,6 +498,31 @@ export function ProcurementDetailApp({
           </div>
         )}
 
+        {source === undefined ? null : (
+          <section className="procurement-detail-section">
+            <h2 className="procurement-detail-section-title">События в хронологическом порядке</h2>
+            {source.history.length === 0 ? (
+              <p className="procurement-detail-empty">На карточке площадки событий нет.</p>
+            ) : (
+              <ol className="procurement-detail-lots">
+                {source.history.map((event, index) => (
+                  <li key={`${String(index)}:${event.question}`} className="procurement-detail-lot">
+                    {event.sourceUrl === undefined ? (
+                      <p className="procurement-detail-lot-title">{event.question}</p>
+                    ) : (
+                      <p className="procurement-detail-lot-title">
+                        <a href={event.sourceUrl} target="_blank" rel="noreferrer">
+                          {event.question}
+                        </a>
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        )}
+
         <details className="procurement-detail-collapse">
           <summary>Документы ({stored.documents.length})</summary>
           {stored.documents.length === 0 ? (

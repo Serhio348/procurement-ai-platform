@@ -33,6 +33,25 @@ describe("compileChangeAlert", () => {
     expect(compiled?.body).not.toMatch(/\d+%/);
   });
 
+  it("names a new chronology row as an event, not a generic card change", () => {
+    const compiled = compileChangeAlert([
+      ChangeEvent.parse({
+        id: uuid(3),
+        procurementId: uuid(2),
+        kind: "other",
+        field: "chronology",
+        previous: null,
+        current: "24.09.2026 10:28:55 Размещение приглашения к участию в процедуре закупки",
+        detectedAt: now,
+        urgent: true,
+      }),
+    ]);
+    expect(compiled?.body).toContain(
+      "Событие (срочно): 24.09.2026 10:28:55 Размещение приглашения к участию в процедуре закупки.",
+    );
+    expect(compiled?.body).not.toContain("Прочее");
+  });
+
   it("returns nothing when there are no changes to deliver", () => {
     expect(compileChangeAlert([])).toBeUndefined();
   });

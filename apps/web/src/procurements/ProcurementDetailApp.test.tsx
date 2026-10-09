@@ -24,6 +24,13 @@ const source = ProcedureCard.parse({
     contact: "Головко Роман Геннадьевич, +375333869267",
   },
   amount: { kind: "indicative", amount: 160651.42, currency: "BYN", raw: "160 651.42 BYN" },
+  history: [
+    { question: "03.09.2026 10:00:00 Размещение приглашения к участию в процедуре закупки" },
+    {
+      question: "05.09.2026 12:00:00 Размещён ответ на запрос о разъяснении",
+      sourceUrl: "https://goszakupki.by/questions/3545600",
+    },
+  ],
   rawFields: {
     "Дата размещения приглашения": "03.09.2026",
     "Дата окончания приема предложений": "09.09.2026",
@@ -72,6 +79,13 @@ describe("ProcurementDetailApp", () => {
     expect(screen.getByText("Головко Роман Геннадьевич, +375333869267")).toBeTruthy();
     expect(screen.getByText("160 651.42 BYN")).toBeTruthy();
     expect(screen.getByText("Согласно заданию на закупку")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "События в хронологическом порядке" })).toBeTruthy();
+    expect(
+      screen.getByText("03.09.2026 10:00:00 Размещение приглашения к участию в процедуре закупки"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "05.09.2026 12:00:00 Размещён ответ на запрос о разъяснении" }),
+    ).toBeTruthy();
     expect(screen.queryByText("Загрузка с площадки…")).toBeNull();
   });
 

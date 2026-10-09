@@ -134,6 +134,9 @@ function compileChanges(changes: readonly ChangeEvent[]): { heading: string; bod
     };
   }
   const lines = changes.map((change) => {
+    if (change.field === "chronology" && change.current !== null && change.current.length > 0) {
+      return `Событие: ${change.current}.`;
+    }
     const from = change.previous ?? "—";
     const to = change.current ?? "—";
     return `${changeKindLabel(change.kind)}: ${from} → ${to}.`;

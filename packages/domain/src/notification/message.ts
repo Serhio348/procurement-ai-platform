@@ -33,10 +33,7 @@ export function compileChangeAlert(
     lines.push(`Ссылка: ${card.url}.`);
   }
   for (const change of changes) {
-    const from = change.previous ?? "—";
-    const to = change.current ?? "—";
-    const urgentMark = change.urgent ? " (срочно)" : "";
-    lines.push(`${changeKindLabel(change.kind)}${urgentMark}: ${from} → ${to}.`);
+    lines.push(changeLine(change));
   }
   return { title, body: lines.join("\n") };
 }
@@ -52,6 +49,16 @@ export function truncateTelegramText(
   if (text.length <= maxLength) return text;
   if (maxLength <= 1) return text.slice(0, maxLength);
   return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function changeLine(change: ChangeEvent): string {
+  const urgentMark = change.urgent ? " (срочно)" : "";
+  if (change.field === "chronology" && change.current !== null && change.current.length > 0) {
+    return `Событие${urgentMark}: ${change.current}.`;
+  }
+  const from = change.previous ?? "—";
+  const to = change.current ?? "—";
+  return `${changeKindLabel(change.kind)}${urgentMark}: ${from} → ${to}.`;
 }
 
 function changeKindLabel(kind: ChangeKind): string {

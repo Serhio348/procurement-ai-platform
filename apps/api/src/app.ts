@@ -2731,7 +2731,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const applyTriageDecision = async (
     cardId: string,
     kind: SpecialistTriageKindValue,
-    write: { persist: boolean } = { persist: true },
+    write: { persist?: boolean; remember?: boolean } = {},
   ): Promise<SpecialistProcurementCardValue | undefined> => {
     const card = await resolveCase(cardId);
     if (card === undefined) return undefined;
@@ -2750,13 +2750,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     catalog().upsertCase(next);
     workspace().setDismissedInboxIds(catalog().dismissedIds());
-    if (write.persist) {
+    if (write.persist !== false) {
       await persistProgress([next.id]);
     }
     if (kind === "participate") {
       startParticipateIngest(next);
     }
-    await rememberDecision(next, kind);
+    // «Очистить очередь» is a bulk discard, not a studied refusal. It must
+    // not teach the assistant or open a suggestion.
+    if (write.remember !== false) {
+      await rememberDecision(next, kind);
+    }
     logger.info("Specialist triage recorded", {
       sourceProcurementId: card.sourceProcurementId,
       kind,
@@ -2781,7 +2785,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   // «Очистить очередь» is «Не нужно» for every undecided card in this
   // profile's search queue: the same decision, the same trash, and the same
   // skip on the next search. Another profile keeps a card that was only in
-  // its own queue.
+  // its own queue. The assistant does not remember this bulk refusal.
   app.post("/api/procurements/search/reject", async (request, reply) => {
     const parsed = SpecialistSearchProgressQuery.safeParse(request.body ?? {});
     if (!parsed.success) {
@@ -2804,7 +2808,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         continue;
       }
       if (workspace().latestKind(card.sourceProcurementId) !== undefined) continue;
-      const next = await applyTriageDecision(id, "reject", { persist: false });
+      const next = await applyTriageDecision(id, "reject", { persist: false, remember: false });
       if (next !== undefined) rejected.push(next);
     }
     if (rejected.length > 0) {

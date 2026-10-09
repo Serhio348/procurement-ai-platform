@@ -99,8 +99,41 @@ describe("profile term table", () => {
       decision("reject", `Выполнение работ на объекте ${index + 1}`),
     );
     const table = profileTermTable([...taken, ...works], profile);
-    // «Выполнение работ» is also in a taken case, so eight rejects do not make it a reason.
-    expect(rejectSignals(table).map((term) => term.label)).toEqual(["объекте"]);
+    // The shared words are the title frame. There is no repeated subject.
+    expect(rejectSignals(table)).toEqual([]);
+  });
+
+  it("reads the quoted subject and skips the preamble, the region and a boilerplate lot", () => {
+    const keys = decisionTerms({
+      title:
+        "Закупка по выбору субподрядной организации для выполнения строительно-монтажных работ по объекту: «Реконструкция ЗТП в Минской области»",
+      lotTitles: ["Выполнение строительно-монтажных работ"],
+    }).map((term) => term.key);
+    expect(keys.some((key) => key.includes("строительн") || key.includes("монтаж"))).toBe(false);
+    expect(keys.some((key) => key.includes("област") || key.includes("минск"))).toBe(false);
+    expect(keys.some((key) => key.startsWith(stemWord("реконструкция")))).toBe(true);
+  });
+
+  it("stays silent when rejects share only a preamble and a region, not a subject", () => {
+    const rejects = [
+      "Закупка для выполнения строительно-монтажных работ по объекту: «Реконструкция ЗТП в Минской области»",
+      "Строительно-монтажные работы по объекту: «Капитальный ремонт воздушной линии ВЛ-10кВ в Гомельской области»",
+      "Выбор организации для выполнения строительно-монтажных работ по объекту: «Текущий ремонт электроосвещения фасада в Могилёвской области»",
+      "Выполнение строительно-монтажных работ по объекту: «Благоустройство двора в Брестской области»",
+      "Закупка строительно-монтажных работ по объекту: «Поставка мебели для школы в Гродненской области»",
+    ].map((title) => decision("reject", title));
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], profile));
+    expect(signals.map((term) => term.label).join(" ")).not.toMatch(/строительн|област/iu);
+    expect(signals.filter((term) => term.rejectCount >= 5)).toEqual([]);
+  });
+
+  it("keeps a repeated subject and does not offer the region it was bought in", () => {
+    const rejects = Array.from({ length: 5 }, (_, index) =>
+      decision("reject", `Поверка трансформаторов тока, объект ${index + 1}, Минская область`),
+    );
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], profile));
+    expect(signals.some((term) => term.key.includes("област") || term.key.includes("минск"))).toBe(false);
+    expect(signals.some((term) => term.key.startsWith(stemWord("поверка")))).toBe(true);
   });
 
   it("skips terms the profile already searches for or already excludes", () => {

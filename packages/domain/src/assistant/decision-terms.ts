@@ -6,10 +6,12 @@ import type {
 import { tokenizeStems, tokenizeWords, type TokenizedWord } from "../search/query-terms.js";
 
 /**
- * The words of remembered decisions are counted per profile; nothing here
- * knows a procurement domain or keeps a list of "common procurement words".
- * A word is generic only because this cabinet's own decisions say so: it
- * also occurs in something the specialist took.
+ * Signals are counted on the procurement's subject, not on every word of
+ * the card. The subject is the quoted object, or the clause after
+ * «по объекту»; the address and the title frame («закупка», «выполнение»,
+ * «объект») are not a reason to exclude anything. A word is still generic
+ * when this cabinet's own taken cases use it — there is no built-in list
+ * of trades.
  */
 export const REJECT_SIGNAL_THRESHOLDS = {
   /** Distinct rejects that must share the term. One reject can be chance. */
@@ -20,6 +22,17 @@ export const REJECT_SIGNAL_THRESHOLDS = {
 
 const EXAMPLE_LIMIT = 3;
 const SEGMENT_BREAK = /[.,;:!?()[\]{}«»"“”„\n]+/u;
+const QUOTED_PART = /«([^»]+)»|"([^"]+)"|“([^”]+)”/gu;
+const OBJECT_MARK = /по\s+объекту\s*:?\s*/iu;
+/**
+ * The address locates the purchase. It starts at the first marker, and a
+ * region or district takes the word in front of it («Минской области»),
+ * so the place name does not become the next suggestion.
+ */
+const ADDRESS_MARK =
+  /(?:^|[\s,(])(?:по\s+адресу|расположен\p{L}*|(?:\p{L}+\s+)?област\p{L}*|(?:\p{L}+\s+)?район\p{L}*|ул\.?|улиц\p{L}*|пр-т|проспект\p{L}*|пер\.?|переул\p{L}*|г\.|город\p{L}*|д\.|дер\.?|деревн\p{L}*|аг\.?|агрогород\p{L}*|обл\.?|р-н)/iu;
+/** Grammar of a procurement title, not the thing being bought. */
+const FRAME_PREFIXES = ["объект", "закуп", "выбор", "выполн", "проведен", "оказан"];
 
 export interface DecisionTerm {
   key: string;
@@ -27,28 +40,78 @@ export interface DecisionTerm {
 }
 
 /**
- * Words and adjacent word pairs of one decision. Pairs never cross a
- * preposition or punctuation, so «работ по ремонту» does not invent
- * «работ ремонт». Each term counts once per decision.
+ * Subject texts of one decision. A quoted object wins over the preamble
+ * («выполнения строительно-монтажных работ по объекту: «…»»). Without
+ * quotes, the clause after «по объекту» is the subject. A boilerplate lot
+ * is not consulted once a subject was found. The address is cut off.
+ */
+export function procurementContexts(
+  entry: Pick<DecisionMemoryEntry, "title" | "lotTitles">,
+): string[] {
+  const texts = [entry.title, ...entry.lotTitles];
+  const quoted = texts.flatMap(quotedParts);
+  if (quoted.length > 0) return contextsOf(quoted);
+  const objects = texts.flatMap(clauseAfterObject);
+  if (objects.length > 0) return contextsOf(objects);
+  return contextsOf(texts);
+}
+
+/**
+ * Words and adjacent word pairs of the subject. Pairs never cross a
+ * preposition, punctuation, or a title-frame word, so «работ по ремонту»
+ * does not invent «работ ремонт» and «выполнения строительно» is not a
+ * subject. Each term counts once per decision.
  */
 export function decisionTerms(
   entry: Pick<DecisionMemoryEntry, "title" | "lotTitles">,
 ): DecisionTerm[] {
   const terms = new Map<string, string>();
-  for (const text of [entry.title, ...entry.lotTitles]) {
+  for (const text of procurementContexts(entry)) {
     for (const segment of text.split(SEGMENT_BREAK)) {
       const words = tokenizeWords(segment);
       words.forEach((word, index) => {
-        if (word.filler) return;
+        if (word.filler || isFrame(word)) return;
         if (isUnigramTerm(word) && !terms.has(word.stem)) terms.set(word.stem, word.surface);
         const next = words[index + 1];
-        if (next === undefined || next.filler || !isPairTerm(word, next)) return;
+        if (next === undefined || next.filler || isFrame(next) || !isPairTerm(word, next)) return;
         const key = `${word.stem} ${next.stem}`;
         if (!terms.has(key)) terms.set(key, `${word.surface} ${next.surface}`);
       });
     }
   }
   return [...terms].map(([key, surface]) => ({ key, surface }));
+}
+
+function contextsOf(texts: readonly string[]): string[] {
+  return texts.map(stripAddress).map(tidy).filter((text) => text.length > 0);
+}
+
+function quotedParts(text: string): string[] {
+  return [...text.matchAll(QUOTED_PART)]
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? "")
+    .filter((part) => part.trim().length > 0);
+}
+
+function clauseAfterObject(text: string): string[] {
+  const match = OBJECT_MARK.exec(text);
+  if (match === null) return [];
+  const clause = text.slice(match.index + match[0].length);
+  return clause.trim().length > 0 ? [clause] : [];
+}
+
+function stripAddress(text: string): string {
+  const match = ADDRESS_MARK.exec(text);
+  if (match === null) return text;
+  return text.slice(0, match.index);
+}
+
+function tidy(text: string): string {
+  return text.replace(/[\s,;:–—-]+$/u, "").trim();
+}
+
+function isFrame(word: TokenizedWord): boolean {
+  const surface = word.surface.toLocaleLowerCase("ru-BY");
+  return FRAME_PREFIXES.some((prefix) => word.stem.startsWith(prefix) || surface.startsWith(prefix));
 }
 
 /**

@@ -160,6 +160,13 @@ async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemo
     JSON.parse(
       (await app.inject({ method: "GET", url: "/api/profile", headers: { cookie: who.cookie } })).body,
     ) as { excludeKeywords: string[] };
+  const enqueue = async (who: Member, title: string) => {
+    const item = card(title, who.profileId);
+    const cabinet = await cabinets.open(who.workspaceId);
+    cabinet.catalog.upsertCase(item);
+    cabinet.workspace.appendSearchId(who.profileId, item.id);
+    return item;
+  };
   return {
     app,
     memory,
@@ -167,6 +174,7 @@ async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemo
     admin,
     specialist,
     decide,
+    enqueue,
     terms,
     suggestions,
     answer,
@@ -246,6 +254,29 @@ describe("cabinet assistant decision memory", () => {
       expect(body.signals).toEqual([
         expect.objectContaining({ label: "наружного освещения", rejectCount: 5, acceptCount: 0 }),
       ]);
+    });
+  });
+
+  it("does not learn from «Очистить очередь», while one «Не нужно» is still remembered", async () => {
+    const { app, memory, admin, decide, enqueue, suggestions } = await twoCabinets();
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      for (const title of LIGHTING) await enqueue(admin, title);
+      const cleared = await app.inject({
+        method: "POST",
+        url: "/api/procurements/search/reject",
+        headers: { cookie: admin.cookie },
+        payload: { profileId: admin.profileId },
+      });
+      expect(cleared.statusCode).toBe(200);
+      expect(JSON.parse(cleared.body).items).toHaveLength(LIGHTING.length);
+
+      const remembered = await memory.list(admin.workspaceId);
+      expect(remembered.map((entry) => entry.kind)).toEqual(["monitor", "monitor", "monitor"]);
+      expect(await suggestions(admin)).toEqual([]);
+
+      await decide(admin, "Капитальный ремонт наружного освещения склада", "reject");
+      expect((await memory.list(admin.workspaceId)).some((entry) => entry.kind === "reject")).toBe(true);
     });
   });
 

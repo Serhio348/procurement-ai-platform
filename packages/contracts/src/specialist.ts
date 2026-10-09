@@ -238,7 +238,7 @@ export const SpecialistTermsEvidence = z.object({
 export type SpecialistTermsEvidence = z.infer<typeof SpecialistTermsEvidence>;
 
 /** Specialist choice on a found procedure. Not a 0–100 score. */
-export const SpecialistTriageKind = z.enum(["monitor", "participate", "reject"]);
+export const SpecialistTriageKind = z.enum(["monitor", "participate", "reject", "hide"]);
 export type SpecialistTriageKind = z.infer<typeof SpecialistTriageKind>;
 
 /**

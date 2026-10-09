@@ -534,7 +534,7 @@ export async function openSpecialistPersistence(options: {
       const cabinet = await openCabinet(workspaceId);
       return cabinet.catalog
         .storedCases()
-        .filter((item) => item.triage === "reject")
+        .filter((item) => item.triage === "reject" || item.triage === "hide")
         .map((item) => item.id);
     },
     async listCases(workspaceId, query = {}) {

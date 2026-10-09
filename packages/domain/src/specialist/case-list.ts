@@ -1,4 +1,5 @@
 import type { SpecialistProcurementCard } from "@procurement/contracts";
+import { isDismissedTriage } from "./triage.js";
 
 export const SPECIALIST_CASE_LIST_TABS = [
   "listed",
@@ -55,9 +56,9 @@ export function caseMatchesListTab(
     case "participate":
       return card.triage === "participate" && card.archived !== true;
     case "archive":
-      return card.archived === true && card.triage !== "reject";
+      return card.archived === true && !isDismissedTriage(card.triage);
     case "trash":
-      return card.triage === "reject";
+      return isDismissedTriage(card.triage);
   }
 }
 
@@ -89,7 +90,7 @@ export function pageListedCases(
   const offset = query.offset ?? 0;
   const limit = query.limit ?? DEFAULT_CASE_LIST_LIMIT;
   const visible = cards.filter((card) => {
-    if (tab === "trash") return card.triage === "reject";
+    if (tab === "trash") return isDismissedTriage(card.triage);
     return isConsoleListedCase(card, query) && caseMatchesListTab(card, tab);
   });
   return {

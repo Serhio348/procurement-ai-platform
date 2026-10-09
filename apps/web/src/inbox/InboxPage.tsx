@@ -349,24 +349,29 @@ function SuggestionDetail({
         </>
       )}
       <h3>{text.question}</h3>
-      <p className="review-reason">{text.acceptEffect}</p>
-      <div className="inbox-actions">
-        <button
-          type="button"
-          className="profile-fill"
-          disabled={busy}
-          onClick={() => onAnswer?.(suggestion.id, "accept")}
-        >
-          Принять
-        </button>
-        <button
-          type="button"
-          className="inbox-open"
-          disabled={busy}
-          onClick={() => onAnswer?.(suggestion.id, "dismiss")}
-        >
-          Отклонить
-        </button>
+      <div className="inbox-actions assistant-answers">
+        <div>
+          <button
+            type="button"
+            className="profile-fill"
+            disabled={busy}
+            onClick={() => onAnswer?.(suggestion.id, "accept")}
+          >
+            {text.acceptLabel}
+          </button>
+          <p className="review-reason">{text.acceptEffect}</p>
+        </div>
+        <div>
+          <button
+            type="button"
+            className="inbox-open"
+            disabled={busy}
+            onClick={() => onAnswer?.(suggestion.id, "dismiss")}
+          >
+            {text.dismissLabel}
+          </button>
+          <p className="review-reason">{text.dismissEffect}</p>
+        </div>
       </div>
     </>
   );

@@ -8,6 +8,7 @@ import type {
 } from "@procurement/contracts";
 import {
   bidsDeadlinePassed,
+  isDismissedTriage,
   isIngestRunning,
   isSingleSourceAfterFailedProcedure,
   procedureBuyerFields,
@@ -218,6 +219,8 @@ export function ProcurementDetailApp({
         notice?.("Мои закупки", `«${stored.title}» — отслеживаем изменения.`);
       } else if (kind === "reject") {
         notice?.("Корзина", `«${stored.title}» — перемещена в корзину.`);
+      } else if (kind === "hide") {
+        notice?.("Корзина", `«${stored.title}» — скрыта. Похожие по-прежнему приходят.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить решение");
@@ -236,8 +239,13 @@ export function ProcurementDetailApp({
       const next = await restore(stored.id);
       const updated = next.find((item) => item.id === stored.id);
       if (updated !== undefined) onCardLoaded?.(updated);
-      notice?.("Мои закупки", `«${stored.title}» — возвращена из корзины.`);
-      navigate(`/my-procurements/${stored.id}`);
+      if (stored.triage === "hide" && updated?.triage !== "monitor" && updated?.triage !== "participate") {
+        notice?.("Закупки", `«${stored.title}» — возвращена в поиск.`);
+        navigate(`/procurements/${stored.id}`);
+      } else {
+        notice?.("Мои закупки", `«${stored.title}» — возвращена из корзины.`);
+        navigate(`/my-procurements/${stored.id}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось вернуть закупку");
     } finally {
@@ -306,9 +314,11 @@ export function ProcurementDetailApp({
                 ? "Слежу"
                 : stored.triage === "participate"
                   ? "Участвую"
-                  : stored.triage === "reject"
-                    ? "Корзина"
-                    : "Решение"}
+                  : stored.triage === "hide"
+                    ? "Скрыта"
+                    : stored.triage === "reject"
+                      ? "Корзина"
+                      : "Решение"}
             </span>
             <span className="procurement-detail-status">{stored.statusLabel}</span>
             {bidsDeadlinePassed(
@@ -325,7 +335,7 @@ export function ProcurementDetailApp({
           </div>
         </header>
 
-        {stored.triage === "reject" ? (
+        {isDismissedTriage(stored.triage) ? (
           restore === undefined && purge === undefined ? null : (
             <div className="triage-actions procurement-detail-triage-actions">
               {restore === undefined ? null : (
@@ -337,7 +347,11 @@ export function ProcurementDetailApp({
                     void runRestore();
                   }}
                 >
-                  {trashBusy === "restore" ? "Возвращаем…" : "Вернуть в «Мои закупки»"}
+                  {trashBusy === "restore"
+                    ? "Возвращаем…"
+                    : stored.triage === "hide"
+                      ? "Вернуть в поиск"
+                      : "Вернуть в «Мои закупки»"}
                 </button>
               )}
               {purge === undefined ? null : (

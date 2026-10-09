@@ -222,8 +222,8 @@ export function createSpecialistStore(db: Database) {
           .select({
             workspaceId: workspaceProcurements.workspaceId,
             mine: sql<number>`cast(count(*) filter (where ${workspaceProcurements.triage} in ('monitor', 'participate') and ${workspaceProcurements.archived} = false) as integer)`,
-            archive: sql<number>`cast(count(*) filter (where ${workspaceProcurements.archived} = true and ${workspaceProcurements.triage} is distinct from 'reject') as integer)`,
-            trash: sql<number>`cast(count(*) filter (where ${workspaceProcurements.triage} = 'reject') as integer)`,
+            archive: sql<number>`cast(count(*) filter (where ${workspaceProcurements.archived} = true and (${workspaceProcurements.triage} is null or ${workspaceProcurements.triage} not in ('reject', 'hide'))) as integer)`,
+            trash: sql<number>`cast(count(*) filter (where ${workspaceProcurements.triage} in ('reject', 'hide')) as integer)`,
           })
           .from(workspaceProcurements)
           .where(inArray(workspaceProcurements.workspaceId, ids))
@@ -602,7 +602,7 @@ export function createSpecialistStore(db: Database) {
           .where(
             and(
               eq(workspaceProcurements.workspaceId, workspaceId),
-              eq(workspaceProcurements.triage, "reject"),
+              inArray(workspaceProcurements.triage, ["reject", "hide"]),
             ),
           );
         return rows.map((row) => row.id);
@@ -1036,11 +1036,17 @@ function caseListFilters(workspaceId: string, query: SpecialistCaseListQuery) {
     isNotNull(workspaceProcurements.triage),
   );
   if (tab === "trash") {
-    return [eq(workspaceProcurements.workspaceId, workspaceId), eq(workspaceProcurements.triage, "reject")];
+    return [
+      eq(workspaceProcurements.workspaceId, workspaceId),
+      inArray(workspaceProcurements.triage, ["reject", "hide"]),
+    ];
   }
   if (listed !== undefined) filters.push(listed);
   filters.push(
-    or(isNull(workspaceProcurements.triage), ne(workspaceProcurements.triage, "reject"))!,
+    or(
+      isNull(workspaceProcurements.triage),
+      notInArray(workspaceProcurements.triage, ["reject", "hide"]),
+    )!,
   );
   if (tab === "all") {
     filters.push(eq(workspaceProcurements.archived, false));
@@ -1514,7 +1520,7 @@ function preferCase(
 
 function casePersistRank(card: SpecialistProcurementCardValue): number {
   if (card.triage === "monitor" || card.triage === "participate") return 3;
-  if (card.triage === "reject") return 2;
+  if (card.triage === "reject" || card.triage === "hide") return 2;
   if (card.sourceCard !== undefined) return 1;
   return 0;
 }

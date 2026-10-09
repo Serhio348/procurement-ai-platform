@@ -72,7 +72,7 @@ import {
   partitionHitsByDecision,
   platformSearchTerms,
   isListingPlaceholder,
-  isRejectedTriage,
+  isDismissedTriage,
   isScoredSearchMatch,
   isWatchedTriage,
   cardAssessmentVerdictFor,
@@ -595,7 +595,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         // The queue belongs to a profile: it shows that profile's own
         // verdict, not another direction's (R04).
         const card = projectCardForProfile(stored, query.profileId ?? "");
-        if (isRejectedTriage(card.triage) || isWatchedTriage(card)) continue;
+        if (isDismissedTriage(card.triage) || isWatchedTriage(card)) continue;
         // A review candidate the specialist opened from the inbox waits
         // in the queue for an explicit decision — it is not a "match".
         if (!isScoredSearchMatch(card) && card.foundAs !== "review") continue;
@@ -623,7 +623,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       .map((item) => withTriage(item, workspace()))
       .filter((item) =>
         tab === "trash"
-          ? item.triage === "reject"
+          ? isDismissedTriage(item.triage)
           : isConsoleListedCase(item, {
               ...(liveOnly ? { liveOnly: true } : {}),
               rejectedSourceIds,
@@ -1364,7 +1364,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       .filter(
         (card) =>
           isScoredSearchMatch(card) &&
-          !isRejectedTriage(card.triage) &&
+          !isDismissedTriage(card.triage) &&
           !isWatchedTriage(card),
       )
       .filter((card) => {
@@ -2758,7 +2758,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
     // «Очистить очередь» is a bulk discard, not a studied refusal. It must
     // not teach the assistant or open a suggestion.
-    if (write.remember !== false) {
+    // «Скрыть» closes this procedure only. It must not teach the assistant,
+    // or five hidden cards of one direction become an exclusion.
+    if (write.remember !== false && kind !== "hide") {
       await rememberDecision(next, kind);
     }
     logger.info("Specialist triage recorded", {
@@ -2804,7 +2806,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     for (const id of queueIds) {
       const card = await resolveCase(id);
       if (card === undefined) continue;
-      if (isListingPlaceholder(card) || isWatchedTriage(card) || isRejectedTriage(card.triage)) {
+      if (isListingPlaceholder(card) || isWatchedTriage(card) || isDismissedTriage(card.triage)) {
         continue;
       }
       if (workspace().latestKind(card.sourceProcurementId) !== undefined) continue;
@@ -2856,16 +2858,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    if (card.triage !== "reject") {
+    if (!isDismissedTriage(card.triage)) {
       return reply.code(400).send({ error: "not_in_trash" });
     }
-    // «Вернуть» снимает отказ, не создавая решения: прежний monitor/participate
+    // «Вернуть» снимает отказ и «Скрыть», не создавая решения: прежний monitor/participate
     // всплывает сам, отклонённый из поиска кандидат возвращается в очередь
     // профиля неразобранным (R36).
     workspace().clearRejections(card.sourceProcurementId);
     workspace().setArchived(card.sourceProcurementId, false);
     let next = withTriage(card, workspace());
-    if (next.triage === "reject") {
+    if (isDismissedTriage(next.triage)) {
       // No earlier monitor/participate survived: the case returns as an
       // undecided candidate, so the stored reject mark is dropped too.
       const undecided = { ...next };
@@ -2919,7 +2921,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card === undefined) {
       return reply.code(404).send({ error: "not_found" });
     }
-    if (card.triage !== "reject") {
+    if (!isDismissedTriage(card.triage)) {
       return reply.code(400).send({ error: "not_in_trash" });
     }
     catalog().dropCase(card.id);

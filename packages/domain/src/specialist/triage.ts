@@ -8,6 +8,11 @@ export function isRejectedTriage(kind: SpecialistTriageKind | undefined): boolea
   return kind === "reject";
 }
 
+/** Left the search on purpose: «Не нужно» or «Скрыть». Not a watched case. */
+export function isDismissedTriage(kind: SpecialistTriageKind | undefined): boolean {
+  return kind === "reject" || kind === "hide";
+}
+
 /**
  * Cron discovery must not re-offer a procedure the specialist already judged,
  * including reject / monitor / participate.

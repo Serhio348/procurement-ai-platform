@@ -10,6 +10,7 @@ import {
   hasBidsDeadline,
   cardProcedureKindLabel,
   isIngestRunning,
+  isDismissedTriage,
   isSingleSourceAfterFailedProcedure,
   procurementBelongsToProfile,
   profileDisplayName,
@@ -38,7 +39,7 @@ const EMPTY_TEXT: Record<ListTab, string> = {
   monitor: "Здесь будут закупки, по которым нажали «Следить».",
   participate: "Здесь будут закупки, по которым нажали «Участвовать».",
   archive: "Здесь будут завершённые закупки, которые вы переместили в архив.",
-  trash: "Сюда попадают закупки после «Убрать» или «Не нужно». Их можно вернуть или удалить.",
+  trash: "Сюда попадают закупки после «Убрать», «Не нужно» или «Скрыть». Их можно вернуть или удалить.",
 };
 
 function shortId(id: string): string {
@@ -294,14 +295,14 @@ export function MyProcurementsApp({
     : (remote ?? procurements);
   const decided = source.filter((item) => isDecided(item) && item.archived !== true);
   const archived = source.filter(
-    (item) => item.archived === true && item.triage !== "reject",
+    (item) => item.archived === true && !isDismissedTriage(item.triage),
   );
-  const trashed = source.filter((item) => item.triage === "reject");
+  const trashed = source.filter((item) => isDismissedTriage(item.triage));
   const byDecision = isTrash
     ? trashed
     : hasLoad
       ? source.filter((item) =>
-          item.triage !== "reject" &&
+          !isDismissedTriage(item.triage) &&
           (filter === "archive" ? item.archived === true : item.archived !== true),
         )
       : filter === "archive"
@@ -399,7 +400,12 @@ export function MyProcurementsApp({
       if (op === "remove") {
         notice?.("Корзина", `«${item.title}» — перемещена в корзину.`);
       } else if (op === "restore") {
-        notice?.("Мои закупки", `«${item.title}» — возвращена из корзины.`);
+        notice?.(
+          item.triage === "hide" ? "Закупки" : "Мои закупки",
+          item.triage === "hide"
+            ? `«${item.title}» — возвращена в поиск.`
+            : `«${item.title}» — возвращена из корзины.`,
+        );
       } else if (op === "purge") {
         notice?.("Корзина", `«${item.title}» — удалена безвозвратно.`);
       } else if (op === "archive") {
@@ -429,7 +435,7 @@ export function MyProcurementsApp({
     if (onEmptyTrash === undefined || pendingIds.has("empty")) return;
     setPending("empty", true);
     const snapshot = hasLoad ? (listItems ?? []) : source;
-    patchItems((items) => items.filter((card) => card.triage !== "reject"));
+    patchItems((items) => items.filter((card) => !isDismissedTriage(card.triage)));
     try {
       await onEmptyTrash();
       setActionError(undefined);
@@ -660,7 +666,9 @@ export function MyProcurementsApp({
                               ? "Слежу"
                               : item.triage === "participate"
                                 ? "Участвую"
-                                : "Корзина"}
+                                : item.triage === "hide"
+                                  ? "Скрыта"
+                                  : "Корзина"}
                           </span>
                           <span className="my-procurements-card-status">{item.statusLabel}</span>
                           {bidsDeadlinePassed(item, today) ? (

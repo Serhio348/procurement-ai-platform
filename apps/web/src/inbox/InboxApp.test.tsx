@@ -24,7 +24,7 @@ describe("InboxApp assistant tab", () => {
     createdAt: "2026-10-08T10:00:00.000Z",
   };
 
-  it("shows a rule only while there is one and answers it with Принять / Отклонить", async () => {
+  it("shows a rule only while there is one and answers yes or no", async () => {
     const user = userEvent.setup();
     const answers: string[] = [];
     const { rerender } = render(
@@ -47,14 +47,15 @@ describe("InboxApp assistant tab", () => {
     );
     await user.click(screen.getByRole("tab", { name: "Помощник (1)" }));
     expect(
-      screen.getAllByText("Вы отклонили 5 закупок со словами «наружного освещения» и не взяли ни одной.")
+      screen.getAllByText("Вы отклонили 5 закупок с предметом «наружного освещения» и не взяли ни одной.")
         .length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("Ремонт наружного освещения парка")).toBeTruthy();
     expect(screen.getByText("Не показывать такие закупки в профиле «Сети 0,4 кВ»?")).toBeTruthy();
+    expect(screen.getByText(/остаются в поиске/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Принять" }));
-    await user.click(screen.getByRole("button", { name: "Отклонить" }));
+    await user.click(screen.getByRole("button", { name: "Да, не показывать" }));
+    await user.click(screen.getByRole("button", { name: "Нет, оставить" }));
     expect(answers).toEqual([`accept:${suggestion.id}`, `dismiss:${suggestion.id}`]);
   });
 });

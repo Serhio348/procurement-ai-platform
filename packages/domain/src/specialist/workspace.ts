@@ -320,15 +320,18 @@ export class SpecialistWorkspace {
   }
 
   /**
-   * «Вернуть» из корзины снимает отказ, а не создаёт новое решение:
-   * кейс с прошлым monitor/participate всплывает со своим прежним этапом,
-   * отклонённый прямо из поиска кандидат возвращается неразобранным —
-   * слежение без явного выбора не включается (R36).
+   * «Вернуть» из корзины снимает «Не нужно» и «Скрыть», а не создаёт новое
+   * решение: кейс с прошлым monitor/participate всплывает со своим прежним
+   * этапом, карточка из поиска возвращается неразобранной — слежение без
+   * явного выбора не включается (R36).
    */
   clearRejections(sourceProcurementId: string): void {
     for (let index = this.#decisions.length - 1; index >= 0; index -= 1) {
       const decision = this.#decisions[index];
-      if (decision?.sourceProcurementId === sourceProcurementId && decision.kind === "reject") {
+      if (
+        decision?.sourceProcurementId === sourceProcurementId &&
+        (decision.kind === "reject" || decision.kind === "hide")
+      ) {
         this.#decisions.splice(index, 1);
       }
     }

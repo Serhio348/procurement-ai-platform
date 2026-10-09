@@ -14,7 +14,7 @@ import {
   cardProcedureKindLabel,
   ingestFileWeight,
   isListingPlaceholder,
-  isRejectedTriage,
+  isDismissedTriage,
   isWatchedTriage,
   procurementsForProfile,
   profileDisplayName,
@@ -154,6 +154,8 @@ export function triageLabel(kind: SpecialistTriageKind): string {
       return "участвуем";
     case "reject":
       return "не нужно";
+    case "hide":
+      return "скрыта";
   }
 }
 
@@ -448,12 +450,15 @@ export function ProcurementsApp({
     if (kind === "participate") pullProgress();
     try {
       await decide(procurementId, kind);
-      if (kind === "reject" || kind === "monitor" || kind === "participate") {
+      if (kind === "reject" || kind === "hide" || kind === "monitor" || kind === "participate") {
         const without = catalogItems.filter((item) => item.id !== procurementId);
         setCatalogItems(without);
         if (kind === "reject") {
           setNotice("Перемещено в корзину. Вернуть можно в разделе «Корзина».");
           pushNotice?.("Корзина", `«${selected.title}» — перемещена в корзину.`);
+        } else if (kind === "hide") {
+          setNotice("Скрыта. Похожие закупки по-прежнему будут приходить. Вернуть можно в корзине.");
+          pushNotice?.("Корзина", `«${selected.title}» — скрыта. Похожие по-прежнему приходят.`);
         } else if (kind === "participate") {
           setNotice(
             "Участвуем. Карточка в «Мои закупки». Документы скачиваются — можно открыть другой раздел.",
@@ -772,6 +777,17 @@ export function ProcurementsApp({
                   >
                     Не нужно
                   </button>
+                  <button
+                    type="button"
+                    className={triageActionClass("hide", selected.triage)}
+                    aria-pressed={selected.triage === "hide"}
+                    disabled={busy}
+                    onClick={() => {
+                      void runDecide("hide");
+                    }}
+                  >
+                    Скрыть
+                  </button>
                 </div>
               )}
               {selected.actions.length === 0 ? null : (
@@ -917,6 +933,6 @@ function isSearchQueueCard(item: SpecialistProcurementCard): boolean {
   return (
     !isListingPlaceholder(item) &&
     !isWatchedTriage(item) &&
-    !isRejectedTriage(item.triage)
+    !isDismissedTriage(item.triage)
   );
 }

@@ -285,6 +285,22 @@ a {
   margin-top: 16px;
 }
 
+.assistant-answers {
+  align-items: stretch;
+}
+
+.assistant-answers > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+
+.assistant-answers .review-reason {
+  margin: 0;
+}
+
 .inbox-open {
   font: inherit;
   font-size: 14px;

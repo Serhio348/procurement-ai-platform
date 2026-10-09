@@ -115,6 +115,26 @@ describe("pageListedCases", () => {
     expect(slim.title).toBe(watching.title);
   });
 
+  it("lists a hidden case in the trash and keeps it out of my procurements", () => {
+    const hidden = card({
+      id: "00000000-0000-4000-8000-000000000008",
+      sourceProcurementId: "auction/8",
+      triage: "hide",
+      live: true,
+    });
+    expect(pageListedCases([match, watching, hidden], { tab: "trash" }).items.map((item) => item.id)).toEqual([
+      hidden.id,
+    ]);
+    expect(pageListedCases([match, watching, hidden], { tab: "all" }).items.map((item) => item.id)).toEqual([
+      watching.id,
+    ]);
+    expect(countCabinetCases([match, watching, hidden])).toEqual({
+      mineCount: 1,
+      archiveCount: 0,
+      trashCount: 1,
+    });
+  });
+
   it("counts mine, archive and trash without mixing tabs", () => {
     const trashed = card({
       id: "00000000-0000-4000-8000-000000000007",

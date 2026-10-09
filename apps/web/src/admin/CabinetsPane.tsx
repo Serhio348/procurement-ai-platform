@@ -196,5 +196,6 @@ function cabinetPresenceLine(lastActiveAt: string | undefined): string {
 function triageLabel(kind: NonNullable<SpecialistProcurementCard["triage"]>): string {
   if (kind === "monitor") return "Слежу";
   if (kind === "participate") return "Участвую";
+  if (kind === "hide") return "Скрыта";
   return "Корзина";
 }

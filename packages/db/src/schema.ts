@@ -849,7 +849,12 @@ export const authPasswordResets = pgTable(
 export const workspaceKind = pgEnum("workspace_kind", ["personal", "team"]);
 export const workspaceMemberRole = pgEnum("workspace_member_role", ["owner", "member", "viewer"]);
 export const workspaceInboxState = pgEnum("workspace_inbox_state", ["open", "resolved", "dismissed"]);
-export const workspaceTriageKind = pgEnum("workspace_triage_kind", ["monitor", "participate", "reject"]);
+export const workspaceTriageKind = pgEnum("workspace_triage_kind", [
+  "monitor",
+  "participate",
+  "reject",
+  "hide",
+]);
 export const workspaceFoundAs = pgEnum("workspace_found_as", ["match", "review"]);
 
 export const workspaces = pgTable(

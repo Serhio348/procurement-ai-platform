@@ -145,10 +145,10 @@ describe("telegram notifier", () => {
     expect(bot.sent).toHaveLength(1);
     expect(bot.sent[0]?.chatId).toBe("777");
     expect(bot.sent[0]?.text).toContain("Поставка КТП");
-    expect(flatButtons(bot.sent[0]).some((button) => button.callbackData === "d:evt-procedure_candidate")).toBe(true);
+    expect(flatButtons(bot.sent[0]).some((button) => button.text === "Разобрано")).toBe(false);
     // A candidate ships the triage row: the specialist decides from the chat.
     expect(flatButtons(bot.sent[0]).map((button) => button.text)).toEqual(
-      expect.arrayContaining(["Следить", "Участвовать", "Не нужно"]),
+      expect.arrayContaining(["Следить", "Участвовать", "Не нужно", "Скрыть"]),
     );
   });
 
@@ -269,7 +269,7 @@ describe("telegram notifier", () => {
     await notifier.notifySuggestion(workspaceId, suggestion);
     await notifier.notifySuggestion(workspaceId, suggestion);
     expect(bot.sent).toHaveLength(1);
-    expect(bot.sent[0]?.text).toContain("Вы отклонили 5 закупок со словами «наружного освещения»");
+    expect(bot.sent[0]?.text).toContain("Вы отклонили 5 закупок с предметом «наружного освещения»");
     expect(bot.sent[0]?.text).toContain("Сети &lt;0,4 кВ&gt;");
     expect(flatButtons(bot.sent[0]).map((button) => button.callbackData)).toEqual(
       expect.arrayContaining([`s:${suggestion.id}:a`, `s:${suggestion.id}:d`]),

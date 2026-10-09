@@ -217,6 +217,10 @@ describe("clearRejections", () => {
     workspace.recordDecision("auction/1", "reject", "2026-09-13T10:00:00.000Z");
     workspace.clearRejections("auction/1");
     expect(workspace.latestKind("auction/1")).toBe("monitor");
+
+    workspace.recordDecision("auction/1", "hide", "2026-09-14T10:00:00.000Z");
+    workspace.clearRejections("auction/1");
+    expect(workspace.latestKind("auction/1")).toBe("monitor");
   });
 });
 

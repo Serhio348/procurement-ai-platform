@@ -119,7 +119,7 @@ async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemo
   const specialist = await member(specialistId, cookieHeader(signed));
   pilot.add(admin.workspaceId);
 
-  const decide = async (who: Member, title: string, kind: "monitor" | "reject") => {
+  const decide = async (who: Member, title: string, kind: "monitor" | "reject" | "hide") => {
     const item = card(title, who.profileId);
     (await cabinets.open(who.workspaceId)).catalog.upsertCase(item);
     const response = await app.inject({
@@ -277,6 +277,62 @@ describe("cabinet assistant decision memory", () => {
 
       await decide(admin, "Капитальный ремонт наружного освещения склада", "reject");
       expect((await memory.list(admin.workspaceId)).some((entry) => entry.kind === "reject")).toBe(true);
+    });
+  });
+
+  it("does not learn a direction from «Скрыть», and the card leaves the search", async () => {
+    const { app, memory, admin, decide, suggestions } = await twoCabinets();
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      const hiddenCards = [];
+      for (const title of LIGHTING) hiddenCards.push(await decide(admin, title, "hide"));
+
+      const remembered = await memory.list(admin.workspaceId);
+      expect(remembered.every((entry) => entry.kind === "monitor")).toBe(true);
+      expect(await suggestions(admin)).toEqual([]);
+
+      const trash = await app.inject({
+        method: "GET",
+        url: "/api/procurements?tab=trash",
+        headers: { cookie: admin.cookie },
+      });
+      const hidden = (JSON.parse(trash.body) as { items: Array<{ title: string; triage?: string }> }).items;
+      expect(hidden.filter((item) => item.triage === "hide").map((item) => item.title).sort()).toEqual(
+        [...LIGHTING].sort(),
+      );
+
+      const mine = await app.inject({
+        method: "GET",
+        url: "/api/procurements?tab=all",
+        headers: { cookie: admin.cookie },
+      });
+      expect(
+        (JSON.parse(mine.body) as { items: Array<{ triage?: string }> }).items.every(
+          (item) => item.triage !== "hide",
+        ),
+      ).toBe(true);
+
+      const returned = hiddenCards[0];
+      expect(returned).toBeDefined();
+      const restore = await app.inject({
+        method: "POST",
+        url: `/api/procurements/${returned!.id}/restore`,
+        headers: { cookie: admin.cookie },
+      });
+      expect(restore.statusCode).toBe(200);
+      expect(
+        (JSON.parse(restore.body) as { items: Array<{ triage?: string }> }).items[0]?.triage,
+      ).toBeUndefined();
+      const search = await app.inject({
+        method: "GET",
+        url: `/api/procurements?tab=search&profileId=${admin.profileId}`,
+        headers: { cookie: admin.cookie },
+      });
+      expect(
+        (JSON.parse(search.body) as { items: Array<{ id: string }> }).items.some(
+          (item) => item.id === returned!.id,
+        ),
+      ).toBe(true);
     });
   });
 

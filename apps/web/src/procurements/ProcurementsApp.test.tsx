@@ -650,6 +650,7 @@ describe("ProcurementsApp", () => {
     expect(screen.getByRole("button", { name: "Отслеживать" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Участвовать" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Не нужно" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Скрыть" })).toBeTruthy();
   });
 
   it("fetches the inbox-opened card by id when nothing in state carries it", async () => {
@@ -690,6 +691,7 @@ describe("ProcurementsApp", () => {
     expect(screen.getByRole("button", { name: "Отслеживать" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Участвовать" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Не нужно" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Скрыть" })).toBeTruthy();
   });
 
   it("lets the specialist pick which profile to search", async () => {

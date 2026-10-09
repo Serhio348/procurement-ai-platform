@@ -23,7 +23,8 @@ import type {
 import {
   isIngestRunning,
   isListingPlaceholder,
-  isRejectedTriage,
+  assistantSuggestionText,
+  isDismissedTriage,
   isWatchedTriage,
 } from "@procurement/domain";
 import { AdminApp } from "./admin/AdminApp.js";
@@ -259,7 +260,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
               const kept = current.filter(
                 (item) =>
                   isWatchedTriage(item) ||
-                  isRejectedTriage(item.triage) ||
+                  isDismissedTriage(item.triage) ||
                   (profileId.length > 0 && !item.profileIds.includes(profileId)),
               );
               return mergeProcurementCards(kept, result.items);
@@ -293,7 +294,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
     (item) =>
       !isListingPlaceholder(item) &&
       !isWatchedTriage(item) &&
-      !isRejectedTriage(item.triage),
+      !isDismissedTriage(item.triage),
   );
 
   const rejectSearchQueue = props.rejectSearchQueue;
@@ -318,7 +319,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
           const items = await decideCase(id, kind);
           const updated = items.find((item) => item.id === id);
           setProcurements((current) => {
-            if (kind === "reject") {
+            if (kind === "reject" || kind === "hide") {
               if (updated === undefined) return current.filter((item) => item.id !== id);
               return mergeProcurementCards(current, [updated]);
             }
@@ -606,11 +607,13 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                         const result = await props.assistant!.resolve(id, action);
                         setSuggestions(result.items);
                         if (result.profile !== undefined) remember(result.profile);
+                        const offer = suggestions.find((item) => item.id === id);
+                        const wording = offer === undefined ? undefined : assistantSuggestionText(offer);
                         pushNotice(
-                          action === "accept" ? "Исключение добавлено" : "Предложение отклонено",
+                          action === "accept" ? "Исключение добавлено" : "Закупки остаются",
                           action === "accept"
                             ? "Такие закупки больше не будут приходить по этому профилю"
-                            : "Помощник больше не предложит это слово для профиля",
+                            : (wording?.dismissEffect ?? "Закупки остаются в поиске."),
                         );
                       } catch (error) {
                         pushNotice(
@@ -910,7 +913,7 @@ function InboxRoute({
 // full stored card in «Мои закупки», rejected ones in «Корзина»; only
 // undecided candidates belong to the search tab.
 function inboxOpenTarget(card: SpecialistProcurementCard): string {
-  if (isRejectedTriage(card.triage)) return `/trash/${card.id}`;
+  if (isDismissedTriage(card.triage)) return `/trash/${card.id}`;
   if (isWatchedTriage(card) || card.archived) return `/my-procurements/${card.id}`;
   return `/procurements/${card.id}`;
 }
@@ -992,7 +995,7 @@ function mergeSearchPane(
     (item) =>
       !updateSources.has(item.sourceProcurementId) &&
       (isWatchedTriage(item) ||
-        isRejectedTriage(item.triage) ||
+        isDismissedTriage(item.triage) ||
         (profileId.length > 0 && !item.profileIds.includes(profileId))),
   );
   return mergeProcurementCards(kept, updates);

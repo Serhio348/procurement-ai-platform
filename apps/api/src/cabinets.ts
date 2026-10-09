@@ -172,7 +172,7 @@ export function createMemoryCabinetRegistry(options: {
     },
     async listTrashIds(workspaceId) {
       return casesOf(workspaceId)
-        .filter((item) => item.triage === "reject")
+        .filter((item) => item.triage === "reject" || item.triage === "hide")
         .map((item) => item.id);
     },
     async listCases(workspaceId, query = {}) {

@@ -63,7 +63,10 @@ export interface TelegramBot {
 
 const TELEGRAM_API = "https://api.telegram.org";
 const LINK_CODE_TTL_MS = 10 * 60_000;
-/** keep the callback payload short: "d:<changeId>" */
+/**
+ * Old messages still carry "d:<changeId>". New ones do not: specialists
+ * never used «Разобрано», and the console inbox stays the place to clear it.
+ */
 const DISMISS_PREFIX = "d:";
 /** "t:<cardId>:<kind>" — a triage decision straight from the chat. */
 const DECIDE_PREFIX = "t:";
@@ -74,6 +77,7 @@ const DECIDE_LABEL: Record<SpecialistTriageKindValue, string> = {
   monitor: "Следить",
   participate: "Участвовать",
   reject: "Не нужно",
+  hide: "Скрыть",
 };
 /**
  * Persistent reply keyboard under the input field. A key tap sends its label
@@ -235,7 +239,7 @@ export interface TelegramNotifierOptions {
   /** Console base URL for the «Открыть» button — plain http is fine for a link. */
   publicUrl: string;
   botUsername?: string;
-  /** Used by «/new», the dismiss button and triage buttons; absent in fixture-only tests. */
+  /** Used by «/new», an old «Разобрано» tap and triage buttons; absent in fixture-only tests. */
   openCabinet?: (userId: string) => Promise<{
     workspaceId: string;
     inbox: {
@@ -290,7 +294,13 @@ function decideButtonRows(cardId: string): TelegramButton[][] {
   const row = kinds
     .map((kind) => ({ text: DECIDE_LABEL[kind], callbackData: `${DECIDE_PREFIX}${cardId}:${kind}` }))
     .filter((button) => button.callbackData.length <= 64);
-  return row.length === 0 ? [] : [row];
+  const hide = {
+    text: DECIDE_LABEL.hide,
+    callbackData: `${DECIDE_PREFIX}${cardId}:hide`,
+  };
+  const rows = row.length === 0 ? [] : [row];
+  if (hide.callbackData.length <= 64) rows.push([hide]);
+  return rows;
 }
 
 export function formatInboxMessage(
@@ -313,10 +323,7 @@ export function formatInboxMessage(
     ),
     buttons: [
       ...triage,
-      [
-        { text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl },
-        { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${item.change.id}` },
-      ],
+      [{ text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl }],
     ],
   };
 }
@@ -336,14 +343,15 @@ export function formatSuggestionMessage(
       escapeHtml(text.body),
       examples.length === 0 ? "" : `Например:\n${examples}`,
       escapeHtml(text.question),
-      `<i>${escapeHtml(text.acceptEffect)}</i>`,
+      `<i>${escapeHtml(text.acceptLabel)}. ${escapeHtml(text.acceptEffect)}</i>`,
+      `<i>${escapeHtml(text.dismissLabel)}. ${escapeHtml(text.dismissEffect)}</i>`,
     ]
       .filter((part) => part.length > 0)
       .join("\n\n"),
     buttons: [
       [
-        { text: "Принять", callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:a` },
-        { text: "Отклонить", callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:d` },
+        { text: text.acceptLabel, callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:a` },
+        { text: text.dismissLabel, callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:d` },
       ],
       [{ text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl }],
     ],
@@ -447,10 +455,7 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
             text: `<b>${escapeHtml(entry.statusLabel)}</b>\n${escapeHtml(entry.title)}\n${escapeHtml(entry.detail).slice(0, 300)}`,
             buttons: [
               ...(isCandidateEvent(entry.kind) ? decideButtonRows(entry.procurementId) : []),
-              [
-                { text: "Открыть в консоли", url: publicUrl },
-                { text: "Разобрано", callbackData: `${DISMISS_PREFIX}${entry.id}` },
-              ],
+              [{ text: "Открыть в консоли", url: publicUrl }],
             ],
           });
         }
@@ -589,7 +594,9 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
                 ? "unavailable"
                 : await cabinet.resolveSuggestion(suggestionId, action);
             const verdict =
-              action === "accept" ? "добавлено в исключения профиля" : "отклонено, больше не предложу";
+              action === "accept"
+                ? "не показывать: добавлено в исключения профиля"
+                : "оставить: профиль без изменений, такие закупки приходят";
             await bot.answerCallbackQuery(
               id,
               result === "ok"

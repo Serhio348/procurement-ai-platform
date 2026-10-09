@@ -70,7 +70,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     }
     this.#minimumIntervalMs = Math.ceil(60_000 / requestsPerMinute);
     this.#maxResponseBytes = options.maxResponseBytes ?? 5 * 1024 * 1024;
-    this.#maxDownloadBytes = options.maxDownloadBytes ?? 100 * 1024 * 1024;
+    this.#maxDownloadBytes = options.maxDownloadBytes ?? 2 * 1024 * 1024 * 1024;
     this.#userAgent =
       options.userAgent ?? "ProcurementAIPlatform/0.1 (read-only procurement adapter)";
     this.#circuitFailureThreshold = options.circuitFailureThreshold ?? 3;
@@ -166,7 +166,8 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     const response = await this.#fetch(url, {
       method: "GET",
       redirect: "follow",
-      signal: AbortSignal.timeout(this.#timeoutMs),
+      // Pages stay on the clock. A file may be a large archive on a slow link.
+      ...(mode === "html" ? { signal: AbortSignal.timeout(this.#timeoutMs) } : {}),
       headers: {
         accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
         "user-agent": this.#userAgent,
@@ -246,7 +247,8 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
       );
     }
 
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bytes =
+      mode === "binary" ? await readLimitedDownload(response, limit) : new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > limit) {
       throw new SourceAccessError(
         "goszakupki_by",
@@ -324,6 +326,35 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
   }
 }
 
+async function readLimitedDownload(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const body = response.body;
+  if (body === null) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new SourceAccessError(
+        "goszakupki_by",
+        `response exceeds configured size limit (${String(total)} bytes)`,
+      );
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 function transportReason(error: unknown): string {
   if (!(error instanceof Error)) return "unknown transport error";
   const cause = error.cause instanceof Error ? error.cause.message : undefined;
@@ -370,6 +401,8 @@ function createDefaultFetch(): typeof fetch {
       rejectUnauthorized: !insecure,
       ...(ca.length > 0 ? { ca } : {}),
     },
+    headersTimeout: 0,
+    bodyTimeout: 0,
   });
   return ((input, init) =>
     undiciFetch(input as never, { ...(init ?? {}), dispatcher: agent })) as typeof fetch;

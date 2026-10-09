@@ -54,7 +54,7 @@ function liveSource(logger: Logger): GoszakupkiBySource {
       ),
       maxDownloadBytes: positiveNumber(
         process.env["GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES"],
-        100 * 1024 * 1024,
+        2 * 1024 * 1024 * 1024,
         "GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES",
       ),
       ...(process.env["GOSZAKUPKI_BY_USER_AGENT"] === undefined

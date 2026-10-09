@@ -112,6 +112,16 @@ describe("downloadPublicDocumentation", () => {
     ).rejects.toBeInstanceOf(SourceAccessError);
   });
 
+  it("does not put a clock on the file download", async () => {
+    let signal: AbortSignal | null | undefined = "unset";
+    const fetchImpl: PublicDocumentationFetch = async (_url, init) => {
+      signal = init?.signal;
+      return respond(200, new Uint8Array([1, 2, 3]), { "content-type": "application/zip" });
+    };
+    await downloadPublicDocumentation("https://files.by/archive.zip", fetchImpl);
+    expect(signal).toBeUndefined();
+  });
+
   it("rejects an oversized body", async () => {
     const fetchImpl = fetchFrom({
       "https://files.by/get/1": respond(200, new Uint8Array(64)),

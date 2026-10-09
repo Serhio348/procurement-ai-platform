@@ -97,6 +97,9 @@ export function createSafePublicFetch(
 ): PublicDocumentationFetch {
   const dispatcher = new Agent({
     connect: { lookup: createPinnedLookup(resolve) as LookupFunction },
+    // A large archive may arrive slowly. The size cap stops it, not a clock.
+    headersTimeout: 0,
+    bodyTimeout: 0,
   });
   return async (url, init) => {
     const { statusCode, headers, body } = await undiciRequest(String(url), {
@@ -115,8 +118,9 @@ export function createSafePublicFetch(
   };
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
+/** Yandex Disk's metadata call is a small JSON request, not the file itself. */
+const METADATA_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_REDIRECT_HOPS = 5;
 
 export async function downloadPublicDocumentation(
@@ -133,10 +137,9 @@ export async function downloadPublicDocumentation(
   if (!isPublicDocumentationUrl(parsed) || isGoszakupkiHost(parsed.hostname)) {
     throw new SourceAccessError("goszakupki_by", "document URL is not a public documentation host");
   }
-  const timeoutMs = limits.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = limits.maxBytes ?? DEFAULT_MAX_BYTES;
-  const target = await resolvePublicDownloadUrl(parsed, fetchImpl, timeoutMs);
-  const response = await fetchWithValidatedRedirects(fetchImpl, target, timeoutMs);
+  const target = await resolvePublicDownloadUrl(parsed, fetchImpl, limits.timeoutMs);
+  const response = await fetchWithValidatedRedirects(fetchImpl, target, limits.timeoutMs);
   if (response.status < 200 || response.status >= 300) {
     throw new SourceAccessError(
       "goszakupki_by",
@@ -156,7 +159,7 @@ export async function downloadPublicDocumentation(
 export async function fetchWithValidatedRedirects(
   fetchImpl: PublicDocumentationFetch,
   url: URL,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs?: number,
   maxHops = MAX_REDIRECT_HOPS,
 ): Promise<Response> {
   let current = url;
@@ -164,7 +167,7 @@ export async function fetchWithValidatedRedirects(
     const response = await fetchImpl(current, {
       method: "GET",
       redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
+      ...(timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(timeoutMs) }),
       headers: { accept: "*/*", "user-agent": "ProcurementAIPlatform/0.1 (documentation fetch)" },
     });
     const location = response.headers.get("location");
@@ -191,7 +194,7 @@ export async function fetchWithValidatedRedirects(
 export async function resolvePublicDownloadUrl(
   url: URL,
   fetchImpl: PublicDocumentationFetch,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs = METADATA_TIMEOUT_MS,
 ): Promise<URL> {
   const driveId = googleDriveFileId(url);
   if (driveId !== undefined) {
@@ -257,18 +260,37 @@ async function readCappedBytes(response: Response, maxBytes: number): Promise<Ui
   if (lengthHeader !== null) {
     const length = Number(lengthHeader);
     if (Number.isFinite(length) && length > maxBytes) {
+      await response.body?.cancel();
       throw new SourceAccessError(
         "goszakupki_by",
         `document download exceeded size limit ${String(maxBytes)}`,
       );
     }
   }
-  const buffer = new Uint8Array(await response.arrayBuffer());
-  if (buffer.byteLength > maxBytes) {
-    throw new SourceAccessError(
-      "goszakupki_by",
-      `document download exceeded size limit ${String(maxBytes)}`,
-    );
+  const body = response.body;
+  if (body === null) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new SourceAccessError(
+        "goszakupki_by",
+        `document download exceeded size limit ${String(maxBytes)}`,
+      );
+    }
+    chunks.push(value);
+  }
+  const buffer = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
   }
   return buffer;
 }

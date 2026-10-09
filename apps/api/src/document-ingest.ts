@@ -105,7 +105,10 @@ export function createProcurementDocumentIngest(
     policyGate: new ToolPolicyGate({
       agentAllowedTools: ["procurement.get_documents", "procurement.download"],
     }),
-    timeoutMs: options.timeoutMs ?? 180_000,
+    // The download itself has no clock: a large archive finishes when the link
+    // does. This only releases a dead call so the shared procurement queue
+    // cannot stay blocked.
+    timeoutMs: options.timeoutMs ?? 12 * 60 * 60 * 1000,
     logger: options.logger ?? silentLogger,
   });
   const logger = options.logger ?? silentLogger;

@@ -113,12 +113,15 @@ describe("downloadPublicDocumentation", () => {
   });
 
   it("does not put a clock on the file download", async () => {
-    let signal: AbortSignal | null | undefined = "unset";
+    let called = false;
+    let signal: AbortSignal | null | undefined;
     const fetchImpl: PublicDocumentationFetch = async (_url, init) => {
+      called = true;
       signal = init?.signal;
       return respond(200, new Uint8Array([1, 2, 3]), { "content-type": "application/zip" });
     };
     await downloadPublicDocumentation("https://files.by/archive.zip", fetchImpl);
+    expect(called).toBe(true);
     expect(signal).toBeUndefined();
   });
 

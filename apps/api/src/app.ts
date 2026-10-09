@@ -2665,8 +2665,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
     if (!(await assistant.suggestions.offer(workspaceId, suggestion))) return;
     logger.info("Assistant rule offered", { profileId, rejectCount: term.rejectCount });
-    const entry = suggestionEntry(suggestion);
-    if (entry !== undefined) await options.telegram?.notifySuggestion(workspaceId, entry);
+    // The choice lives in the console inbox. A Telegram copy stays after the
+    // specialist has already answered, so it is not sent.
   };
 
   const openSuggestions = async (): Promise<ReturnType<typeof AssistantSuggestionEntry.parse>[]> => {

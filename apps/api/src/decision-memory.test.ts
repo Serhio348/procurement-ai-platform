@@ -387,7 +387,7 @@ describe("assistant rule suggestions", () => {
       expect(offered).toEqual([
         expect.objectContaining({ label: "наружного освещения", profileName: "Сети", rejectCount: 5 }),
       ]);
-      expect(telegram.suggestions).toEqual(["наружного освещения"]);
+      expect(telegram.suggestions).toEqual([]);
       expect((await profileOf(admin)).excludeKeywords).toEqual([]);
 
       const accepted = await answer(admin, offered[0]!.id, "accept");
@@ -414,7 +414,7 @@ describe("assistant rule suggestions", () => {
         await decide(admin, `Обслуживание наружного освещения, участок ${index + 1}`, "reject");
       }
       expect(await suggestions(admin)).toEqual([]);
-      expect(telegram.suggestions).toEqual(["наружного освещения"]);
+      expect(telegram.suggestions).toEqual([]);
       expect((await profileOf(admin)).excludeKeywords).toEqual([]);
     });
   });

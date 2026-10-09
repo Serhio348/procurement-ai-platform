@@ -249,7 +249,7 @@ describe("telegram notifier", () => {
     ]);
   });
 
-  it("offers an assistant rule once with Принять / Отклонить and skips it in urgent mode", async () => {
+  it("does not send an assistant rule to Telegram; an old button still answers it", async () => {
     const { bot, notifier, rules } = setup();
     const { code } = await notifier.createLinkCode(userId);
     await notifier.handleUpdate({ updateId: 1, message: { chatId: "777", text: `/start ${code}` } });
@@ -268,12 +268,7 @@ describe("telegram notifier", () => {
 
     await notifier.notifySuggestion(workspaceId, suggestion);
     await notifier.notifySuggestion(workspaceId, suggestion);
-    expect(bot.sent).toHaveLength(1);
-    expect(bot.sent[0]?.text).toContain("Вы отклонили 5 закупок с предметом «наружного освещения»");
-    expect(bot.sent[0]?.text).toContain("Сети &lt;0,4 кВ&gt;");
-    expect(flatButtons(bot.sent[0]).map((button) => button.callbackData)).toEqual(
-      expect.arrayContaining([`s:${suggestion.id}:a`, `s:${suggestion.id}:d`]),
-    );
+    expect(bot.sent).toHaveLength(0);
 
     await notifier.handleUpdate({
       updateId: 2,

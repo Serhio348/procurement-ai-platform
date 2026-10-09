@@ -4,11 +4,7 @@ import type {
   InboxFixtureItem as InboxFixtureItemValue,
   SpecialistTriageKind as SpecialistTriageKindValue,
 } from "@procurement/contracts";
-import {
-  assistantSuggestionText,
-  compileChangeAlert,
-  compileTelegramText,
-} from "@procurement/domain";
+import { compileChangeAlert, compileTelegramText } from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type { TelegramLink, TelegramStore } from "@procurement/db";
 
@@ -328,36 +324,6 @@ export function formatInboxMessage(
   };
 }
 
-export function formatSuggestionMessage(
-  suggestion: AssistantSuggestionEntry,
-  publicUrl: string,
-): { text: string; buttons: TelegramButton[][] } {
-  const text = assistantSuggestionText(suggestion);
-  const examples = suggestion.examples
-    .slice(0, 3)
-    .map((title) => `• ${escapeHtml(title)}`)
-    .join("\n");
-  return {
-    text: [
-      `<b>${escapeHtml(text.title)}</b>`,
-      escapeHtml(text.body),
-      examples.length === 0 ? "" : `Например:\n${examples}`,
-      escapeHtml(text.question),
-      `<i>${escapeHtml(text.acceptLabel)}. ${escapeHtml(text.acceptEffect)}</i>`,
-      `<i>${escapeHtml(text.dismissLabel)}. ${escapeHtml(text.dismissEffect)}</i>`,
-    ]
-      .filter((part) => part.length > 0)
-      .join("\n\n"),
-    buttons: [
-      [
-        { text: text.acceptLabel, callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:a` },
-        { text: text.dismissLabel, callbackData: `${SUGGESTION_PREFIX}${suggestion.id}:d` },
-      ],
-      [{ text: "Открыть в консоли", url: publicUrl.replace(/\/$/, "") || publicUrl }],
-    ],
-  };
-}
-
 export function createTelegramNotifier(options: TelegramNotifierOptions): TelegramNotifier {
   const { bot, store, logger } = options;
   const publicUrl = options.publicUrl.replace(/\/$/, "");
@@ -533,16 +499,9 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
         logger.error("Telegram notify failed", error, { workspaceId });
       }
     },
-    async notifySuggestion(workspaceId, suggestion) {
-      try {
-        const link = await store.linkForWorkspace(workspaceId);
-        if (link === undefined || link.mode === "urgent") return;
-        const fresh = await store.markSent(workspaceId, `assistant:${suggestion.id}`);
-        if (!fresh) return;
-        await safeSend(link, formatSuggestionMessage(suggestion, publicUrl));
-      } catch (error) {
-        logger.error("Telegram suggestion notify failed", error, { workspaceId });
-      }
+    async notifySuggestion(_workspaceId, _suggestion) {
+      // Suggestions are answered in the console. Already delivered messages
+      // still accept their buttons below.
     },
     async handleUpdate(update) {
       try {

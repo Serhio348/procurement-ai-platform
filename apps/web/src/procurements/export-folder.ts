@@ -159,14 +159,22 @@ interface DirectoryPicker {
 }
 
 export function folderExportSupported(): boolean {
-  return typeof (window as DirectoryPicker).showDirectoryPicker === "function";
+  return window.isSecureContext && typeof (window as DirectoryPicker).showDirectoryPicker === "function";
+}
+
+export function folderExportBlockReason(): string | undefined {
+  if (folderExportSupported()) return undefined;
+  if (!window.isSecureContext) {
+    return "Откройте консоль по https:// — тогда можно выбрать папку на диске.";
+  }
+  return "Выгрузка в выбранную папку работает в Chrome и Edge.";
 }
 
 export async function pickExportDirectory(): Promise<RememberedDirectory> {
+  const blocked = folderExportBlockReason();
+  if (blocked !== undefined) throw new Error(blocked);
   const picker = (window as DirectoryPicker).showDirectoryPicker;
-  if (picker === undefined) {
-    throw new Error("Выгрузка в папку работает в Chrome и Edge.");
-  }
+  if (picker === undefined) throw new Error("Выгрузка в выбранную папку работает в Chrome и Edge.");
   return picker.call(window, { mode: "readwrite", id: "procurement-card-export" });
 }
 

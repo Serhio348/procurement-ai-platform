@@ -4,6 +4,7 @@ import { fetchProcurementExport } from "../api/specialist.js";
 import {
   acquireExportDirectory,
   downloadExportFile,
+  folderExportBlockReason,
   loadExportDirectory,
   pickerWasCancelled,
   pickExportDirectory,
@@ -19,6 +20,7 @@ export function ExportToFolderButton({ procurementId }: { procurementId: string 
   const [progress, setProgress] = useState<{ done: number; total: number } | undefined>();
   const [note, setNote] = useState<string | undefined>();
   const [failed, setFailed] = useState(false);
+  const blocked = folderExportBlockReason();
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +97,9 @@ export function ExportToFolderButton({ procurementId }: { procurementId: string 
         </button>
       )}
       {place === undefined ? null : <span className="export-folder-place">Папка: {place}</span>}
+      {blocked === undefined || note !== undefined ? null : (
+        <span className="export-folder-note">{blocked}</span>
+      )}
       {note === undefined ? null : (
         <span className={failed ? "export-folder-note is-error" : "export-folder-note"} role="status">
           {note}

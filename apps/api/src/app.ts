@@ -2756,7 +2756,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         return;
       }
       directionAnalyzedAt.set(gateKey, table.rejectCount);
-      const own = entries.filter((entry) => entry.profileIds.includes(profile.id));
+      // The store lists entries unordered: newest first so the slice keeps
+      // the specialist's current rejects, not the cabinet's ancient ones.
+      const own = entries
+        .filter((entry) => entry.profileIds.includes(profile.id))
+        .sort((left, right) => right.decidedAt.localeCompare(left.decidedAt));
       const rejected = own
         .filter((entry) => entry.kind === "reject")
         .map((entry) => ({

@@ -1,4 +1,4 @@
-import { SpecialistProcurementCard } from "@procurement/contracts";
+import { DecisionMemoryEntry, SpecialistProcurementCard } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
 import { buildSpecialistApi } from "./app.js";
 import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
@@ -522,6 +522,63 @@ describe("assistant direction suggestions", () => {
       await sleep(100);
       expect(await suggestions(admin)).toEqual([]);
       expect((await profileOf(admin)).excludeKeywords).toEqual([]);
+    });
+  });
+
+  it("feeds the model the freshest rejects when memory outgrows the sample", async () => {
+    const captured: { rejected: { title: string }[] } = { rejected: [] };
+    const directionPort: AssistantDirectionPort = {
+      analyze: async (input) => {
+        captured.rejected = input.rejected;
+        return [];
+      },
+    };
+    const memory = createMemoryDecisionMemory();
+    const { app, admin, decide } = await twoCabinets(memory, directionPort);
+    await closing(app, async () => {
+      // 45 old rejects + 3 taken, all decided before the API reject below.
+      // Unique words per title so no term signal steals the path.
+      const stamp = (index: number) =>
+        new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString();
+      for (let index = 0; index < 45; index += 1) {
+        await memory.record(
+          admin.workspaceId,
+          DecisionMemoryEntry.parse({
+            sourceProcurementId: `request/old-${String(index)}`,
+            kind: "reject",
+            profileIds: [admin.profileId],
+            title: `old${String(index)}aa old${String(index)}bb old${String(index)}cc`,
+            lotTitles: [],
+            decidedAt: stamp(index),
+          }),
+        );
+      }
+      for (let index = 0; index < 3; index += 1) {
+        await memory.record(
+          admin.workspaceId,
+          DecisionMemoryEntry.parse({
+            sourceProcurementId: `request/taken-${String(index)}`,
+            kind: "monitor",
+            profileIds: [admin.profileId],
+            title: `Взятая ${String(index)}`,
+            lotTitles: [],
+            decidedAt: stamp(100 + index),
+          }),
+        );
+      }
+      await decide(admin, "Свежая закупка химического оборудования", "reject");
+      for (let attempt = 0; attempt < 100 && captured.rejected.length === 0; attempt += 1) {
+        await sleep(20);
+      }
+
+      const titles = captured.rejected.map((item) => item.title);
+      expect(titles).toHaveLength(40);
+      expect(titles[0]).toBe("Свежая закупка химического оборудования");
+      expect(titles).toContain("old44aa old44bb old44cc");
+      // The six oldest rejects did not fit the sample of forty.
+      for (const index of [0, 1, 2, 3, 4, 5]) {
+        expect(titles).not.toContain(`old${String(index)}aa old${String(index)}bb old${String(index)}cc`);
+      }
     });
   });
 });

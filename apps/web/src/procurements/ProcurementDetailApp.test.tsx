@@ -74,6 +74,7 @@ describe("ProcurementDetailApp", () => {
     );
 
     expect(screen.getByText(/auc0003545600/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выгрузить в папку" })).toBeTruthy();
     expect(screen.getByText("200050653")).toBeTruthy();
     expect(screen.getByText("г. Брест, ул. Воровского, 13/1")).toBeTruthy();
     expect(screen.getByText("Головко Роман Геннадьевич, +375333869267")).toBeTruthy();

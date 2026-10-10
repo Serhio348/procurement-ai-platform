@@ -2428,9 +2428,63 @@ h3 {
 
 .procurement-detail-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 12px 16px;
   margin-bottom: 20px;
+}
+
+.export-folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.export-folder-button,
+.export-folder-change {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.export-folder-button {
+  color: #1c2430;
+  background: #e8eef6;
+  border: 1px solid #b7c4d4;
+}
+
+.export-folder-button:hover:not(:disabled) {
+  background: #dbe6f2;
+}
+
+.export-folder-change {
+  background: #fff;
+  border: 1px solid #d5dae2;
+}
+
+.export-folder-change:hover:not(:disabled) {
+  background: #f4f6f8;
+}
+
+.export-folder-button:disabled,
+.export-folder-change:disabled {
+  color: #7a8494;
+  background: #f4f6f8;
+  border-color: #d5dae2;
+  cursor: not-allowed;
+}
+
+.export-folder-place,
+.export-folder-note {
+  font-size: 13px;
+  color: #5c6778;
+}
+
+.export-folder-note.is-error {
+  color: #a94442;
 }
 
 .procurement-detail-triage-actions {
@@ -2854,7 +2908,9 @@ h3 {
   .inbox-clear,
   .inbox-tab,
   .profile-actions button,
-  .doc-open {
+  .doc-open,
+  .export-folder-button,
+  .export-folder-change {
     min-height: 44px;
     padding-top: 10px;
     padding-bottom: 10px;

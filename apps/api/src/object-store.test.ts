@@ -27,7 +27,9 @@ describe("blob stores", () => {
     await store.put(hash, bytes);
 
     expect(await store.get(hash)).toEqual(Buffer.from(bytes));
+    expect(await store.has(hash)).toBe(true);
     expect(await store.get("a".repeat(64))).toBeUndefined();
+    expect(await store.has("a".repeat(64))).toBe(false);
   });
 
   it("reads the primary store first and falls back when the object is missing", async () => {
@@ -56,6 +58,9 @@ describe("blob stores", () => {
           throw new Error("minio down");
         },
         get: async () => {
+          throw new Error("minio down");
+        },
+        has: async () => {
           throw new Error("minio down");
         },
       },

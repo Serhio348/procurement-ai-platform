@@ -1,15 +1,17 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getBlob, isSha256Hex, putBlob } from "./blobs.js";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { blobExists, getBlob, isSha256Hex, putBlob } from "./blobs.js";
 
 export interface BlobStore {
   put: (hash: string, bytes: Uint8Array) => Promise<void>;
   get: (hash: string) => Promise<Uint8Array | undefined>;
+  has: (hash: string) => Promise<boolean>;
 }
 
 export function createDiskBlobStore(directory: string): BlobStore {
   return {
     put: (hash, bytes) => putBlob(directory, hash, bytes),
     get: (hash) => getBlob(directory, hash),
+    has: (hash) => blobExists(directory, hash),
   };
 }
 
@@ -53,11 +55,32 @@ export function createS3BlobStore(options: {
         if (body === undefined) return undefined;
         return new Uint8Array(await body.transformToByteArray());
       } catch (error) {
-        if ((error as { name?: string }).name === "NoSuchKey") return undefined;
+        if (isMissingObject(error)) return undefined;
+        throw error;
+      }
+    },
+    async has(hash) {
+      if (!isSha256Hex(hash)) return false;
+      try {
+        await client.send(
+          new HeadObjectCommand({
+            Bucket: options.bucket,
+            Key: `blobs/${hash}`,
+          }),
+        );
+        return true;
+      } catch (error) {
+        if (isMissingObject(error)) return false;
         throw error;
       }
     },
   };
+}
+
+function isMissingObject(error: unknown): boolean {
+  const name = (error as { name?: string }).name;
+  const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+  return name === "NoSuchKey" || name === "NotFound" || status === 404;
 }
 
 /** Durable object store first, local scratch second. */
@@ -79,6 +102,14 @@ export function createChainedBlobStore(primary: BlobStore, fallback: BlobStore):
         // Serve the local scratch copy when the durable store is unreachable.
       }
       return fallback.get(hash);
+    },
+    async has(hash) {
+      try {
+        if (await primary.has(hash)) return true;
+      } catch {
+        // Durable store unreachable: the disk copy still counts.
+      }
+      return fallback.has(hash);
     },
   };
 }

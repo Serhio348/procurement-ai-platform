@@ -9,6 +9,7 @@ import {
   SpecialistInboxResolveResponse,
   SpecialistIngestProgress,
   SpecialistProcurementCard,
+  SpecialistProcurementExport,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
   SpecialistProfileSuggestResponse,
@@ -148,6 +149,17 @@ export async function fetchProcurement(
     await throwApiError(response, "Не удалось открыть закупку");
   }
   return SpecialistProcurementCard.parse(await response.json());
+}
+
+export async function fetchProcurementExport(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SpecialistProcurementExport> {
+  const response = await fetcher(`/api/procurements/${encodeURIComponent(id)}/export`, withCredentials());
+  if (!response.ok) {
+    await throwApiError(response, "Не удалось подготовить выгрузку");
+  }
+  return SpecialistProcurementExport.parse(await response.json());
 }
 
 export async function searchProcurements(

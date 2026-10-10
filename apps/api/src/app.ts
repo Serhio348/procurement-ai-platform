@@ -26,6 +26,7 @@ import {
   SpecialistTelegramModeWrite,
   SpecialistTelegramStatus,
   SpecialistProcurementCard,
+  SpecialistProcurementExport,
   SpecialistProcurementListQuery,
   SpecialistProcurementListResponse,
   SpecialistProfileListResponse,
@@ -53,6 +54,7 @@ import {
   applySourceCard,
   attachProfileToCard,
   caseMatchesListTab,
+  buildProcurementExport,
   compareSearchQueueNewestFirst,
   slimListedCard,
   bidsDeadlinePassed,
@@ -105,6 +107,7 @@ import type { AuthMailPort } from "./auth/mail.js";
 import { registerAuth } from "./auth/register.js";
 import { profileToSiteSearchQuery } from "./profile-search-query.js";
 import {
+  blobExists,
   contentDisposition,
   contentTypeForName,
   defaultBlobDirectory,
@@ -289,6 +292,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const workspace = (): SpecialistWorkspace => currentCabinet().workspace;
   const logger = options.logger ?? silentLogger;
   const blobDirectory = options.blobDirectory ?? defaultBlobDirectory();
+  const blobIsStored = async (hash: string): Promise<boolean> => {
+    if (!isSha256Hex(hash)) return false;
+    if (options.blobStore !== undefined) return options.blobStore.has(hash);
+    return blobExists(blobDirectory, hash);
+  };
   const searchHits = options.searchHits ?? { search: loadDefaultSearchHits };
   const suggestSearch = options.suggestSearch ?? searchHits;
   const profileSuggest = options.profileSuggest;
@@ -2980,6 +2988,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(404).send({ error: "not_found" });
     }
     return card;
+  });
+
+  /**
+   * Names and text for a folder on the specialist's computer. Bytes stay on
+   * GET /api/documents/:hash so a large file is not packed into this response.
+   */
+  app.get("/api/procurements/:id/export", async (request, reply) => {
+    const params = request.params as { id: string };
+    const card = await resolveCase(params.id);
+    if (card === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const present = new Set<string>();
+    for (const document of card.documents) {
+      if (document.status !== "hashed" || document.hash === undefined) continue;
+      if (await blobIsStored(document.hash)) present.add(document.hash);
+    }
+    return SpecialistProcurementExport.parse(
+      buildProcurementExport(card, (hash) => present.has(hash)),
+    );
   });
 
   app.get("/api/procurements/:id/card", async (request, reply) => {

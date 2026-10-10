@@ -5063,6 +5063,25 @@ describe("specialist API", () => {
     expect(missingBlob.statusCode).toBe(404);
     expect(missing.statusCode).toBe(404);
 
+    const exported = await app.inject({
+      method: "GET",
+      url: "/api/procurements/00000000-0000-4000-8000-000000000301/export",
+    });
+    const manifest = JSON.parse(exported.body) as {
+      folderName: string;
+      readmeName: string;
+      readme: string;
+      files: { name: string; hash: string }[];
+    };
+
+    expect(exported.statusCode).toBe(200);
+    expect(manifest.folderName).toBe("Тест PDF");
+    expect(manifest.readmeName).toBe("карточка.txt");
+    expect(manifest.files).toEqual([{ name: "Техническое задание.pdf", hash }]);
+    expect(manifest.readme).toContain("Номер: auction/301");
+    expect(manifest.readme).toContain("— Потерянный.pdf");
+    expect(manifest.readme).not.toContain(absent);
+
     await app.close();
   });
 });

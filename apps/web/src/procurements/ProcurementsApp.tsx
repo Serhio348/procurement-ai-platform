@@ -24,6 +24,7 @@ import {
 import { ConfirmToast, QUEUE_REJECT_PROMPT, TRASH_MOVE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { RelevanceNote } from "./RelevanceNote.js";
+import { ExportToFolderButton } from "./ExportToFolderButton.js";
 import { TermsEvidenceList } from "./TermsEvidenceList.js";
 
 export function documentHref(document: SpecialistCaseDocument): string {
@@ -702,6 +703,7 @@ export function ProcurementsApp({
           ) : (
             <>
               <h2 id="case-heading">{selected.title}</h2>
+              <ExportToFolderButton procurementId={selected.id} />
               <dl className="detail-meta">
                 <div>
                   <dt>Номер</dt>

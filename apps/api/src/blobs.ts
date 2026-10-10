@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +24,18 @@ export async function putBlob(directory: string, hash: string, bytes: Uint8Array
   if (!isSha256Hex(hash)) throw new Error("blob hash must be sha256 hex");
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, hash), bytes);
+}
+
+/** Existence only. Export must not read a multi-hundred-megabyte blob just to list it. */
+export async function blobExists(directory: string, hash: string): Promise<boolean> {
+  if (!isSha256Hex(hash)) return false;
+  try {
+    await access(path.join(directory, hash));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 export async function getBlob(directory: string, hash: string): Promise<Uint8Array | undefined> {

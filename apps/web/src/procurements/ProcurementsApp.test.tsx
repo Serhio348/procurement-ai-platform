@@ -131,6 +131,7 @@ describe("ProcurementsApp", () => {
     await user.click(screen.getByRole("button", { name: /Бытовой щиток/ }));
 
     expect(screen.getByRole("heading", { level: 2, name: "Бытовой щиток" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выгрузить в папку" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "https://goszakupki.by/auction/view/003" })).toBeTruthy();
     expect(
       screen.getByRole("heading", { level: 2, name: "Бытовой щиток" }).closest("section")?.textContent,

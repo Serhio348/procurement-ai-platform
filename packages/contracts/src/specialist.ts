@@ -709,6 +709,22 @@ export const SpecialistServiceHealth = z.object({
 });
 export type SpecialistServiceHealth = z.infer<typeof SpecialistServiceHealth>;
 
+/** Manifest the console writes into a folder the specialist picked. */
+export const SpecialistProcurementExportFile = z.object({
+  name: z.string().min(1).max(200),
+  hash: Sha256,
+});
+export type SpecialistProcurementExportFile = z.infer<typeof SpecialistProcurementExportFile>;
+
+export const SpecialistProcurementExport = z.object({
+  folderName: z.string().min(1).max(120),
+  sourceProcurementId: z.string().min(1),
+  readmeName: z.literal("карточка.txt"),
+  readme: z.string(),
+  files: z.array(SpecialistProcurementExportFile),
+});
+export type SpecialistProcurementExport = z.infer<typeof SpecialistProcurementExport>;
+
 export const SpecialistLiveRun = z.object({
   capturedAt: IsoDateTime,
   profileName: z.string().min(1),

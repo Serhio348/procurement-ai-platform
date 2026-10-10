@@ -58,7 +58,11 @@ describe("createProcurementDocumentIngest", () => {
     await putBlob(blobDirectory, hash, bytes);
     const callTool = vi.fn<McpToolCaller["callTool"]>().mockImplementation(fakeCaller(hash));
     const progress = createIngestProgressHub();
-    const blobStore = { put: vi.fn(async () => undefined), get: vi.fn(async () => undefined) };
+    const blobStore = {
+      put: vi.fn(async () => undefined),
+      get: vi.fn(async () => undefined),
+      has: vi.fn(async () => false),
+    };
     const port = createProcurementDocumentIngest({
       caller: { callTool },
       blobDirectory,

@@ -19,6 +19,7 @@ import { fetchProcurementCard } from "../api/specialist.js";
 import { ConfirmToast, TRASH_PURGE_PROMPT } from "../shell/ConfirmToast.js";
 import { Shell } from "../shell/Shell.js";
 import { DocumentNameLink, ingestProgressCaption, officeDownloadFrame, triageActionClass } from "./ProcurementsApp.js";
+import { ExportToFolderButton } from "./ExportToFolderButton.js";
 import { RelevanceNote } from "./RelevanceNote.js";
 import { TermsEvidenceList } from "./TermsEvidenceList.js";
 
@@ -408,6 +409,7 @@ export function ProcurementDetailApp({
           >
             Открыть на goszakupki.by
           </a>
+          <ExportToFolderButton procurementId={stored.id} />
           {loading ? (
             <span className="procurement-detail-loading">
               {stored.triage === "participate" && reindex !== undefined

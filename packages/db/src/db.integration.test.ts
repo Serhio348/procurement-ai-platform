@@ -411,6 +411,7 @@ integration("PostgreSQL migrations and invariants", () => {
       profileId: "00000000-0000-4000-8000-000000000974",
       termKey: "наруж освеще",
       label: "наружного освещения",
+      phrases: [] as string[],
       rejectCount: 5,
       examples: ["Ремонт наружного освещения"],
       state: "open" as const,

@@ -18,6 +18,7 @@ describe("InboxApp assistant tab", () => {
     profileName: "Сети 0,4 кВ",
     termKey: "наруж освеще",
     label: "наружного освещения",
+    phrases: [] as string[],
     rejectCount: 5,
     examples: ["Ремонт наружного освещения парка"],
     state: "open" as const,

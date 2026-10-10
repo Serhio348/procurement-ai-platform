@@ -9,6 +9,7 @@ import {
   createMemoryDecisionMemory,
   type DecisionMemoryPort,
 } from "./decision-memory.js";
+import type { AssistantDirectionPort } from "./assistant-directions.js";
 import type { TelegramNotifier } from "./telegram.js";
 
 type Api = Awaited<ReturnType<typeof buildSpecialistApi>>;
@@ -63,7 +64,10 @@ function telegramStub(): TelegramNotifier & { suggestions: string[] } {
   };
 }
 
-async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemory()) {
+async function twoCabinets(
+  memory: DecisionMemoryPort = createMemoryDecisionMemory(),
+  directions?: AssistantDirectionPort,
+) {
   const directory = createMemoryAuthDirectory();
   await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
   const cabinets = createMemoryCabinetRegistry();
@@ -78,6 +82,7 @@ async function twoCabinets(memory: DecisionMemoryPort = createMemoryDecisionMemo
       suggestions: createMemoryAssistantSuggestions(),
       enabledFor: (workspaceId) => pilot.has(workspaceId),
     },
+    ...(directions === undefined ? {} : { assistantDirections: directions }),
   });
   const adminIn = await app.inject({
     method: "POST",
@@ -431,6 +436,92 @@ describe("assistant rule suggestions", () => {
       expect(await suggestions(specialist)).toEqual([]);
       expect((await answer(specialist, offered[0]!.id, "accept")).statusCode).toBe(404);
       expect(await suggestions(admin)).toHaveLength(1);
+    });
+  });
+});
+
+describe("assistant direction suggestions", () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const waitForSuggestions = async (
+    who: Member,
+    suggestions: (who: Member) => Promise<Array<{ id: string }>>,
+  ) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const items = await suggestions(who);
+      if (items.length > 0) return items;
+      await sleep(20);
+    }
+    return [];
+  };
+
+  it("offers the direction the model named when no term explains the rejects", async () => {
+    const directionPort: AssistantDirectionPort = {
+      analyze: async () => [
+        { name: "тепловые пункты", phrases: ["ЦТП", "тепловой"] },
+        { name: "поверка", phrases: ["поверка приборов"] },
+      ],
+    };
+    const { app, admin, decide, suggestions, answer, profileOf } = await twoCabinets(
+      createMemoryDecisionMemory(),
+      directionPort,
+    );
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      // Each reject is worded differently — no term reaches five, so the
+      // code signal stays silent and the model's direction gets offered.
+      for (const title of [
+        "Закрытие ЦТП-10 с устройством ИТП",
+        "Реконструкция теплового пункта №5",
+        "Замена оборудования ИТП-4",
+        "Модернизация ЦТП-8",
+        "Прокладка тепловых сетей микрорайона",
+        "Демонтаж ЦТП-3",
+      ]) {
+        await decide(admin, title, "reject");
+      }
+
+      const offered = await waitForSuggestions(admin, suggestions);
+      expect(offered).toEqual([
+        expect.objectContaining({
+          label: "тепловые пункты",
+          phrases: ["ЦТП", "тепловой"],
+        }),
+      ]);
+
+      const accepted = await answer(admin, offered[0]!.id, "accept");
+      expect(accepted.statusCode).toBe(200);
+      expect((await profileOf(admin)).excludeKeywords).toEqual(
+        expect.arrayContaining(["ЦТП", "тепловой"]),
+      );
+    });
+  });
+
+  it("stays silent when the model's phrases hit taken cases or repeats itself", async () => {
+    const directionPort: AssistantDirectionPort = {
+      analyze: async () => [
+        { name: "сети", phrases: ["сетей"] },
+        { name: "мусор", phrases: ["не встречается нигде"] },
+      ],
+    };
+    const { app, admin, decide, suggestions, profileOf } = await twoCabinets(
+      createMemoryDecisionMemory(),
+      directionPort,
+    );
+    await closing(app, async () => {
+      for (const title of TAKEN) await decide(admin, title, "monitor");
+      for (const title of [
+        "Закрытие ЦТП-10",
+        "Реконструкция теплового пункта №5",
+        "Замена оборудования ИТП-4",
+        "Модернизация ЦТП-8",
+        "Прокладка тепловых сетей микрорайона",
+        "Демонтаж ЦТП-3",
+      ]) {
+        await decide(admin, title, "reject");
+      }
+      await sleep(100);
+      expect(await suggestions(admin)).toEqual([]);
+      expect((await profileOf(admin)).excludeKeywords).toEqual([]);
     });
   });
 });

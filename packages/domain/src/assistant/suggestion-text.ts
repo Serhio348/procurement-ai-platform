@@ -10,7 +10,7 @@ function procurementsWord(count: number): string {
 
 /** The same wording in the console and in Telegram. */
 export function assistantSuggestionText(
-  suggestion: Pick<AssistantSuggestionEntry, "label" | "rejectCount" | "profileName">,
+  suggestion: Pick<AssistantSuggestionEntry, "label" | "rejectCount" | "profileName" | "phrases">,
 ): {
   title: string;
   body: string;
@@ -29,7 +29,10 @@ export function assistantSuggestionText(
     question: `Не показывать закупки этого направления в профиле «${profile}»?`,
     acceptLabel: "Да, не показывать",
     dismissLabel: "Нет, оставить",
-    acceptEffect: `«${suggestion.label}» добавится в исключения профиля. Убрать можно в редакторе профиля.`,
+    acceptEffect:
+      suggestion.phrases.length > 0
+        ? `В исключения добавятся: ${suggestion.phrases.map((phrase) => `«${phrase}»`).join(", ")}.`
+        : `«${suggestion.label}» добавится в исключения профиля. Убрать можно в редакторе профиля.`,
     dismissEffect: `Закупки этого направления остаются в поиске.`,
   };
 }

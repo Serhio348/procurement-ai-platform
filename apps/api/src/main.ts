@@ -18,6 +18,7 @@ import { openSpecialistPersistence } from "./persist.js";
 import { connectProcurementMcp } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
 import { createProfileSuggestFromEnv } from "./profile-suggest.js";
+import { createAssistantDirectionFromEnv } from "./assistant-directions.js";
 import { createSearchClassifierFromEnv } from "./search-classifier.js";
 import { createSearchIntentFromEnv } from "./search-intent.js";
 import { createProcurementSearchReview } from "./search-review.js";
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
         });
   const commercialReader = createCommercialReaderFromEnv(process.env);
   const profileSuggest = createProfileSuggestFromEnv(process.env);
+  const assistantDirections = createAssistantDirectionFromEnv(process.env);
   // The listing probe answers on the interactive lane — a specialist waiting
   // on «Заполнить профиль» must not queue behind background search/ingest.
   const suggestSearch =
@@ -266,6 +268,9 @@ async function main(): Promise<void> {
             suggestions: createPostgresAssistantSuggestionStore(persistence.db),
             enabledFor: assistantPilotFromEnv(process.env["ASSISTANT_WORKSPACE_IDS"]),
           },
+          ...(assistantDirections === undefined
+            ? {}
+            : { assistantDirections }),
         }),
     ...(watchLimit === undefined ? {} : { watchLimit }),
     ...(mcp === undefined

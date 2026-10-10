@@ -45,6 +45,12 @@ export const AssistantSuggestion = z.object({
   profileId: z.string().uuid(),
   termKey: z.string().min(1),
   label: z.string().min(1),
+  /**
+   * Direction offers carry the validated exclusion phrases; «Принять»
+   * writes all of them. Empty: the label itself is the exclusion, as in
+   * the term-only offers.
+   */
+  phrases: z.array(z.string().min(1)).max(10).default([]),
   rejectCount: z.number().int().nonnegative(),
   examples: z.array(z.string().min(1)).max(5).default([]),
   state: AssistantSuggestionState,

@@ -85,6 +85,10 @@ import {
   nextSuggestionTerm,
   profileTermTable,
   rejectSignals,
+  directionTermKey,
+  procurementContexts,
+  validateAssistantDirections,
+  REJECT_SIGNAL_THRESHOLDS,
   scoreIntentCard,
   selectRelevantSearchCards,
   shouldRunDiscovery,
@@ -133,6 +137,7 @@ import type { BlobStore } from "./object-store.js";
 import type { ReviewBudget, SpecialistReviewPort } from "./search-review.js";
 import type { ProfileSuggestPort } from "./profile-suggest.js";
 import type { SearchIntentPort } from "./search-intent.js";
+import type { AssistantDirectionPort } from "./assistant-directions.js";
 import type { TelegramNotifier } from "./telegram.js";
 import { decisionMemoryEntry, type CabinetAssistantOptions } from "./decision-memory.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -245,6 +250,11 @@ export interface BuildApiOptions {
   telegram?: TelegramNotifier;
   /** Cabinet assistant pilot: background decision memory. Absent: off. */
   assistant?: CabinetAssistantOptions;
+  /**
+   * Model look at rejected directions when no single term explains them.
+   * Absent: the assistant stays with code-only term signals.
+   */
+  assistantDirections?: AssistantDirectionPort;
   authCookieSecure?: boolean;
   authPublicUrl?: string;
   internalApiToken?: string;
@@ -2683,7 +2693,15 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       rejectSignals(table),
       offered.map((item) => item.termKey),
     );
-    if (term === undefined) return;
+    if (term === undefined) {
+      // The rejects share no single term — maybe a direction. The model
+      // call is fire-and-forget so «Не нужно» never waits on it.
+      void offerDirectionSuggestion(
+        profileId,
+        offered.map((item) => item.termKey),
+      ).catch(() => undefined);
+      return;
+    }
     const suggestion = AssistantSuggestion.parse({
       id: randomUUID(),
       profileId,
@@ -2698,6 +2716,106 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     logger.info("Assistant rule offered", { profileId, rejectCount: term.rejectCount });
     // The choice lives in the console inbox. A Telegram copy stays after the
     // specialist has already answered, so it is not sent.
+  };
+
+  /**
+   * Rejects per profile the model last saw; the analysis runs again only
+   * after enough new refusals, so a quiet profile never pays for it.
+   */
+  const directionAnalyzedAt = new Map<string, number>();
+  const DIRECTION_MIN_REJECTS = 6;
+  const DIRECTION_MIN_NEW_REJECTS = 3;
+
+  /**
+   * Term signals explain a repeated word; a direction is what remains —
+   * rejects that share a theme but not a term. The model names the theme
+   * and the phrases it is called by; code validates every phrase against
+   * the same memory before offering it. Model output never reaches the
+   * profile unchecked.
+   */
+  const offerDirectionSuggestion = async (
+    profileId: string,
+    offeredTermKeys: readonly string[],
+  ): Promise<void> => {
+    const port = options.assistantDirections;
+    const workspaceId = currentCabinet().workspaceId;
+    const assistant = assistantFor(workspaceId);
+    const profile = workspace().findProfile(profileId);
+    if (port === undefined || assistant === undefined || profile === undefined) return;
+    try {
+      const entries = await assistant.memory.list(workspaceId);
+      const table = profileTermTable(entries, profile);
+      if (table.acceptCount < REJECT_SIGNAL_THRESHOLDS.minAccepts) return;
+      const gateKey = `${workspaceId}:${profileId}`;
+      const analyzedAt = directionAnalyzedAt.get(gateKey);
+      if (
+        analyzedAt === undefined
+          ? table.rejectCount < DIRECTION_MIN_REJECTS
+          : table.rejectCount - analyzedAt < DIRECTION_MIN_NEW_REJECTS
+      ) {
+        return;
+      }
+      directionAnalyzedAt.set(gateKey, table.rejectCount);
+      const own = entries.filter((entry) => entry.profileIds.includes(profile.id));
+      const rejected = own
+        .filter((entry) => entry.kind === "reject")
+        .map((entry) => ({
+          title: entry.title,
+          subject: procurementContexts(entry).join("; "),
+        }))
+        .slice(0, 40);
+      const accepted = own
+        .filter((entry) => entry.kind !== "reject")
+        .map((entry) => ({
+          title: entry.title,
+          subject: procurementContexts(entry).join("; "),
+        }))
+        .slice(0, 40);
+      const directions = await port.analyze({
+        profileName: profileDisplayName(profile),
+        keywords: profile.keywords,
+        excludeKeywords: profile.excludeKeywords,
+        rejected,
+        accepted,
+      });
+      const direction = validateAssistantDirections({
+        directions,
+        rejected,
+        accepted,
+        keywords: profile.keywords,
+        excludeKeywords: profile.excludeKeywords,
+        offeredTermKeys,
+      })[0];
+      if (direction === undefined) return;
+      // The model call took a while: a term offer may have opened since.
+      const open = (await assistant.suggestions.list(workspaceId)).some(
+        (item) => item.profileId === profileId && item.state === "open",
+      );
+      if (open) return;
+      const suggestion = AssistantSuggestion.parse({
+        id: randomUUID(),
+        profileId,
+        termKey: directionTermKey(direction.phrases[0] ?? direction.name),
+        label: direction.name,
+        phrases: direction.phrases,
+        rejectCount: direction.rejectCount,
+        examples: direction.examples,
+        state: "open",
+        createdAt: clock(),
+      });
+      if (!(await assistant.suggestions.offer(workspaceId, suggestion))) return;
+      logger.info("Assistant direction offered", {
+        profileId,
+        direction: direction.name,
+        phrases: direction.phrases.length,
+        rejectCount: direction.rejectCount,
+      });
+    } catch (error) {
+      logger.warn("Assistant direction analysis failed", {
+        profileId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   const openSuggestions = async (): Promise<ReturnType<typeof AssistantSuggestionEntry.parse>[]> => {
@@ -2727,16 +2845,23 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (suggestion === undefined) return "not_found";
     const profile = workspace().findProfile(suggestion.profileId);
     if (action === "accept" && profile !== undefined) {
-      const known = profile.excludeKeywords.some(
-        (item) => item.trim().toLocaleLowerCase("ru-BY") === suggestion.label.toLocaleLowerCase("ru-BY"),
+      const exclusions = suggestion.phrases.length > 0 ? suggestion.phrases : [suggestion.label];
+      const fresh = exclusions.filter(
+        (phrase) =>
+          !profile.excludeKeywords.some(
+            (item) =>
+              item.trim().toLocaleLowerCase("ru-BY") === phrase.toLocaleLowerCase("ru-BY"),
+          ),
       );
-      if (!known) {
-        if (profile.excludeKeywords.length >= PROFILE_EXCLUSION_LIMIT) return "exclusions_full";
+      if (fresh.length > 0) {
+        if (profile.excludeKeywords.length + fresh.length > PROFILE_EXCLUSION_LIMIT) {
+          return "exclusions_full";
+        }
         workspace().replaceProfileById(
           profile.id,
           SpecialistProfileWrite.parse({
             ...profile,
-            excludeKeywords: [...profile.excludeKeywords, suggestion.label],
+            excludeKeywords: [...profile.excludeKeywords, ...fresh],
           }),
         );
         await persistWorkspaceOnly();

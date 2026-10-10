@@ -1069,6 +1069,7 @@ export const workspaceAssistantSuggestions = pgTable(
     profileId: uuid("profile_id").notNull(),
     termKey: varchar("term_key", { length: 256 }).notNull(),
     label: varchar("label", { length: 256 }).notNull(),
+    phrases: jsonb("phrases").$type<string[]>().notNull().default([]),
     rejectCount: integer("reject_count").notNull(),
     examples: jsonb("examples").$type<string[]>().notNull().default([]),
     state: varchar("state", { length: 16 }).notNull().default("open"),

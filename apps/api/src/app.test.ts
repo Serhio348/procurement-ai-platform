@@ -234,6 +234,40 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("rejects the procurement from the inbox the same way as Не нужно on the card", async () => {
+    const catalog = new SpecialistCatalog();
+    const stored = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000401",
+      title: "КТПБ 400",
+      status: "announced",
+      statusLabel: "объявлена",
+      url: "https://goszakupki.by/auction/view/401",
+      sourceProcurementId: "auction/401",
+      foundAs: "match",
+      live: true,
+    });
+    catalog.upsertCase(stored);
+    catalog.record(inboxItemFromFoundCard(stored, "2026-09-06T12:00:00.000Z"));
+    const app = await buildSpecialistApi({ catalog });
+    const listed = await app.inject({ method: "GET", url: "/api/inbox" });
+    const id = (JSON.parse(listed.body).items as Array<{ id: string }>)[0]?.id;
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/inbox/${id ?? ""}/resolve`,
+      payload: { action: "reject" },
+    });
+    const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+    const card = await app.inject({ method: "GET", url: `/api/procurements/${stored.id}` });
+
+    expect(resolved.statusCode).toBe(200);
+    expect(JSON.parse(resolved.body).card.triage).toBe("reject");
+    expect(JSON.parse(inbox.body).items).toEqual([]);
+    expect(JSON.parse(card.body).triage).toBe("reject");
+
+    await app.close();
+  });
+
   it("deletes an inbox row and does not invent a procurement case from it", async () => {
     const app = await buildSpecialistApi({ catalog: await loadFixtureCatalog() });
     const listed = await app.inject({ method: "GET", url: "/api/inbox" });

@@ -97,7 +97,7 @@ export type InboxFixture = z.infer<typeof InboxFixture>;
 export const SpecialistInboxTopic = z.enum(["new_found", "documents", "card_update", "review"]);
 export type SpecialistInboxTopic = z.infer<typeof SpecialistInboxTopic>;
 
-export const SpecialistInboxAction = z.enum(["open", "refresh", "documents", "dismiss"]);
+export const SpecialistInboxAction = z.enum(["open", "refresh", "documents", "dismiss", "reject"]);
 export type SpecialistInboxAction = z.infer<typeof SpecialistInboxAction>;
 
 export const SpecialistInboxEntry = z.object({

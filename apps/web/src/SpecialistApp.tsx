@@ -651,7 +651,20 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                     resolve: async (id, action) => {
                       const result = await resolveInbox(id, action);
                       applyInboxItems(result.items);
-                      if (result.card !== undefined) showInSearchPane(result.card);
+                      if (action === "reject" && result.card !== undefined) {
+                        const rejected = result.card;
+                        setProcurements((current) =>
+                          current.filter(
+                            (item) =>
+                              item.id !== rejected.id &&
+                              item.sourceProcurementId !== rejected.sourceProcurementId,
+                          ),
+                        );
+                        pushNotice("Корзина", `«${rejected.title}» — перемещена в корзину.`);
+                        refreshSuggestions();
+                      } else if (result.card !== undefined) {
+                        showInSearchPane(result.card);
+                      }
                       if (action === "documents" && result.card !== undefined) {
                         // The download runs as a background ingest job: the
                         // progress poll tracks it and the detail page shows

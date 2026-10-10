@@ -310,6 +310,14 @@ export function InboxPage(props: InboxPageProps) {
               ) : null}
               <button
                 type="button"
+                className="search-profile is-pressed-reject"
+                disabled={props.busyId === selected.id}
+                onClick={() => props.onResolve?.(selected.id, "reject")}
+              >
+                Не нужно
+              </button>
+              <button
+                type="button"
                 className="admin-danger"
                 disabled={props.busyId === selected.id}
                 onClick={() => props.onResolve?.(selected.id, "dismiss")}

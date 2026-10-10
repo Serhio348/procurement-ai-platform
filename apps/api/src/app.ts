@@ -53,6 +53,7 @@ import {
   applySourceCard,
   attachProfileToCard,
   caseMatchesListTab,
+  compareSearchQueueNewestFirst,
   slimListedCard,
   bidsDeadlinePassed,
   deadlineWithin,
@@ -603,6 +604,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         seen.add(card.sourceProcurementId);
         items.push(slimListedCard(card));
       }
+      items.sort(compareSearchQueueNewestFirst);
       return SpecialistProcurementListResponse.parse({
         items: items.slice(offset, offset + limit),
         total: items.length,
@@ -2418,6 +2420,27 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }
 
     let card = await resolveCase(item.change.procurementId);
+    // «Не нужно» is the card decision, not a cleared notification: the case
+    // leaves search for the trash, and every inbox row of that case goes with it.
+    if (action === "reject") {
+      if (card === undefined) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      const rejected = await applyTriageDecision(card.id, "reject");
+      if (rejected === undefined) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      logger.info("Specialist inbox resolved", {
+        changeId: params.id,
+        action,
+        topic,
+      });
+      return SpecialistInboxResolveResponse.parse({
+        items: presentInbox().items,
+        documents: [],
+        card: rejected,
+      });
+    }
     // Resolving a row is navigation, not a decision: the verdict, triage
     // and profile links stay untouched. The card joins the search queue
     // of the profile(s) that found it — never whichever profile happens

@@ -126,8 +126,9 @@ describe("InboxApp", () => {
     );
 
     expect(screen.getByRole("button", { name: "Открыть карточку" })).toHaveProperty("disabled", false);
-    await user.click(screen.getByRole("button", { name: "Открыть карточку" }));
-    expect(resolved[0]?.startsWith("open:")).toBe(true);
+    expect(screen.getByRole("button", { name: "Не нужно" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Не нужно" }));
+    expect(resolved[0]?.startsWith("reject:")).toBe(true);
   });
 
   it("splits new procurements from changes on watched cards", async () => {

@@ -12,6 +12,7 @@ import type {
 } from "@procurement/contracts";
 import {
   cardProcedureKindLabel,
+  compareSearchQueueNewestFirst,
   ingestFileWeight,
   isListingPlaceholder,
   isDismissedTriage,
@@ -288,7 +289,7 @@ export function ProcurementsApp({
   const chosenProfile = profiles.find((item) => item.id === chosenProfileId);
   const items = uniqueBySource(
     catalogItems.filter((item) => belongsToChosenProfile(item, chosenProfileId)),
-  );
+  ).sort(compareSearchQueueNewestFirst);
   // An inbox open can aim at a card the search queue hides on purpose — a
   // review candidate that already carries a triage mark, or a duplicate the
   // queue deduped away. The detail pane still opens that exact card.

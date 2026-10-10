@@ -1,4 +1,4 @@
-import type { SpecialistProcurementCard } from "@procurement/contracts";
+import type { PlatformInstant, SpecialistProcurementCard } from "@procurement/contracts";
 import { isDismissedTriage } from "./triage.js";
 
 export const SPECIALIST_CASE_LIST_TABS = [
@@ -103,6 +103,34 @@ export function pageListedCases(
  * Tile lists do not need extracts, files or the raw platform dump. The detail
  * route loads the full row by id.
  */
+function instantMillis(value: PlatformInstant | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Date.parse(value.precision === "date" ? `${value.date}T12:00:00Z` : value.at);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function processedMillis(card: SpecialistProcurementCard): number {
+  const fetched = Date.parse(card.sourceCard?.fetchedAt ?? "");
+  return Number.isFinite(fetched) ? fetched : 0;
+}
+
+/**
+ * «Закупки» is an append-only queue, so cards land in scoring order.
+ * The specialist sees the newest posting first. A card that never received
+ * a posting date uses the moment search processed it.
+ */
+export function compareSearchQueueNewestFirst(
+  left: SpecialistProcurementCard,
+  right: SpecialistProcurementCard,
+): number {
+  const leftAt = instantMillis(left.sourceCard?.publishedAt) ?? processedMillis(left);
+  const rightAt = instantMillis(right.sourceCard?.publishedAt) ?? processedMillis(right);
+  if (rightAt !== leftAt) return rightAt - leftAt;
+  const byProcessed = processedMillis(right) - processedMillis(left);
+  if (byProcessed !== 0) return byProcessed;
+  return 0;
+}
+
 export function slimListedCard(card: SpecialistProcurementCard): SpecialistProcurementCard {
   const listed: SpecialistProcurementCard = {
     ...card,

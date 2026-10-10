@@ -1,6 +1,12 @@
 import { SpecialistProcurementCard } from "@procurement/contracts";
 import { describe, expect, it } from "vitest";
-import { countCabinetCases, isConsoleListedCase, pageListedCases, slimListedCard } from "./case-list.js";
+import {
+  compareSearchQueueNewestFirst,
+  countCabinetCases,
+  isConsoleListedCase,
+  pageListedCases,
+  slimListedCard,
+} from "./case-list.js";
 
 function card(input: {
   id: string;
@@ -133,6 +139,62 @@ describe("pageListedCases", () => {
       archiveCount: 0,
       trashCount: 1,
     });
+  });
+
+  it("orders the search queue by posting date, newest first", () => {
+    const older = SpecialistProcurementCard.parse({
+      ...card({
+        id: "00000000-0000-4000-8000-000000000011",
+        sourceProcurementId: "auction/old",
+        foundAs: "match",
+        live: true,
+      }),
+      sourceCard: {
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/old",
+        url: "https://goszakupki.by/auction/old",
+        title: "старая",
+        fetchedAt: "2026-10-10T16:00:00.000Z",
+        publishedAt: { precision: "date", date: "2026-10-01", timeZone: "Europe/Minsk" },
+      },
+    });
+    const newer = SpecialistProcurementCard.parse({
+      ...card({
+        id: "00000000-0000-4000-8000-000000000012",
+        sourceProcurementId: "auction/new",
+        foundAs: "match",
+        live: true,
+      }),
+      sourceCard: {
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/new",
+        url: "https://goszakupki.by/auction/new",
+        title: "свежая",
+        fetchedAt: "2026-10-09T16:00:00.000Z",
+        publishedAt: { precision: "date", date: "2026-10-10", timeZone: "Europe/Minsk" },
+      },
+    });
+    const processedOnly = SpecialistProcurementCard.parse({
+      ...card({
+        id: "00000000-0000-4000-8000-000000000013",
+        sourceProcurementId: "auction/processed",
+        foundAs: "match",
+        live: true,
+      }),
+      sourceCard: {
+        sourceId: "goszakupki_by",
+        sourceProcurementId: "auction/processed",
+        url: "https://goszakupki.by/auction/processed",
+        title: "без даты размещения",
+        fetchedAt: "2026-10-08T16:00:00.000Z",
+      },
+    });
+    const ordered = [older, processedOnly, newer].sort(compareSearchQueueNewestFirst);
+    expect(ordered.map((item) => item.sourceProcurementId)).toEqual([
+      "auction/new",
+      "auction/processed",
+      "auction/old",
+    ]);
   });
 
   it("counts mine, archive and trash without mixing tabs", () => {

@@ -526,7 +526,9 @@ describe("assistant direction suggestions", () => {
   });
 
   it("feeds the model the freshest rejects when memory outgrows the sample", async () => {
-    const captured: { rejected: { title: string }[] } = { rejected: [] };
+    const captured: { rejected: readonly { title: string; subject: string }[] } = {
+      rejected: [],
+    };
     const directionPort: AssistantDirectionPort = {
       analyze: async (input) => {
         captured.rejected = input.rejected;

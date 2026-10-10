@@ -20,6 +20,16 @@ export const REJECT_SIGNAL_THRESHOLDS = {
   minAccepts: 3,
 } as const;
 
+/**
+ * Single words are offered only when they name the subject, not describe
+ * it. Adjectival stems («государствен», «наружн», «основн», «областн») are
+ * modifiers, so a stem ending in a typical adjective tail is never a
+ * direction on its own — it may still be offered inside a phrase. Subject
+ * nouns («картридж», «экскаватор») and codes («цтп», «скуд») end
+ * differently and still qualify.
+ */
+const ADJECTIVE_STEM = /(?:н|ск|ов|ев)$/u;
+
 const EXAMPLE_LIMIT = 3;
 const SEGMENT_BREAK = /[.,;:!?()[\]{}«»"“”„\n]+/u;
 const QUOTED_PART = /«([^»]+)»|"([^"]+)"|“([^”]+)”/gu;
@@ -189,7 +199,10 @@ export function rejectSignals(
 ): AssistantTermStat[] {
   if (table.acceptCount < thresholds.minAccepts) return [];
   const candidates = table.terms.filter(
-    (term) => term.acceptCount === 0 && term.rejectCount >= thresholds.minRejects,
+    (term) =>
+      term.acceptCount === 0 &&
+      term.rejectCount >= thresholds.minRejects &&
+      isDirectionTerm(term),
   );
   const pairs = candidates.filter((term) => term.key.includes(" "));
   return candidates.filter((term) => {
@@ -215,6 +228,17 @@ export function nextSuggestionTerm(
     const stems = signal.key.split(" ");
     return !offered.some((previous) => overlapsExclusion(stems, previous));
   });
+}
+
+/**
+ * What the specialist rejects is a direction of purchases, not a word. A
+ * phrase («наружного освещения») already reads as one. A bare word
+ * qualifies only when it is the subject noun — «картридж», «экскаватор»,
+ * «поверка» — while modifiers («государственного») are grammar, not a
+ * direction, and are never offered alone.
+ */
+function isDirectionTerm(term: AssistantTermStat): boolean {
+  return term.key.includes(" ") || !ADJECTIVE_STEM.test(term.key);
 }
 
 function isUnigramTerm(word: TokenizedWord): boolean {

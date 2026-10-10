@@ -25,11 +25,11 @@ export function assistantSuggestionText(
     title: `Помощник: профиль «${profile}»`,
     body:
       `Вы отклонили ${suggestion.rejectCount} ${procurementsWord(suggestion.rejectCount)} ` +
-      `с предметом «${suggestion.label}» и не взяли ни одной.`,
-    question: `Не показывать такие закупки в профиле «${profile}»?`,
+      `по направлению «${suggestion.label}» и не взяли ни одной.`,
+    question: `Не показывать закупки этого направления в профиле «${profile}»?`,
     acceptLabel: "Да, не показывать",
     dismissLabel: "Нет, оставить",
     acceptEffect: `«${suggestion.label}» добавится в исключения профиля. Убрать можно в редакторе профиля.`,
-    dismissEffect: `Закупки с предметом «${suggestion.label}» остаются в поиске.`,
+    dismissEffect: `Закупки этого направления остаются в поиске.`,
   };
 }

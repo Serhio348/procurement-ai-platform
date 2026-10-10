@@ -47,11 +47,13 @@ describe("InboxApp assistant tab", () => {
     );
     await user.click(screen.getByRole("tab", { name: "Помощник (1)" }));
     expect(
-      screen.getAllByText("Вы отклонили 5 закупок с предметом «наружного освещения» и не взяли ни одной.")
+      screen.getAllByText("Вы отклонили 5 закупок по направлению «наружного освещения» и не взяли ни одной.")
         .length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("Ремонт наружного освещения парка")).toBeTruthy();
-    expect(screen.getByText("Не показывать такие закупки в профиле «Сети 0,4 кВ»?")).toBeTruthy();
+    expect(
+      screen.getByText("Не показывать закупки этого направления в профиле «Сети 0,4 кВ»?"),
+    ).toBeTruthy();
     expect(screen.getByText(/остаются в поиске/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Да, не показывать" }));

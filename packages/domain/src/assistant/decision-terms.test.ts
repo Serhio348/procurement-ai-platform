@@ -148,6 +148,42 @@ describe("profile term table", () => {
     expect(table.terms.some((term) => term.key === "сет")).toBe(false);
   });
 
+  it("never offers a bare modifier — a repeated adjective is grammar, not a direction", () => {
+    const rejects = [
+      "Оборудование для государственного учреждения",
+      "Поставка мебели в государственную школу",
+      "Закупка для государственной поликлиники",
+      "Ремонт государственного архива",
+      "Обслуживание государственного предприятия",
+    ].map((title) => decision("reject", title));
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], profile));
+    expect(signals).toEqual([]);
+  });
+
+  it("offers a subject noun that repeats across differently worded rejects", () => {
+    const rejects = [
+      "Заправка картриджей",
+      "Поставка картриджей HP",
+      "Картриджи для МФУ",
+      "Обмен картриджей",
+      "Ремонт картриджей",
+    ].map((title) => decision("reject", title));
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], profile));
+    expect(signals.some((term) => term.key === stemWord("картриджей"))).toBe(true);
+  });
+
+  it("offers a code direction shared by rejects with different numbers", () => {
+    const rejects = [
+      "Закрытие ЦТП-10 с устройством ИТП",
+      "Реконструкция ЦТП-5 в г. Минске",
+      "Модернизация ЦТП-12",
+      "Замена оборудования ЦТП-8",
+      "Демонтаж ЦТП-3",
+    ].map((title) => decision("reject", title));
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], profile));
+    expect(signals.some((term) => term.key === "цтп")).toBe(true);
+  });
+
   it("does not offer a term again, nor a narrower or wider form of it", () => {
     const table = profileTermTable([...taken, ...lightingRejects], profile);
     const signals = rejectSignals(table);

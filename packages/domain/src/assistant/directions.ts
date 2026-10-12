@@ -30,6 +30,26 @@ export interface ValidatedAssistantDirection {
   examples: string[];
 }
 
+/**
+ * One procurement's identity markers: «№432» object numbers and quoted
+ * object names. Everything from the first marker on is the object tail —
+ * an exclusion written from it would hide that single object, not the
+ * direction.
+ */
+const OBJECT_TAIL = /№\s*\d|[«"„]/u;
+
+/**
+ * The reusable part of a direction phrase. «Реконструкция ВЛ 330 кВ №432
+ * «ГРЭС-20 – Мирадино»» is one object's name; «Реконструкция ВЛ 330 кВ»
+ * is the direction. A phrase with no marker is kept whole; a phrase that
+ * is only an identifier trims to nothing and dies.
+ */
+export function reusableDirectionPhrase(phrase: string): string {
+  const cut = phrase.search(OBJECT_TAIL);
+  const reusable = cut === -1 ? phrase : phrase.slice(0, cut);
+  return reusable.replace(/[\s,;.:–—-]+$/u, "").trim();
+}
+
 /** A direction must explain at least two different rejects to be one. */
 const MIN_PHRASE_REJECTS = 2;
 const PHRASE_LIMIT = 4;
@@ -90,7 +110,9 @@ export function validateAssistantDirections(input: {
   for (const direction of input.directions) {
     const covered = new Set<number>();
     const phrases: string[] = [];
-    for (const phrase of direction.phrases) {
+    for (const rawPhrase of direction.phrases) {
+      const phrase = reusableDirectionPhrase(rawPhrase);
+      if (phrase.length === 0 || phrases.includes(phrase)) continue;
       const stems = tokenizeStems(phrase);
       if (stems.length === 0) continue;
       if (stems.every((stem) => keywordStems.has(stem))) continue;
@@ -154,6 +176,7 @@ export const ASSISTANT_DIRECTION_PROMPT = [
   "name — короткое название направления по-русски (например «тепловые пункты», «пожарная сигнализация»).",
   "phrases — 1-4 фразы, которыми эти закупки реально названы в предметах: подстроки из rejected, не пересказ.",
   "Фраза обязана встречаться минимум в двух предметах rejected и ни в одном accepted.",
+  "Фраза должна подходить другим закупкам той же темы: без номеров объектов (№…), без названий объектов в кавычках, без адресов — только общая часть («реконструкция ВЛ 330 кВ», а не «Реконструкция ВЛ 330 кВ №432 «ГРЭС-20 – Мирадино»»).",
   "Не используй общие слова вместо направления («работы», «объект», «государственный», «текущий»).",
   "Не придумывай направление из одного предмета и не объединяй разные темы в одну.",
   "Верни только один JSON-объект без markdown:",

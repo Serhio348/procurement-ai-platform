@@ -101,6 +101,46 @@ describe("validate assistant directions", () => {
     expect(validated).toEqual([]);
   });
 
+  it("trims a one-object tail — the exclusion names the direction, not the object", () => {
+    const rejects = [
+      subject(
+        "Демонтаж и монтаж железобетонных опор в количестве 9 шт. по объекту «Реконструкция ВЛ 330 кВ №432 «ГРЭС-20 – Мирадино»»",
+      ),
+      subject(
+        "Протяжка провода, грозотроса, ОКГТ, демонтаж в пролетах опор №332-349 по объекту «Реконструкция ВЛ 330 кВ №432 «ГРЭС-20 – Мирадино»»",
+      ),
+    ];
+    const validated = validateAssistantDirections({
+      ...base,
+      rejected: rejects,
+      accepted: [],
+      directions: [
+        {
+          name: "реконструкция ВЛ 330 кВ",
+          phrases: ["Реконструкция ВЛ 330 кВ №432 «ГРЭС-20 – Мирадино»"],
+        },
+      ],
+    });
+    expect(validated).toHaveLength(1);
+    // The exclusion is the reusable direction, not the object №432 name.
+    expect(validated[0]?.phrases).toEqual(["Реконструкция ВЛ 330 кВ"]);
+    expect(validated[0]?.rejectCount).toBe(2);
+  });
+
+  it("drops a phrase that is only an object identifier", () => {
+    const rejects = [
+      subject("Работы по объекту «Реконструкция ВЛ 330 кВ №432 «ГРЭС-20 – Мирадино»»"),
+      subject("Материалы по объекту «Реконструкция ВЛ 330 кВ №432 «ГРЭС-20 – Мирадино»»"),
+    ];
+    const validated = validateAssistantDirections({
+      ...base,
+      rejected: rejects,
+      accepted: [],
+      directions: [{ name: "объект", phrases: ["№432 «ГРЭС-20 – Мирадино»"] }],
+    });
+    expect(validated).toEqual([]);
+  });
+
   it("skips a phrase made only of the profile's own keywords", () => {
     const validated = validateAssistantDirections({
       ...base,

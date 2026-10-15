@@ -141,6 +141,49 @@ describe("ButbSource.get", () => {
     expect(card.sourceProcurementId).toBe("butb/AU20261001999001");
   });
 
+  it("starts the second lookup next to the remembered row position", async () => {
+    const pages = new Map<number, string>([
+      [1, registryHtml],
+      [3, syntheticPage(42, "01.10.2026", "AU20261001999001")],
+    ]);
+    const client = fakeClient(pages);
+    let now = Date.parse("2026-10-20T00:00:00Z");
+    const source = new ButbSource({ client, cardCacheTtlMs: 1_000, now: () => new Date(now) });
+    const id = SourceProcurementId.parse("butb/AU20261001999001");
+
+    await source.get(id);
+    expect(client.calls.pages).toContain(3);
+    client.calls.pages = [];
+    client.calls.links = [];
+
+    now += 60_000; // past the card cache — the card is re-read, but…
+    await source.get(id);
+    // …the row position is remembered: page 3 answered directly, no page 1.
+    expect(client.calls.pages).toEqual([3]);
+    expect(client.calls.links).toEqual(["fra:reestrAu:42:_t344"]);
+  });
+
+  it("seeds the row position from a search scan", async () => {
+    const pages = new Map<number, string>([
+      [1, registryHtml],
+      [2, syntheticPage(20, "10.10.2026")],
+    ]);
+    const client = fakeClient(pages);
+    const source = new ButbSource({ client });
+
+    await source.search(
+      query({ keywords: [], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    client.calls.pages = [];
+
+    const card = await source.get(
+      SourceProcurementId.parse(`butb/${firstRow.registryNumber}`),
+    );
+    expect(card.sourceProcurementId).toBe(`butb/${firstRow.registryNumber}`);
+    // Hint from the scan pointed at page 1 — no probing needed.
+    expect(client.calls.pages).toEqual([1]);
+  });
+
   it("answers not-found for an id the registry no longer lists", async () => {
     const client = fakeClient(new Map([[1, registryHtml]]));
     const source = new ButbSource({ client });

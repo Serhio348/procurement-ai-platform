@@ -49,6 +49,11 @@ interface CacheEntry {
   parsed: ParsedButbCard;
 }
 
+/** Rows per registry page — verified live and in fixtures. */
+const PAGE_SIZE = 20;
+/** Bound on remembered row positions so the map cannot grow forever. */
+const POSITION_CACHE_LIMIT = 10_000;
+
 /**
  * BUTB adapter. The site has no usable server-side subject search for an
  * anonymous reader — expanding the registry's search panel degrades the
@@ -69,6 +74,13 @@ export class ButbSource implements ProcurementSourcePort {
   readonly #publicFetch: PublicDocumentationFetch;
   readonly #logger: Logger;
   readonly #cache = new Map<string, CacheEntry>();
+  /**
+   * registryNumber → last seen absolute row index. New records only push
+   * rows deeper, so a remembered index is a lower bound — card lookups
+   * start next to it instead of page 1. Free to maintain: the row index is
+   * already inside every link id the parser sees.
+   */
+  readonly #positions = new Map<string, number>();
 
   constructor(options: ButbSourceOptions) {
     this.#client = options.client;
@@ -104,6 +116,7 @@ export class ButbSource implements ProcurementSourcePort {
       const rows = parseButbRegistryRows(rendered.body);
       if (rows.length === 0) break;
       scannedRows += rows.length;
+      for (const row of rows) this.#rememberPosition(row);
       let pageBeforeWatermark = false;
       for (const row of rows) {
         const rowDate = rowDateOf(row);
@@ -295,6 +308,11 @@ export class ButbSource implements ProcurementSourcePort {
     return parsed;
   }
 
+  #rememberPosition(row: ButbRegistryRow): void {
+    if (this.#positions.size >= POSITION_CACHE_LIMIT) this.#positions.clear();
+    this.#positions.set(row.registryNumber, row.rowIndex);
+  }
+
   async #locateRow(
     registryNumber: string,
     targetDate: string | undefined,
@@ -315,32 +333,55 @@ export class ButbSource implements ProcurementSourcePort {
           `registry page ${page} returned HTTP ${rendered.status}`,
         );
       }
-      return parseButbRegistryRows(rendered.body);
+      const rows = parseButbRegistryRows(rendered.body);
+      for (const row of rows) this.#rememberPosition(row);
+      return rows;
     };
 
-    // Fast path: the row may sit on the first page (most lookups are fresh).
-    let low = 1;
-    let rows = await readPage(1);
-    const direct = rows.find((row) => row.registryNumber === registryNumber);
-    if (direct !== undefined) return direct;
-    if (rows.length === 0 || targetDate === undefined) {
-      // Without a publish date there is no ordering guarantee to exploit —
-      // scan forward a bounded number of pages.
-      for (let page = 2; page <= Math.min(this.#maxGetPages, 60); page += 1) {
-        rows = await readPage(page);
-        if (rows.length === 0) return undefined;
-        const found = rows.find((row) => row.registryNumber === registryNumber);
-        if (found !== undefined) return found;
+    let boundaryLow = 1;
+    let boundaryHigh: number | undefined;
+    let high = 2;
+
+    // A remembered index is a lower bound — publications only push the row
+    // deeper — so the lookup starts on its page instead of page 1.
+    const hint = this.#positions.get(registryNumber);
+    if (hint !== undefined && targetDate !== undefined) {
+      const hintPage = Math.floor(hint / PAGE_SIZE) + 1;
+      const rows = await readPage(hintPage);
+      const hit = rows.find((row) => row.registryNumber === registryNumber);
+      if (hit !== undefined) return hit;
+      const newest = rows.length === 0 ? undefined : dateOfFirstRow(rows);
+      if (newest === undefined || newest <= targetDate) {
+        // The hint overshot (registry shrank or rows were removed) — the row,
+        // if still listed, sits above: bound the gap to [1, hintPage].
+        boundaryHigh = hintPage;
+      } else {
+        // Newest row still younger than the card — it drifted deeper;
+        // keep probing forward from here.
+        boundaryLow = hintPage;
+        high = hintPage * 2;
       }
-      return undefined;
+    } else {
+      // Fast path: the row may sit on the first page (most lookups are fresh).
+      const rows = await readPage(1);
+      const direct = rows.find((row) => row.registryNumber === registryNumber);
+      if (direct !== undefined) return direct;
+      if (rows.length === 0 || targetDate === undefined) {
+        // Without a publish date there is no ordering guarantee to exploit —
+        // scan forward a bounded number of pages.
+        for (let page = 2; page <= Math.min(this.#maxGetPages, 60); page += 1) {
+          const scan = await readPage(page);
+          if (scan.length === 0) return undefined;
+          const found = scan.find((row) => row.registryNumber === registryNumber);
+          if (found !== undefined) return found;
+        }
+        return undefined;
+      }
     }
 
-    // Exponential probe: jump 2,4,8,… until the page's newest row is already
+    // Exponential probe: jump outward until the page's newest row is already
     // older than the card's publish date — the boundary is inside the gap.
-    let high = 2;
-    let boundaryLow = low;
-    let boundaryHigh: number | undefined;
-    for (;;) {
+    while (boundaryHigh === undefined) {
       const probe = await readPage(high);
       if (probe.length === 0) {
         boundaryHigh = high;
@@ -353,8 +394,7 @@ export class ButbSource implements ProcurementSourcePort {
         boundaryHigh = high;
         break;
       }
-      low = high;
-      boundaryLow = low;
+      boundaryLow = high;
       high = Math.min(high * 2, 20_000);
     }
 

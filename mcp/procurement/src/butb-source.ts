@@ -342,24 +342,32 @@ export class ButbSource implements ProcurementSourcePort {
     let boundaryHigh: number | undefined;
     let high = 2;
 
-    // A remembered index is a lower bound — publications only push the row
-    // deeper — so the lookup starts on its page instead of page 1.
+    // A remembered index is a lower bound — the registry is ordered by a
+    // publication timestamp we cannot see (the column shows only the date),
+    // so publications only ever push the row deeper. The lookup therefore
+    // starts on its page and trusts the index over the displayed date.
     const hint = this.#positions.get(registryNumber);
-    if (hint !== undefined && targetDate !== undefined) {
+    if (hint !== undefined) {
       const hintPage = Math.floor(hint / PAGE_SIZE) + 1;
       const rows = await readPage(hintPage);
       const hit = rows.find((row) => row.registryNumber === registryNumber);
       if (hit !== undefined) return hit;
-      const newest = rows.length === 0 ? undefined : dateOfFirstRow(rows);
-      if (newest === undefined || newest <= targetDate) {
-        // The hint overshot (registry shrank or rows were removed) — the row,
-        // if still listed, sits above: bound the gap to [1, hintPage].
+      if (rows.length === 0) {
+        // Registry is shorter than the hint — it shrank; search above.
         boundaryHigh = hintPage;
       } else {
-        // Newest row still younger than the card — it drifted deeper;
-        // keep probing forward from here.
         boundaryLow = hintPage;
         high = hintPage * 2;
+      }
+      if (targetDate === undefined) {
+        // No ordering to exploit: bounded forward scan from the hint.
+        for (let page = hintPage + 1; reads < this.#maxGetPages; page += 1) {
+          const scan = await readPage(page);
+          if (scan.length === 0) return undefined;
+          const found = scan.find((row) => row.registryNumber === registryNumber);
+          if (found !== undefined) return found;
+        }
+        return undefined;
       }
     } else {
       // Fast path: the row may sit on the first page (most lookups are fresh).
@@ -408,11 +416,22 @@ export class ButbSource implements ProcurementSourcePort {
       if (newest === undefined || newest <= targetDate) boundaryHigh = mid;
       else boundaryLow = mid;
     }
-    // boundaryHigh is the first page whose newest row is already ≤ the
-    // publish date — every probed page was hit-checked, but equal dates can
-    // straddle the boundary onto the next page, so check it as well.
-    const tail = await readPage(boundaryHigh + 1);
-    return tail.find((row) => row.registryNumber === registryNumber);
+    // The column shows only the day — every same-date page is one stratum,
+    // and the row may sit pages past the boundary. Walk forward while the
+    // page still carries the target date; stop when its OLDEST row is older
+    // (deeper pages can only get older) or the registry/run budget ends.
+    for (let page = boundaryHigh + 1; reads < this.#maxGetPages; page += 1) {
+      const scan = await readPage(page);
+      if (scan.length === 0) return undefined;
+      const hit = scan.find((row) => row.registryNumber === registryNumber);
+      if (hit !== undefined) return hit;
+      const dated = scan
+        .map((row) => rowDateOf(row))
+        .filter((d): d is string => d !== undefined);
+      if (dated.length === 0) return undefined;
+      if (dated.reduce((a, b) => (a < b ? a : b)) < targetDate) return undefined;
+    }
+    return undefined;
   }
 }
 

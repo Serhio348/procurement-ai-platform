@@ -177,7 +177,7 @@ describe("ButbHttpClient session", () => {
     expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
   });
 
-  it("restores the registry view before paging after a card was opened", async () => {
+  it("reopens the session before paging after a card was opened", async () => {
     const { run: fetch, calls } = scriptedFetch((request) => {
       if (request.method === "GET" && request.url === REGISTRY) {
         return htmlResponse(registryHtml("VS1"));
@@ -202,8 +202,8 @@ describe("ButbHttpClient session", () => {
     await c.openCard("fra:reestrAu:0:_t344");
     await c.registryPage(2);
 
-    // GET bootstrap, POST card link, GET card, GET registry (back),
-    // POST pageChange — the card view cannot answer row postbacks.
+    // GET bootstrap, POST card link, GET card, GET bootstrap (the
+    // card view degrades the session's table), POST pageChange.
     const gets = calls.filter((call) => call.method === "GET" && call.url === REGISTRY);
     expect(gets).toHaveLength(2);
     const last = calls[calls.length - 1];

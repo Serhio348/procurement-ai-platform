@@ -46,7 +46,9 @@ export interface ButbPageClient {
  *
  * The search panel is intentionally unused: expanding it permanently
  * degrades the session's table to a single «Вид закупки» column, so the
- * source filters rows locally instead.
+ * source filters rows locally instead. Returning to the registry after a
+ * card page degrades the table the same way — once a card was opened the
+ * session is finished and a fresh one must be bootstrapped.
  */
 export interface ButbHttpClientOptions {
   baseUrl?: string;
@@ -131,16 +133,15 @@ export class ButbHttpClient implements ButbPageClient {
    * Page `page` (1-based) of the registry. A GET on the registry URL does
    * NOT reset the table — the server answers with the page the session is
    * already on — so navigation beyond the freshly-bootstrapped view always
-   * goes through pageChange postbacks. After a card was opened the session
-   * sits on the card view; a registry GET restores the registry first.
+   * goes through pageChange postbacks. After a card was opened the whole
+   * session is degraded, so it is dropped and rebuilt instead of reused.
    */
   async registryPage(page: number): Promise<ButbPage> {
     if (page < 1) throw new Error("registryPage pages are 1-based");
     return this.#serialized(() => this.#guarded(async () => {
+      if (this.#view === "card") this.#resetSession();
       const boot = await this.#ensureSession();
-      const back = await this.#restoreRegistryView();
-      const fresh = boot ?? back;
-      if (fresh !== undefined && this.#currentPage === page) return fresh;
+      if (boot !== undefined && this.#currentPage === page) return boot;
       const body = await this.#pageChange(page);
       return { status: 200, url: this.#registryUrl(), body };
     }));
@@ -156,10 +157,10 @@ export class ButbHttpClient implements ButbPageClient {
       throw new Error(`not a registry row link id: ${cardLinkId}`);
     }
     return this.#serialized(() => this.#guarded(async () => {
-      await this.#ensureSession();
       // A row link id only resolves while the registry table renders its
-      // page — if a previous card is still on screen, go back first.
-      await this.#restoreRegistryView();
+      // page — and a card view leaves the session degraded, so reopen.
+      if (this.#view === "card") this.#resetSession();
+      await this.#ensureSession();
       return this.#postbackForCard(cardLinkId);
     }));
   }
@@ -269,18 +270,6 @@ export class ButbHttpClient implements ButbPageClient {
     }
   }
 
-  /**
-   * Puts the registry view back on screen when the session is on a card.
-   * Returns the registry page the server came back on, or undefined when the
-   * registry was already the current view.
-   */
-  async #restoreRegistryView(): Promise<ButbPage | undefined> {
-    if (this.#view === "registry") return undefined;
-    const back = await this.#request(new URL(REGISTRY_PATH, this.#baseUrl), "html");
-    this.#adoptRegistry(back.body);
-    return { status: back.status, url: back.url, body: back.body };
-  }
-
   /** Adopts JSF state and records which registry page was actually rendered. */
   #adoptRegistry(body: string): void {
     this.#adoptState(body);
@@ -288,10 +277,20 @@ export class ButbHttpClient implements ButbPageClient {
     this.#currentPage = detectRegistryPage(body) ?? this.#currentPage ?? 1;
   }
 
-  #invalidateSession(): void {
+  /**
+   * Drops the whole server-side session — cookies included. A degraded
+   * registry table (seen after card views and the search panel) survives
+   * plain GETs on the same jsessionid, so the session cannot be salvaged.
+   */
+  #resetSession(): void {
     this.#state = undefined;
+    this.#cookies.clear();
     this.#currentPage = undefined;
     this.#view = "registry";
+  }
+
+  #invalidateSession(): void {
+    this.#resetSession();
   }
 
   #adoptState(html: string): void {

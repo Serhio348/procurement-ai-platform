@@ -81,12 +81,27 @@ async function main(): Promise<void> {
     mode === "live"
       ? await connectProcurementMcp({ mode: "live", logger, blobDirectory, lane: "interactive" })
       : undefined;
+  // BUTB: registered in MCP only under BUTB_ENABLED, and its hits reach a
+  // cabinet only while BUTB_WORKSPACE_IDS pilots it — two separate gates so
+  // the adapter can deploy dark and still never disturb other specialists.
+  const enabledSourceIds: SourceId[] = [
+    SourceId.parse("goszakupki_by"),
+    ...(process.env["BUTB_ENABLED"] === "1" ? [SourceId.parse("butb")] : []),
+  ];
+  const butbPilot = assistantPilotFromEnv(process.env["BUTB_WORKSPACE_IDS"]);
+  const sourcesForWorkspace = (workspaceId: string | undefined): readonly SourceId[] =>
+    enabledSourceIds.filter((id) => id !== "butb" || butbPilot(workspaceId ?? ""));
+  // searchHits is created before the app, so the workspace lookup is indirect.
+  const appRef: { current?: SpecialistApi } = {};
+  const activeWorkspaceId = () => appRef.current?.currentWorkspaceId();
   const searchHits =
     mcp === undefined
       ? undefined
       : createProcurementSearchHits({
           caller: mcp.caller,
-          sourceId: SourceId.parse("goszakupki_by"),
+          sourceIds: enabledSourceIds,
+          sourcesForWorkspace,
+          activeWorkspaceId,
           logger,
         });
   const cardWatch =
@@ -125,7 +140,9 @@ async function main(): Promise<void> {
       ? undefined
       : createProcurementSearchHits({
           caller: mcpInteractive.caller,
-          sourceId: SourceId.parse("goszakupki_by"),
+          sourceIds: enabledSourceIds,
+          sourcesForWorkspace,
+          activeWorkspaceId,
           logger,
         });
   logger.info("Search intent configured", { model: searchIntent !== undefined });
@@ -294,6 +311,7 @@ async function main(): Promise<void> {
         background: mcp !== undefined,
         interactive: mcpInteractive !== undefined,
       },
+      sources: enabledSourceIds,
       models: {
         searchIntent: searchIntent !== undefined,
         classifier: classifier !== undefined,
@@ -306,6 +324,7 @@ async function main(): Promise<void> {
       postgresPing: persistence.ping,
     },
   });
+  appRef.current = app;
   decideBridge.fn = app.decideForWorkspace;
   decideBridge.suggestion = app.resolveSuggestionForWorkspace;
   const port = Number.parseInt(process.env["API_PORT"] ?? "3001", 10);

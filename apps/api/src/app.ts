@@ -199,6 +199,11 @@ export interface SpecialistApi extends FastifyInstance {
     suggestionId: string,
     action: "accept" | "dismiss",
   ) => Promise<"ok" | "not_found" | "exclusions_full">;
+  /**
+   * Workspace of the cabinet scope currently executing (falls back to the
+   * default cabinet outside a request). Ports use it for per-cabinet pilots.
+   */
+  currentWorkspaceId: () => string;
 }
 
 export interface BuildApiOptions {
@@ -271,6 +276,8 @@ export interface BuildApiOptions {
     mode: "live" | "fixture";
     objectStore: string;
     source?: { background: boolean; interactive: boolean };
+    /** Source ids enabled at boot (health reports the fan-out membership). */
+    sources?: string[];
     models?: { searchIntent: boolean; classifier: boolean; commercialReader: boolean };
     mail?: boolean;
     /** Bot token set and getMe answered. */
@@ -1994,6 +2001,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       components: {
         postgres,
         source,
+        ...(health?.sources === undefined ? {} : { sources: health.sources }),
         objectStore: health?.objectStore ?? "unknown",
         models,
         mail: health?.mail === true,
@@ -3260,6 +3268,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     runDiscovery,
     decideForWorkspace,
     resolveSuggestionForWorkspace,
+    currentWorkspaceId: () => currentCabinet().workspaceId,
   }) as SpecialistApi;
   return api;
 }

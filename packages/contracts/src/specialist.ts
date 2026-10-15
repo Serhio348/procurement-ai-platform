@@ -694,6 +694,8 @@ export const SpecialistServiceHealth = z.object({
   components: z.object({
     postgres: z.enum(["ok", "failed", "off"]),
     source: z.enum(["live", "fixture", "off"]),
+    /** Procurement sources the fan-out may use (e.g. goszakupki_by, butb). */
+    sources: z.array(z.string().min(1)).optional(),
     objectStore: z.string().min(1),
     models: z.object({
       searchIntent: z.boolean(),

@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head><script src="/auctions/javax.faces.resource/jsf.js.html?ln=javax.faces&amp;v=3_3_0_130424" type="text/javascript"></script><link href="/auctions/javax.faces.resource/themes/sam/theme.css.html?ln=icefaces.ace&amp;v=3_3_0_130424" rel="stylesheet" type="text/css" /><script src="/auctions/javax.faces.resource/bridge.js.html?ln=ice.core&amp;v=3_3_0_130424" type="text/javascript"></script><script src="/auctions/javax.faces.resource/icepush.js.html?ln=ice.push&amp;v=3_3_0_130424" type="text/javascript"></script><script src="/auctions/javax.faces.resource/util/ace-jquery.js.html?ln=icefaces.ace&amp;v=3_3_0_130424" type="text/javascript"></script><link href="/auctions/javax.faces.resource/util/combined.css.html?ln=icefaces.ace&amp;v=3_3_0_130424" rel="stylesheet" type="text/css" /><script src="/auctions/javax.faces.resource/compat.js.html?ln=ice.compat&amp;v=3_3_0_130424" type="text/javascript"></script><script src="/auctions/javax.faces.resource/util/ace-components.js.html?ln=icefaces.ace&amp;v=3_3_0_130424" type="text/javascript"></script><link href="/auctions/javax.faces.resource/fileentry/fileEntry.css.html?ln=icefaces.ace&amp;v=3_3_0_130424" rel="stylesheet" type="text/css" /><script src="/auctions/javax.faces.resource/icefaces-compat.js.html?ln=ice.compat&amp;v=3_3_0_130424" type="text/javascript"></script><script src="/auctions/javax.faces.resource/util/ace-menu.js.html?ln=icefaces.ace&amp;v=3_3_0_130424" type="text/javascript"></script><script src="/auctions/javax.faces.resource/util/ace-datatable.js.html?ln=icefaces.ace&amp;v=3_3_0_130424" type="text/javascript"></script><script src="/auctions/javax.faces.resource/fileentry/fileEntry.js.html?ln=icefaces.ace&amp;v=3_3_0_130424" type="text/javascript"></script><script type="text/javascript">document.documentElement.isHeadUpdateSuccessful=true;</script><style type="text/css">.ice-blockui-overlay {position: absolute;background-color: white;z-index: 28000;opacity: 0.22;filter: alpha(opacity = 22);}.ice-status-indicator-overlay {position: absolute;background-color: white;z-index: 28000;opacity: 0.22;filter: alpha(opacity = 22);}</style>
+	<title>Электронная торговая площадка Закупки - Реестр закупок</title>
+
+	<meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+	<meta content="ru" http-equiv="Content-Language" />
+	<meta content="no" http-equiv="imagetoolbar" />
+	<meta name="keywords" />
+	<meta content="Проведение электронных аукционов" name="description" />
+	<meta content="РБ, РУП 'Белторгинфосервис', 2011-2013" name="copyright" />
+	<link href="favicon.ico" rel="icon" type="image/x-icon" />
+	<link href="favicon.ico" rel="shortcut icon" type="image/x-icon" />
+	<link href="./xmlhttp/css/rime/rime.css" rel="stylesheet" type="text/css" />
+	<link href="./css/butb.css" rel="stylesheet" type="text/css" />
+	<link href="./css/menu_butb.css" rel="stylesheet" type="text/css" />
+	<link href="./css/default.css" rel="stylesheet" type="text/css" />
+	<script src="js/signfiles.js" type="text/javascript"></script></head><body class="ice-skin-rime">
+
+	<span class="top_bg">
+	    <div class="butb_all">
+		<table border="0" class="base_table">
+		    <tr>
+			<td class="logo" colspan="3"><span id="_t6"><div xmlns="http://www.w3.org/1999/xhtml">
+
+    <script src="js/sha1.js" type="text/javascript"></script>
+    <script src="js/checkInput.js" type="text/javascript"></script>
+    <script src="js/tictaclot.js" type="text/javascript"></script>
+
+    <script type="text/javascript">
+
+	function OnEnterKey(a_event) {
+
+	    var ENTER_KEY = 13;
+	    a_event = (a_event == null) ? window.event : a_event;
+	    if (ENTER_KEY == a_event.keyCode) {
+		var ret = document.getElementById("formLogin:loginBtn");
+		ret.click();
+	    }
+	}
+
+	function doLogin1_3() {
+	    var elPwd = document.getElementById("formLogin:sPassword");
+	    document.getElementById("formLogin:j_password").value = sha1Hash(elPwd.value);
+	    elPwd.value = "";
+	    return true;
+	}
+
+	function doLogout()
+	{
+	    //alert("1"); 
+	    document.FORM2.submit();
+	}
+    </script>
+
+    <div><table border="0" class="icePnlGrd" id="j_idt8" style="width: 100%;"><tbody><tr class="icePnlGrdRow1"><td class="icePnlGrdCol logoCol1" id="j_idt8-0-0"><span id="_t9"></span></td><td class="icePnlGrdCol logoCol2" id="j_idt8-0-1"><span class="labelContent" id="_t10" style="width: 100%;"> </span></td><td class="icePnlGrdCol logoCol3" id="j_idt8-0-2"><div class="icePnlGrp butb_col3" id="j_idt11" style="font-color: white; width: 190px; padding-top: 8px; padding-left: 10px; text-align: center;"><span class="fat2" id="_t12" style="vertical-align: top;">ПЕРСОНАЛЬНЫЙ РАЗДЕЛ</span><form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" class="iceFrm" enctype="application/x-www-form-urlencoded" id="formLogin" method="post" onsubmit="doLogin1_3();"><input name="formLogin" type="hidden" value="formLogin" /><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input><input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="formLogin:formLogin_captureSubmit" type="text/javascript">ice.captureSubmit('formLogin',false);ice.captureKeypress('formLogin',null);</script><table class="icePnlGrd" id="formLogin:j_idt13"><tbody><tr class="icePnlGrdRow1"><td class="icePnlGrdCol1" id="formLogin:j_idt13-0-0"><label class="iceOutLbl login" for="formLogin:j_username" id="formLogin:j_idt14">логин</label></td><td class="icePnlGrdCol2" id="formLogin:j_idt13-0-1"><input class="inputFormContent" id="formLogin:j_username" name="formLogin:j_username" onkeypress="OnEnterKey(event);" size="24" style="width: 120px;" type="text" value="" /></td></tr><tr class="icePnlGrdRow2"><td class="icePnlGrdCol1" id="formLogin:j_idt13-1-0"><label class="iceOutLbl login" for="formLogin:sPassword" id="formLogin:j_idt15">пароль</label></td><td class="icePnlGrdCol2" id="formLogin:j_idt13-1-1"><input class="inputFormContent" id="formLogin:sPassword" name="formLogin:sPassword" onkeypress="OnEnterKey(event);" size="24" style="width: 120px;" type="password" value="" /></td></tr><tr class="icePnlGrdRow1"><td class="icePnlGrdCol1" id="formLogin:j_idt13-2-0"><label class="iceOutLbl" id="formLogin:j_idt16"> </label></td><td class="icePnlGrdCol2" id="formLogin:j_idt13-2-1"><a class="bt_login" href="#" id="formLogin:loginBtn" onclick="jsf.util.chain(this,event,'return doLogin1_3();','mojarra.jsfcljs(document.getElementById(\'formLogin\'),{\'formLogin:loginBtn\':\'formLogin:loginBtn\'},\'\')');return false" onkeypress="OnEnterKey(event);" style="color: white;">Вход по логину</a></td></tr><tr class="icePnlGrdRow2"><td class="icePnlGrdCol1" id="formLogin:j_idt13-3-0"><span id="formLogin:_t17"></span></td><td class="icePnlGrdCol2" id="formLogin:j_idt13-3-1"><input class="buttonContent" id="formLogin:_t18" name="formLogin:_t18" type="submit" value="Вход по ЭЦП" /></td></tr><tr class="icePnlGrdRow1"><td class="icePnlGrdCol1" id="formLogin:j_idt13-4-0"><span id="formLogin:_t19"></span></td><td class="icePnlGrdCol2" id="formLogin:j_idt13-4-1"><input class="buttonContent" id="formLogin:_t20" name="formLogin:_t20" type="submit" value="Вход по ID-карте" /></td></tr></tbody></table><input id="formLogin:j_password" name="formLogin:j_password" type="hidden" value="" /><span id="formLoginhdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span></form></div></td></tr></tbody></table><table border="0" class="icePnlGrd" id="j_idt21" style="width: 100%;"><tbody><tr class="icePnlGrdRow1"><td class="icePnlGrdCol logoCol1" id="j_idt21-0-0"><span id="_t22"></span></td><td class="icePnlGrdCol logoCol2" id="j_idt21-0-1"><span id="_t24" style="width: 100%;"> </span></td></tr></tbody></table>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="fmod_cert" method="post" name="fmod_cert">
+<input name="fmod_cert" type="hidden" value="fmod_cert" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="fmod_cert:fmod_cert_captureSubmit" type="text/javascript">ice.captureSubmit('fmod_cert',false);ice.captureKeypress('fmod_cert',null);</script><span id="fmod_certhdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="f_msg" method="post" name="f_msg">
+<input name="f_msg" type="hidden" value="f_msg" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="f_msg_captureSubmit" type="text/javascript">ice.captureSubmit('f_msg',false);ice.captureKeypress('f_msg',null);</script><span id="f_msghdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="j_idt47" method="post" name="j_idt47">
+<input name="j_idt47" type="hidden" value="j_idt47" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="j_idt47:j_idt47_captureSubmit" type="text/javascript">ice.captureSubmit('j_idt47',false);ice.captureKeypress('j_idt47',null);</script><span id="j_idt47hdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="j_idt64" method="post" name="j_idt64">
+<input name="j_idt64" type="hidden" value="j_idt64" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="j_idt64:j_idt64_captureSubmit" type="text/javascript">ice.captureSubmit('j_idt64',false);ice.captureKeypress('j_idt64',null);</script><span id="j_idt64hdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+
+    </div>
+</div></span>	
+			</td>
+		    </tr>        
+		    <tr>
+			<td class="basemenu" colspan="3"><span id="_t94">
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="fmainmenu" method="post" name="fmainmenu">
+<input name="fmainmenu" type="hidden" value="fmainmenu" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="fmainmenu:fmainmenu_captureSubmit" type="text/javascript">ice.captureSubmit('fmainmenu',false);ice.captureKeypress('fmainmenu',null);</script>
+
+        <span id="menushadow_bg"></span>
+        <div id="menushadow"></div>
+
+        <div style="visibility: hidden;"><span class="iceOutTxt" id="fmainmenu:j_idt96">ClockBean-Loaded</span>
+        </div><span class="clock" id="fmainmenu:_t98"><span id="fmainmenu:_t99">В Минске </span><span id="fmainmenu:_t100">15.10.2026 22:26</span></span>
+
+        <div class="menubar" style="left: 40px; white-space: nowrap;"><a href="#" id="fmainmenu:_t102" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t102':'fmainmenu:_t102'},'');return false" style="">ГЛАВНАЯ</a>
+        </div>
+
+        <div class="menubar" style="left: 120px; white-space: nowrap;"><a href="#" id="fmainmenu:_t104" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t104':'fmainmenu:_t104'},'');return false" style="">С ЧЕГО НАЧАТЬ?</a>
+        </div>
+
+        <div class="menubar" style="left: 250px; white-space: nowrap;"><a href="#" id="fmainmenu:_t106" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t106':'fmainmenu:_t106'},'');return false" style="">ОБУЧЕНИЕ</a>
+        </div>
+
+        <div class="menubar" style="left: 340px; white-space: nowrap;"><a href="#" id="fmainmenu:_t108" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t108':'fmainmenu:_t108'},'');return false" style="">ПРАВОВАЯ ИНФОРМАЦИЯ</a>
+        </div>
+
+        <div class="menubar" style="left: 540px; white-space: nowrap;"><a href="#" id="fmainmenu:_t110" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t110':'fmainmenu:_t110'},'');return false" style="color:#125D10;">ЗАКУПКИ</a>
+        </div>
+
+        <div class="menubar" style="left: 625px; white-space: nowrap;"><a href="#" id="fmainmenu:_t112" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t112':'fmainmenu:_t112'},'');return false" style="">РЕЕСТРЫ</a>
+        </div>
+
+        <div class="menubar" style="left: 710px; white-space: nowrap;"><a href="#" id="fmainmenu:_t114" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t114':'fmainmenu:_t114'},'');return false" style="">КОНТАКТЫ</a>
+        </div><div class="ui-notificationbar" id="fmainmenu:j_idt128" role="alert" style="height: 20px; width: 160px; color: #667;            background-color: #ffc; border: 2px solid #fc0;"><table width="100%">
+<tbody>
+<tr>
+<td><a href="#" id="fmainmenu:_t130" onclick="mojarra.jsfcljs(document.getElementById('fmainmenu'),{'fmainmenu:_t130':'fmainmenu:_t130'},'');return false" title="просмотреть"><span id="fmainmenu:_t131" style="white-space: nowrap">новых сообщений: 0</span></a></td>
+</tr>
+</tbody>
+</table>
+<script type="text/javascript">ice.ace.jq(document).ready(function(){widget_fmainmenu_j_idt128 = ice.ace.create("NotificationBar",["fmainmenu:j_idt128",{"position":"bottom","effect":"slide","effectSpeed":"slow","visible":false,"ariaEnabled":true}]);});</script></div><span id="fmainmenuhdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form></span>	
+			</td>
+		    </tr>        
+		    <tr>
+			<td class="basemenu" colspan="3" style="height:50px;"></td>
+		    </tr>        
+		    <tr>
+			<td class="basemenu" colspan="3" style="height: 30px;">
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="j_idt142" method="post" name="j_idt142">
+<input name="j_idt142" type="hidden" value="j_idt142" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="j_idt142:j_idt142_captureSubmit" type="text/javascript">ice.captureSubmit('j_idt142',false);ice.captureKeypress('j_idt142',null);</script><span id="j_idt142:_t143">
+            <div id="whereareyou">
+                <p class="white"><table class="icePnlGrd" id="j_idt142:j_idt145" style="border-spacing: 0px;"><tbody><tr class="icePnlGrdRow1"><td class="icePnlGrdCol tabContentFill" id="j_idt142:j_idt145-0-0"><div class="icePnlGrp submenuBtnfalse" id="j_idt142:j_idt146"><a class="linkSubmenufalse" href="#" id="j_idt142:_t147" onclick="mojarra.jsfcljs(document.getElementById('j_idt142'),{'j_idt142:_t147':'j_idt142:_t147'},'');return false">НОВОСТИ ЗАКУПОК</a></div></td><td class="icePnlGrdCol tabContentFill" id="j_idt142:j_idt145-0-1"><div class="icePnlGrp submenuBtntrue" id="j_idt142:j_idt148"><a class="linkSubmenutrue" href="#" id="j_idt142:_t149" onclick="mojarra.jsfcljs(document.getElementById('j_idt142'),{'j_idt142:_t149':'j_idt142:_t149'},'');return false">РЕЕСТР ЗАКУПОК ЭТП БУТБ</a></div></td><td class="icePnlGrdCol tabContentFill" id="j_idt142:j_idt145-0-2"><div class="icePnlGrp submenuBtnfalse" id="j_idt142:j_idt150"><a class="linkSubmenufalse" href="#" id="j_idt142:_t151" onclick="mojarra.jsfcljs(document.getElementById('j_idt142'),{'j_idt142:_t151':'j_idt142:_t151'},'');return false">РЕЕСТР СПРАВОК ЗОИ</a></div></td></tr></tbody></table>  
+                </p></div></span><span id="j_idt142hdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+			</td>
+		    </tr>        
+		    <tr style="height: 100%;">
+			<td class="leftcontent"></td>
+			<td class="content"><span id="mainContent"><div xmlns="http://www.w3.org/1999/xhtml"><div class="icePnlGrp" id="j_idt155">
+        <br /><span class="hc1" id="_t157">РЕЕСТР ЗАКУПОК ЭТП БУТБ</span>
+        <br /><br />
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="fra" method="post" name="fra">
+<input name="fra" type="hidden" value="fra" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="fra:fra_captureSubmit" type="text/javascript">ice.captureSubmit('fra',false);ice.captureKeypress('fra',null);</script><div xmlns="http://www.w3.org/1999/xhtml">	
+</div><div class="icePnlGrp panelContentWithBorder" id="fra:j_idt217"><a class="iceCmdLnk row-panel-command" href="javascript:;" id="fra:j_idt218" onblur="setFocus('');" onclick="var form=formOf(this);form['fra:j_idcl'].value='fra:j_idt218';iceSubmit(form,this,event);form['fra:j_idcl'].value='';return false;" onfocus="setFocus(this.id);">Раскрыть форму поиска <img class="down-img" src="" /></a></div>
+            <br /><br /><table class="icePnlGrd" id="fra:j_idt326" style="width: 100%"><tbody><tr class="icePnlGrdRow1"><td class="icePnlGrdCol gridColLeft" id="fra:j_idt326-0-0"><span id="fra:_t328"> </span></td><td class="icePnlGrdCol gridColRight" id="fra:j_idt326-0-1"><span id="fra:j_idt329"><button id="fra:j_idt329_button" name="fra:j_idt329_button" type="button">Столбцы<script type="text/javascript">ice.ace.jq(function(){var b = ice.ace.jq(ice.ace.escapeClientId('fra:j_idt329_button')); if (!b.hasClass('ui-button')) { var widget_fra_j_idt329 = ice.ace.create("MenuButton",["fra:j_idt329",{"animation":{"animated":"slide","duration":300},"zindex":1,"styleClass":"columnMy","style":"text-align: left"}]); }});</script></button><ul><li><table id="fra:_t331">
+<tbody>
+<tr>
+<td><span id="fra:_t331:0:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:0:_t334" name="fra:_t331:0:_t334" type="checkbox" /><span id="fra:_t331:0:_t335">Рег. №</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:1:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:1:_t334" name="fra:_t331:1:_t334" type="checkbox" /><span id="fra:_t331:1:_t335">Наименование закупки</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:2:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:2:_t334" name="fra:_t331:2:_t334" type="checkbox" /><span id="fra:_t331:2:_t335">Дата публикации</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:3:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:3:_t334" name="fra:_t331:3:_t334" type="checkbox" /><span id="fra:_t331:3:_t335">Начальная цена</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:4:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:4:_t334" name="fra:_t331:4:_t334" type="checkbox" /><span id="fra:_t331:4:_t335">Заказчик</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:5:_t333" style="white-space: nowrap;"><input id="fra:_t331:5:_t334" name="fra:_t331:5:_t334" type="checkbox" /><span id="fra:_t331:5:_t335">Регион заказчика</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:6:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:6:_t334" name="fra:_t331:6:_t334" type="checkbox" /><span id="fra:_t331:6:_t335">Финансирование</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:7:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:7:_t334" name="fra:_t331:7:_t334" type="checkbox" /><span id="fra:_t331:7:_t335">Срок подачи предложений</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:8:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:8:_t334" name="fra:_t331:8:_t334" type="checkbox" /><span id="fra:_t331:8:_t335">Дата и время торгов</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:9:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:9:_t334" name="fra:_t331:9:_t334" type="checkbox" /><span id="fra:_t331:9:_t335">Состояние</span></span></td>
+</tr>
+<tr>
+<td><span id="fra:_t331:10:_t333" style="white-space: nowrap;"><input checked="true" id="fra:_t331:10:_t334" name="fra:_t331:10:_t334" type="checkbox" /><span id="fra:_t331:10:_t335">Дата завершения закупки</span></span></td>
+</tr>
+</tbody>
+</table>
+</li><li><a href="javascript:void 0;" onclick="var self = this; setTimeout(function() { var f = function(opt){}; self.id = 'fra:_t336'; ice.s(event, self,function(p){});}, 10);"><span class="wijmo-wijmenu-text" style="font-weight: bold;">Сохранить</span></a></li></ul><script type="text/javascript">var widget_fra_j_idt329 = ice.ace.create("MenuButton",["fra:j_idt329",{"animation":{"animated":"slide","duration":300},"zindex":1,"styleClass":"columnMy","style":"text-align: left"}]);</script></span></td></tr></tbody></table><div class="ui-datatable ui-widget ace-datatable" id="fra:reestrAu"><div class="ui-datatable-header ui-widget-header ui-corner-tl ui-corner-tr"></div><div class="ui-paginator ui-paginator-top ui-widget-header" id="fra:reestrAu_paginatortop"></div><div><table><thead><tr><th class="ui-widget-header colLeft"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt338"><span><span class="ui-header-text" id="fra:reestrAu:j_idt338_text"><span id="fra:reestrAu:_t339">Рег. номер <br/>/номер на icetrade.by<br/> /номер в ГИАС</span></span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header colLeft"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt343"><span><span class="ui-header-text" id="fra:reestrAu:j_idt343_text">Наименование закупки</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt345"><span><span class="ui-header-text" id="fra:reestrAu:j_idt345_text">Вид закупки</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt347"><span><span class="ui-header-text" id="fra:reestrAu:j_idt347_text">Дата публикации</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header colRight" style="white-space: nowrap"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt349"><span><span class="ui-header-text" id="fra:reestrAu:j_idt349_text">Стоимость,<br/> бел. рубль</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header colLeft"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt352"><span><span class="ui-header-text" id="fra:reestrAu:j_idt352_text">Заказчик/организатор</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header colLeft"><div class="ui-header-column clickable" id="fra:reestrAu:j_idt358"><span><span class="ui-header-text" id="fra:reestrAu:j_idt358_text">Финансирование</span></span></div></th><th class="ui-widget-header"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt360"><span><span class="ui-header-text" id="fra:reestrAu:j_idt360_text">Срок подачи предложений</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt362"><span><span class="ui-header-text" id="fra:reestrAu:j_idt362_text">Дата и время торгов</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th><th class="ui-widget-header colLeft"><div class="ui-header-column clickable" id="fra:reestrAu:j_idt364"><span><span class="ui-header-text" id="fra:reestrAu:j_idt364_text">Состояние</span></span></div></th><th class="ui-widget-header"><div class="ui-header-column ui-sortable-column clickable" id="fra:reestrAu:j_idt370"><span><span class="ui-header-text" id="fra:reestrAu:j_idt370_text">Дата завершения закупки</span></span>&nbsp;<span class="ui-header-right"><span class="ui-sortable-control"><span class="ui-sortable-column-icon"><a class="ui-icon ui-icon-triangle-1-n" tabindex="0"></a><a class="ui-icon ui-icon-triangle-1-s" tabindex="0"></a></span><span class="ui-sortable-column-order" style="display:none;"></span></span></span></div></th></tr></thead><tbody class="ui-datatable-data ui-widget-content"><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_0" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:0:_t340">AU20261015396707</span>
+		    <br /><span id="fra:reestrAu:0:_t342">- /        4828385</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:0:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:0:_t344':'fra:reestrAu:0:_t344'},'');return false">БелМТ №894/26-ЭА &#171;Микрохирургический инструментарий&#187;</a></td><td><span id="fra:reestrAu:0:_t346">аукцион</span></td><td><span id="fra:reestrAu:0:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:0:_t350">1&#160;710&#160;704,01</span><span id="fra:reestrAu:0:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:0:_t354">УП &#34;БЕЛМЕДТЕХНИКА&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:0:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:0:_t361">30.10.2026</span></td><td><span id="fra:reestrAu:0:_t363"></span></td><td class="colLeft"><span id="fra:reestrAu:0:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:0:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_1" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:1:_t340">PR20261015396708</span>
+		    <br /><span id="fra:reestrAu:1:_t342">- /        -</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:1:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:1:_t344':'fra:reestrAu:1:_t344'},'');return false">Техническое обслуживание и ремонт секционных ворот </a></td><td><span id="fra:reestrAu:1:_t346">заявка о ценах (тарифах)</span></td><td><span id="fra:reestrAu:1:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:1:_t354">Учреждение &#34;Могилевское областное управление МЧС&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:1:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:1:_t361">19.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:1:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:1:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_2" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:2:_t340">EZ20261015396705</span>
+		    <br /><span id="fra:reestrAu:2:_t342">- /        4828318</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:2:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:2:_t344':'fra:reestrAu:2:_t344'},'');return false">МТ №903/26-ЗОИ &#171;Перчатки медицинские &#187; (лот 1)</a></td><td><span id="fra:reestrAu:2:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:2:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:2:_t350">299&#160;200,00</span><span id="fra:reestrAu:2:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:2:_t354">УП &#34;БЕЛМЕДТЕХНИКА&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:2:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:2:_t361">21.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:2:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:2:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_3" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:3:_t340">EZ20261015396693</span>
+		    <br /><span id="fra:reestrAu:3:_t342">- /        4828222</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:3:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:3:_t344':'fra:reestrAu:3:_t344'},'');return false">Лимон, Клементин</a></td><td><span id="fra:reestrAu:3:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:3:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:3:_t350">1&#160;944,00</span><span id="fra:reestrAu:3:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:3:_t354">ГОРОДСКОЙ ДЕТСКИЙ ЦЕНТР МЕДИЦИНСКОЙ РЕАБИЛИТАЦИИ &#34;ПРАЛЕСКА&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:3:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:3:_t361">22.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:3:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:3:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_4" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:4:_t340">AU20261015396544</span>
+		    <br /><span id="fra:reestrAu:4:_t342">- /        4828195</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:4:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:4:_t344':'fra:reestrAu:4:_t344'},'');return false">ГродМТ № 712/26-ЭА &#171;Ранорасширитель стоечный типа Сигала (или аналог) для строительного объекта &#171;Реконструкция комплекса зданий УЗ &#171;Городская клиническая больница №3 г. Гродно&#187; под &#171;Гродненский областной клинический онкологический диспансер&#187; по заявке Государственное областное унитарное предприятие &#171;Управление капитального строительства Гродненского облисполкома&#187;</a></td><td><span id="fra:reestrAu:4:_t346">аукцион</span></td><td><span id="fra:reestrAu:4:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:4:_t350">273&#160;658,08</span><span id="fra:reestrAu:4:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:4:_t354">УП &#34;Медтехника&#34; г.Гродно</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:4:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:4:_t361">30.10.2026</span></td><td><span id="fra:reestrAu:4:_t363"></span></td><td class="colLeft"><span id="fra:reestrAu:4:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:4:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_5" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:5:_t340">EZ20261015396686</span>
+		    <br /><span id="fra:reestrAu:5:_t342">- /        4828170</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:5:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:5:_t344':'fra:reestrAu:5:_t344'},'');return false">Услуга по проведению электрофизических измерений</a></td><td><span id="fra:reestrAu:5:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:5:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:5:_t350">2&#160;043,32</span><span id="fra:reestrAu:5:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:5:_t354">ГОРОДСКОЙ ДЕТСКИЙ ЦЕНТР МЕДИЦИНСКОЙ РЕАБИЛИТАЦИИ &#34;ПРАЛЕСКА&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:5:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:5:_t361">22.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:5:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:5:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_6" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:6:_t340">EZ20261015396690</span>
+		    <br /><span id="fra:reestrAu:6:_t342">- /        4828172</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:6:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:6:_t344':'fra:reestrAu:6:_t344'},'');return false">Техническое обслуживание медицинского оборудования 2 лота</a></td><td><span id="fra:reestrAu:6:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:6:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:6:_t350">77&#160;814,41</span><span id="fra:reestrAu:6:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:6:_t354">МГКОЦ</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:6:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:6:_t361">19.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:6:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:6:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_7" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:7:_t340">EZ20261015396666</span>
+		    <br /><span id="fra:reestrAu:7:_t342">- /        4828150</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:7:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:7:_t344':'fra:reestrAu:7:_t344'},'');return false">Стерилизующие фильтры для изотопной радиохимической лаборатории</a></td><td><span id="fra:reestrAu:7:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:7:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:7:_t350">34&#160;260,00</span><span id="fra:reestrAu:7:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:7:_t354">РНПЦ ОМР им. Н.Н. Александрова</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:7:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:7:_t361">19.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:7:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:7:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_8" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:8:_t340">AU20261015396691</span>
+		    <br /><span id="fra:reestrAu:8:_t342">- /        4828134</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:8:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:8:_t344':'fra:reestrAu:8:_t344'},'');return false">БелМТ №896/26-ЭА &#171;Аппараты функционально-диагностические&#187;</a></td><td><span id="fra:reestrAu:8:_t346">аукцион</span></td><td><span id="fra:reestrAu:8:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:8:_t350">2&#160;677&#160;678,75</span><span id="fra:reestrAu:8:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:8:_t354">УП &#34;БЕЛМЕДТЕХНИКА&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:8:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:8:_t361">30.10.2026</span></td><td><span id="fra:reestrAu:8:_t363"></span></td><td class="colLeft"><span id="fra:reestrAu:8:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:8:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_9" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:9:_t340">EZ20261015396696</span>
+		    <br /><span id="fra:reestrAu:9:_t342">- /        4828133</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:9:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:9:_t344':'fra:reestrAu:9:_t344'},'');return false">Работы (услуги) по техническому обслуживанию и ремонту медицинского оборудования с за-меной расходных материалов и запасных частей 
+для операционных отделений </a></td><td><span id="fra:reestrAu:9:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:9:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:9:_t350">7&#160;600,00</span><span id="fra:reestrAu:9:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:9:_t354">4-я городская клиническая больница имени Н.Е.Савченко</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:9:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:9:_t361">19.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:9:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:9:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_10" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:10:_t340">AU20261015396618</span>
+		    <br /><span id="fra:reestrAu:10:_t342">- /        4828111</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:10:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:10:_t344':'fra:reestrAu:10:_t344'},'');return false">27/06 Анальгетики, противоэпилептические и иные препараты</a></td><td><span id="fra:reestrAu:10:_t346">аукцион</span></td><td><span id="fra:reestrAu:10:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:10:_t350">8&#160;335&#160;399,57</span><span id="fra:reestrAu:10:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:10:_t354">РУП &#34;БЕЛФАРМАЦИЯ&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:10:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:10:_t361">01.11.2026</span></td><td><span id="fra:reestrAu:10:_t363"></span></td><td class="colLeft"><span id="fra:reestrAu:10:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:10:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_11" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:11:_t340">PR20261015396694</span>
+		    <br /><span id="fra:reestrAu:11:_t342">- /        -</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:11:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:11:_t344':'fra:reestrAu:11:_t344'},'');return false">Услуга по ремонту фиброскопа интубационного портативного FNL-7RP3</a></td><td><span id="fra:reestrAu:11:_t346">заявка о ценах (тарифах)</span></td><td><span id="fra:reestrAu:11:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:11:_t354">РНПЦ ОМР им. Н.Н. Александрова</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:11:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:11:_t361">16.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:11:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:11:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_12" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:12:_t340">RQ20261015396638</span>
+		    <br /><span id="fra:reestrAu:12:_t342">- /        4828044</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:12:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:12:_t344':'fra:reestrAu:12:_t344'},'');return false">ГЦ892-10/261 &#171;Синоптофор&#187; для ГУО &#171;Специальный детский сад № 19 г.Минска&#187; в интересах государственного учреждения &#171;Центр по обеспечению деятельности бюджетных организаций администрации Советского района г. Минска&#187;</a></td><td><span id="fra:reestrAu:12:_t346">ЗЦП</span></td><td><span id="fra:reestrAu:12:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:12:_t350">56&#160;390,00</span><span id="fra:reestrAu:12:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:12:_t354">КУП &#34;ТЕНДЕРНЫЙ ЦЕНТР МИНГОРИСПОЛКОМА&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:12:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:12:_t361">22.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:12:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:12:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_13" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:13:_t340">EZ20261015396519</span>
+		    <br /><span id="fra:reestrAu:13:_t342">- /        4828029</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:13:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:13:_t344':'fra:reestrAu:13:_t344'},'');return false">№860-ЗИОИ-2026 БарМТ №449/26 - Экспресс-тесты иммунохроматографические для выполнения лабораторных исследований с визуальной оценкой результатов. Лоты 46, 51</a></td><td><span id="fra:reestrAu:13:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:13:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:13:_t350">74&#160;537,84</span><span id="fra:reestrAu:13:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:13:_t354">УП &#34;Медтехника&#34; г. Барановичи</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:13:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:13:_t361">22.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:13:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:13:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_14" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:14:_t340">EZ20261015396683</span>
+		    <br /><span id="fra:reestrAu:14:_t342">- /        4828030</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:14:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:14:_t344':'fra:reestrAu:14:_t344'},'');return false">ЗОИ. Медицинская одежда для УЗ Городская детская инфекционная клиническая больница на 2026 год.</a></td><td><span id="fra:reestrAu:14:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:14:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:14:_t350">1&#160;180,00</span><span id="fra:reestrAu:14:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:14:_t354">Городская детская инфекционная клиническая больница</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:14:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:14:_t361">20.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:14:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:14:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_15" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:15:_t340">RQ20261015396677</span>
+		    <br /><span id="fra:reestrAu:15:_t342">- /        4827990</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:15:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:15:_t344':'fra:reestrAu:15:_t344'},'');return false">Ремонт аппарата ИВЛ SV-300 (Mindray)</a></td><td><span id="fra:reestrAu:15:_t346">ЗЦП</span></td><td><span id="fra:reestrAu:15:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:15:_t350">2&#160;243,80</span><span id="fra:reestrAu:15:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:15:_t354">Минский областной клинический госпиталь инвалидов Великой Отечественной войны имени П.М.Машерова</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:15:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:15:_t361">22.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:15:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:15:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_16" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:16:_t340">AU20261015396560</span>
+		    <br /><span id="fra:reestrAu:16:_t342">- /        4827977</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:16:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:16:_t344':'fra:reestrAu:16:_t344'},'');return false">27/11-1 Лекарственное средство Энзалутамид</a></td><td><span id="fra:reestrAu:16:_t346">аукцион</span></td><td><span id="fra:reestrAu:16:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:16:_t350">3&#160;524&#160;881,56</span><span id="fra:reestrAu:16:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:16:_t354">РУП &#34;БЕЛФАРМАЦИЯ&#34;</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:16:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:16:_t361">06.11.2026</span></td><td><span id="fra:reestrAu:16:_t363"></span></td><td class="colLeft"><span id="fra:reestrAu:16:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:16:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_17" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:17:_t340">EZ20261015396680</span>
+		    <br /><span id="fra:reestrAu:17:_t342">- /        4827976</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:17:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:17:_t344':'fra:reestrAu:17:_t344'},'');return false">ЗОИ. Электрические чайники для УЗ &#171;Городская детская инфекционная клиническая больница&#187; на 2026 год.</a></td><td><span id="fra:reestrAu:17:_t346">ЗОИ на ЭТП</span></td><td><span id="fra:reestrAu:17:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:17:_t350">4&#160;500,00</span><span id="fra:reestrAu:17:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:17:_t354">Городская детская инфекционная клиническая больница</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:17:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:17:_t361">20.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:17:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:17:_t371"></span></td></tr><tr class=" ui-datatable-even zebra  " id="fra:reestrAu_row_18" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:18:_t340">RQ20261015396672</span>
+		    <br /><span id="fra:reestrAu:18:_t342">- /        4827962</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:18:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:18:_t344':'fra:reestrAu:18:_t344'},'');return false">Медицинская одежда для УЗ Городская детская инфекционная клиническая больница на 2026 год.</a></td><td><span id="fra:reestrAu:18:_t346">ЗЦП</span></td><td><span id="fra:reestrAu:18:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:18:_t350">44&#160;450,00</span><span id="fra:reestrAu:18:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:18:_t354">Городская детская инфекционная клиническая больница</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:18:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:18:_t361">22.10.2026</span></td><td></td><td class="colLeft"><span id="fra:reestrAu:18:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:18:_t371"></span></td></tr><tr class=" ui-datatable-odd zebra  " id="fra:reestrAu_row_19" tabindex="0"><td class="colLeft"><span id="fra:reestrAu:19:_t340">AU20261015396607</span>
+		    <br /><span id="fra:reestrAu:19:_t342">- /        4827945</span></td><td class="colLeft"><a href="#" id="fra:reestrAu:19:_t344" onclick="mojarra.jsfcljs(document.getElementById('fra'),{'fra:reestrAu:19:_t344':'fra:reestrAu:19:_t344'},'');return false">БарМТ №722/26 - Реагенты для гематологических анализаторов &#171;HumaCount 5D&#187;,  &#171;HumaCount 80 TS&#187;, наборы реагентов для качественных и полуколичественных иммунологических исследований на основе латекс-агглютинации</a></td><td><span id="fra:reestrAu:19:_t346">аукцион</span></td><td><span id="fra:reestrAu:19:_t348">15.10.2026</span></td><td class="colRight" style="white-space: nowrap"><span id="fra:reestrAu:19:_t350">84&#160;435,72</span><span id="fra:reestrAu:19:_t351"> BYN</span></td><td class="colLeft">
+		    <span><span id="fra:reestrAu:19:_t354">УП &#34;Медтехника&#34; г. Барановичи</span>
+		    </span></td><td class="colLeft"><span id="fra:reestrAu:19:_t359">Госзакупка</span></td><td><span id="fra:reestrAu:19:_t361">02.11.2026</span></td><td><span id="fra:reestrAu:19:_t363"></span></td><td class="colLeft"><span id="fra:reestrAu:19:_t365">Подача предложений / документов</span></td><td><span id="fra:reestrAu:19:_t371"></span></td></tr></tbody></table></div><div class="ui-paginator ui-paginator-bottom ui-widget-header ui-corner-bl ui-corner-br" id="fra:reestrAu_paginatorbottom"></div><script type="text/javascript">var widget_fra_reestrAu = ice.ace.create("DataTable",["fra:reestrAu",{"formId":"fra","widgetVar":"widget_fra_reestrAu","sorting":true,"paginator":new YAHOO.widget.Paginator({"rowsPerPage":20,"totalRecords":230954,"initialPage":1,"containers":['fra:reestrAu_paginatortop','fra:reestrAu_paginatorbottom'],"template":"{CurrentPageReport} <br\/> {FirstPageLink} {PreviousPageLink} {PageLinks} {NextPageLink} {LastPageLink}","pageReportTemplate":"Всего: {totalRecords}, показано {startRecord} - {endRecord}.        (Страница {currentPage} из {totalPages})","alwaysVisible":false,"pageLinks":10}),"clickableHeaderSorting":true,"singleSort":true}]);</script></div><span id="frahdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /><input name="fra:j_idcl" type="hidden" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" enctype="application/x-www-form-urlencoded" id="frokrb" method="post" name="frokrb">
+<input name="frokrb" type="hidden" value="frokrb" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="frokrb:frokrb_captureSubmit" type="text/javascript">ice.captureSubmit('frokrb',false);ice.captureKeypress('frokrb',null);</script>
+            
+            <style type="text/css">
+                #frokrb\3Aokrbtree {
+                    font-weight: normal;
+                    line-height: 1 !important;
+                    height:405px;
+                    width:430px;
+                    overflow: auto;
+                    position:relative;
+                    text-align: left;
+                    cursor: pointer;
+                }
+                #form\3Atree table {
+                    font-size: 1em;
+                }
+                #form > table > tr {
+                    vertical-align: top;
+                }
+                .eqCell {
+                    width:50%;
+                    text-align: center;
+                }
+                ul.output {
+                    height:184px;
+                    width:120px;
+                    display:inline-block;
+                    overflow: auto;
+                    padding-left: 1em;
+                    list-style: disc inside;
+                }
+            </style><span id="frokrbhdnFldsDiv"><input name="icefacesCssUpdates" type="hidden" value="" /></span><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form></div>
+
+</div></span>
+			</td>
+			<td class="rightcontent"></td>
+		    </tr>        
+		    <tr>
+			<td class="footerFill" colspan="3"><span id="_t408"><div xmlns="http://www.w3.org/1999/xhtml"><span id="_t410">
+        <br />
+        <div style="border-top:1px solid white;margin:0 100px;padding:0;"></div><span class="footerText" id="_t412">&#169;ОАО &#171;Белорусская универсальная товарная биржа&#187;, 2010-</span><span class="footerText" id="_t413">2026</span><span class="footerText" id="_t414">. Все права защищены</span>
+	<br /><span class="footerText" id="_t416">E-mail:info@butb.by</span>
+
+	<br />
+
+	<a href="https://www.butb.by" target="_blank"><img class="linkImg" src="/auctions/images/logo_small.png" />
+	</a></span>
+
+    <br /><br />
+</div></span>	
+			</td>
+		    </tr>
+
+		</table>
+	    </div>
+	</span>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" id="vkeu0su29vnh-retrieve-update" method="post" name="vkeu0su29vnh-retrieve-update">
+<input name="vkeu0su29vnh-retrieve-update" type="hidden" value="vkeu0su29vnh-retrieve-update" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="vkeu0su29vnh-retrieve-update:vkeu0su29vnh-retrieve-update_captureSubmit" type="text/javascript">ice.captureSubmit('vkeu0su29vnh-retrieve-update',false);ice.captureKeypress('vkeu0su29vnh-retrieve-update',null);</script><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form>
+<form action="/auctions/reestrauctions.html;jsessionid=447EE46A664708D8ADEFFAAC46C5FAFE" id="vkeu0su29vnh-single-submit" method="post" name="vkeu0su29vnh-single-submit">
+<input name="vkeu0su29vnh-single-submit" type="hidden" value="vkeu0su29vnh-single-submit" />
+<input name="ice.window" type="hidden" value="ohmv9xjgmi" /><input name="ice.view" type="hidden" value="vkeu0su29vnh" /><script id="vkeu0su29vnh-single-submit:vkeu0su29vnh-single-submit_captureSubmit" type="text/javascript">ice.captureSubmit('vkeu0su29vnh-single-submit',false);ice.captureKeypress('vkeu0su29vnh-single-submit',null);</script><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="1071019590542559377:-1629819047499179006" autocomplete="off"></input>
+</form><span id="vkeu0su29vnh_icefaces_config"><script>ice.setupBridge('vkeu0su29vnh_icefaces_config', 'vkeu0su29vnh', 'ohmv9xjgmi', {reloadOnUpdateFailure: false,deltaSubmit: false,focusManaged: true,disableDefaultErrorPopups: true,standardFormSerialization: false,sendDisposeWindow: false,blockUIOnSubmit: false});</script></span><span id="vkeu0su29vnh_icefaces_compat_config"><script type="text/javascript">ice.includeScrollOffsets=true;ice.DefaultIndicators({fastBusyIndicator: false,connectionLostRedirectURI: null,sessionExpiredRedirectURI: null,connection: { context: '/auctions/'},messages: {sessionExpired: 'User Session Expired',connectionLost: 'Network Connection Interrupted',serverError: 'Server Internal Error',description: 'To reconnect click the Reload button on the browser or click the button below',buttonText: 'Reload'}},'vkeu0su29vnh_icefaces_compat_config');</script></span><span id="dynamic-code"></span><span id="dynamic-code-compat"><script type="text/javascript">Ice.modal.stop('j_idt47:j_idt49');Ice.modal.stop('j_idt64:j_idt65');Ice.modal.stop('fra:j_idt372');Ice.modal.stop('frokrb:j_idt387');//-795907424</script></span><span id="vkeu0su29vnh_icepush"><script type="text/javascript">ice.setupPush('vkeu0su29vnh');ice.push.configuration.contextPath="/auctions";ice.push.configuration.blockingConnectionURI="/auctions/javax.faces.resource/listen.icepush.xml.html";ice.push.configuration.createPushIdURI="/auctions/javax.faces.resource/create-push-id.icepush.txt.html";ice.push.configuration.notifyURI="/auctions/javax.faces.resource/notify.icepush.txt.html";ice.push.configuration.addGroupMemberURI="/auctions/javax.faces.resource/add-group-member.icepush.txt.html";ice.push.configuration.removeGroupMemberURI="/auctions/javax.faces.resource/remove-group-member.icepush.txt.html";</script></span></body>
+
+    
+
+</html>

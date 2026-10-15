@@ -23,9 +23,30 @@ export interface SpecialistCardWatchPort {
 
 export interface ProcurementCardWatchOptions {
   caller: McpToolCaller;
+  /** Fallback for ids whose prefix is not recognised (legacy goszakupki ids). */
   sourceId: SourceIdValue;
   logger?: Logger;
   timeoutMs?: number;
+}
+
+/**
+ * `sourceProcurementId` carries its source: `butb/…` reads go to the BUTB
+ * adapter, every other prefix keeps the wired default. This is what lets one
+ * watch pass monitor cards from several platforms without splitting the lane.
+ */
+function sourceIdFromProcurementId(id: string, fallback: SourceIdValue): SourceIdValue {
+  if (id.startsWith("butb/")) return SourceId.parse("butb");
+  return fallback;
+}
+
+/** Downloads route to BUTB only for documents hosted on its domain. */
+function sourceIdFromDocumentUrl(url: string, fallback: SourceIdValue): SourceIdValue {
+  try {
+    if (new URL(url).hostname.endsWith("butb.by")) return SourceId.parse("butb");
+  } catch {
+    // Non-URL strings keep the default source — download() validates anyway.
+  }
+  return fallback;
 }
 
 /**
@@ -54,7 +75,10 @@ export function createProcurementCardWatch(
     async read(sourceProcurementId) {
       try {
         return await client.get(
-          { sourceId, sourceProcurementId: SourceProcurementId.parse(sourceProcurementId) },
+          {
+            sourceId: sourceIdFromProcurementId(sourceProcurementId, sourceId),
+            sourceProcurementId: SourceProcurementId.parse(sourceProcurementId),
+          },
           RequestId.parse(randomUUID()),
         );
       } catch (error) {
@@ -68,7 +92,7 @@ export function createProcurementCardWatch(
     async probeDocument(sourceUrl) {
       try {
         const downloaded = await client.download(
-          { sourceId, downloadUrl: sourceUrl },
+          { sourceId: sourceIdFromDocumentUrl(sourceUrl, sourceId), downloadUrl: sourceUrl },
           RequestId.parse(randomUUID()),
         );
         return downloaded.hash;

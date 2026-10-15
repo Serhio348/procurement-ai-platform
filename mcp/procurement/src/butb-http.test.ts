@@ -146,10 +146,69 @@ describe("ButbHttpClient session", () => {
 
     expect(page2.body).toContain("reestrAu_row_20");
     expect(pageChanges).toBe(2);
-    // Bootstrap GET + page-1 GET happen per session opening.
     expect(bootstraps).toBeGreaterThanOrEqual(2);
     const posts = calls.filter((call) => call.method === "POST");
     expect(posts[1]?.body).toContain("javax.faces.ViewState=VS2");
+  });
+
+  it("pages only with postbacks — a registry GET keeps the session's page", async () => {
+    const { run: fetch, calls } = scriptedFetch((request) => {
+      if (request.method === "GET" && request.url === REGISTRY) {
+        return htmlResponse(registryHtml("VS1"));
+      }
+      if (request.method === "POST" && request.body?.includes("pageChange")) {
+        return htmlResponse(pageChangeXml("VS2"));
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.url}`);
+    });
+    const c = client(fetch);
+
+    await c.registryPage(1);
+    await c.registryPage(3);
+    // Back to page 1: a GET would return page 3 again — must postback.
+    await c.registryPage(1);
+
+    const posts = calls.filter((call) => call.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(posts[0]?.body).toContain("reestrAu_page=3");
+    expect(posts[1]?.body).toContain("reestrAu_page=1");
+    // One bootstrap GET only: no extra GETs that the server would answer
+    // with whatever page the session is parked on.
+    expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
+  });
+
+  it("restores the registry view before paging after a card was opened", async () => {
+    const { run: fetch, calls } = scriptedFetch((request) => {
+      if (request.method === "GET" && request.url === REGISTRY) {
+        return htmlResponse(registryHtml("VS1"));
+      }
+      if (request.method === "POST" && request.body?.includes("_t344")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "/auctions/viewinvitation.html" },
+        });
+      }
+      if (request.method === "GET" && request.url === CARD) {
+        return htmlResponse("<html>card body</html>");
+      }
+      if (request.method === "POST" && request.body?.includes("pageChange")) {
+        return htmlResponse(pageChangeXml("VS2"));
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.url}`);
+    });
+    const c = client(fetch);
+
+    await c.registryPage(1);
+    await c.openCard("fra:reestrAu:0:_t344");
+    await c.registryPage(2);
+
+    // GET bootstrap, POST card link, GET card, GET registry (back),
+    // POST pageChange — the card view cannot answer row postbacks.
+    const gets = calls.filter((call) => call.method === "GET" && call.url === REGISTRY);
+    expect(gets).toHaveLength(2);
+    const last = calls[calls.length - 1];
+    expect(last?.method).toBe("POST");
+    expect(last?.body).toContain("reestrAu_page=2");
   });
 });
 

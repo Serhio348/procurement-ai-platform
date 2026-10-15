@@ -65,6 +65,18 @@ export interface ButbHttpClientOptions {
 const REGISTRY_PATH = "/auctions/reestrauctions.html";
 const CARD_PATH = "/auctions/viewinvitation.html";
 const TABLE_ID = "fra:reestrAu";
+const REGISTRY_PAGE_SIZE = 20;
+
+/**
+ * The registry answers a plain GET with whatever page the session's table
+ * is on, not with page 1 — so the only ground truth about position is the
+ * absolute row index inside `fra:reestrAu:<index>:_tNNN` link ids.
+ */
+function detectRegistryPage(body: string): number | undefined {
+  const match = /reestrAu:(\d+):/.exec(body);
+  if (match === null) return undefined;
+  return Math.floor(Number(match[1]) / REGISTRY_PAGE_SIZE) + 1;
+}
 
 export class ButbHttpClient implements ButbPageClient {
   readonly #baseUrl: URL;
@@ -84,7 +96,11 @@ export class ButbHttpClient implements ButbPageClient {
   #consecutiveFailures = 0;
   #circuitOpenedUntil = 0;
   #state: ButbViewState | undefined;
-  #sessionBootstrap: Promise<void> | undefined;
+  #sessionBootstrap: Promise<ButbPage> | undefined;
+  /** Which JSF view the session currently renders. */
+  #view: "registry" | "card" = "registry";
+  /** Page the session's registry table actually shows (detected, not asked). */
+  #currentPage: number | undefined;
   /** Whole-operation lock; #queue only paces individual requests. */
   #operationQueue: Promise<void> = Promise.resolve();
   /** >0 while inside withSession — inner calls skip the lock. */
@@ -112,20 +128,19 @@ export class ButbHttpClient implements ButbPageClient {
   }
 
   /**
-   * Page `page` (1-based) of the registry. Page 1 is a plain GET — it also
-   * (re)opens the session. Later pages are pageChange postbacks inside it.
-   * Returns the rendered table fragment: the caller parses rows only.
+   * Page `page` (1-based) of the registry. A GET on the registry URL does
+   * NOT reset the table — the server answers with the page the session is
+   * already on — so navigation beyond the freshly-bootstrapped view always
+   * goes through pageChange postbacks. After a card was opened the session
+   * sits on the card view; a registry GET restores the registry first.
    */
   async registryPage(page: number): Promise<ButbPage> {
     if (page < 1) throw new Error("registryPage pages are 1-based");
     return this.#serialized(() => this.#guarded(async () => {
-      await this.#ensureSession();
-      if (page === 1) {
-        // The bootstrap GET already holds the pristine first page.
-        const page1 = await this.#request(new URL(REGISTRY_PATH, this.#baseUrl), "html");
-        this.#adoptState(page1.body);
-        return page1;
-      }
+      const boot = await this.#ensureSession();
+      const back = await this.#restoreRegistryView();
+      const fresh = boot ?? back;
+      if (fresh !== undefined && this.#currentPage === page) return fresh;
       const body = await this.#pageChange(page);
       return { status: 200, url: this.#registryUrl(), body };
     }));
@@ -142,6 +157,9 @@ export class ButbHttpClient implements ButbPageClient {
     }
     return this.#serialized(() => this.#guarded(async () => {
       await this.#ensureSession();
+      // A row link id only resolves while the registry table renders its
+      // page — if a previous card is still on screen, go back first.
+      await this.#restoreRegistryView();
       return this.#postbackForCard(cardLinkId);
     }));
   }
@@ -226,28 +244,54 @@ export class ButbHttpClient implements ButbPageClient {
     }
   }
 
-  async #ensureSession(): Promise<void> {
-    if (this.#state !== undefined) return;
+  /**
+   * Opens the session if needed. Returns the freshly rendered registry page
+   * when a bootstrap GET happened, undefined when a session was already live.
+   */
+  async #ensureSession(): Promise<ButbPage | undefined> {
+    if (this.#state !== undefined) return undefined;
     if (this.#sessionBootstrap !== undefined) return this.#sessionBootstrap;
     this.#sessionBootstrap = (async () => {
       const page = await this.#request(new URL(REGISTRY_PATH, this.#baseUrl), "html");
       if (page.status < 200 || page.status >= 300) {
         throw new SourceAccessError("butb", `session bootstrap returned HTTP ${page.status}`);
       }
-      this.#adoptState(page.body);
+      this.#adoptRegistry(page.body);
       if (this.#state === undefined) {
         throw new SourceAccessError("butb", "registry page carries no JSF view state");
       }
+      return { status: page.status, url: page.url, body: page.body };
     })();
     try {
-      await this.#sessionBootstrap;
+      return await this.#sessionBootstrap;
     } finally {
       this.#sessionBootstrap = undefined;
     }
   }
 
+  /**
+   * Puts the registry view back on screen when the session is on a card.
+   * Returns the registry page the server came back on, or undefined when the
+   * registry was already the current view.
+   */
+  async #restoreRegistryView(): Promise<ButbPage | undefined> {
+    if (this.#view === "registry") return undefined;
+    const back = await this.#request(new URL(REGISTRY_PATH, this.#baseUrl), "html");
+    this.#adoptRegistry(back.body);
+    return { status: back.status, url: back.url, body: back.body };
+  }
+
+  /** Adopts JSF state and records which registry page was actually rendered. */
+  #adoptRegistry(body: string): void {
+    this.#adoptState(body);
+    this.#view = "registry";
+    this.#currentPage = detectRegistryPage(body) ?? this.#currentPage ?? 1;
+  }
+
   #invalidateSession(): void {
     this.#state = undefined;
+    this.#currentPage = undefined;
+    this.#view = "registry";
   }
 
   #adoptState(html: string): void {
@@ -292,6 +336,8 @@ export class ButbHttpClient implements ButbPageClient {
       throw new SourceAccessError("butb", "pageChange returned no table update");
     }
     this.#adoptState(response.body);
+    this.#view = "registry";
+    this.#currentPage = detectRegistryPage(table) ?? page;
     return table;
   }
 
@@ -308,7 +354,9 @@ export class ButbHttpClient implements ButbPageClient {
       );
     }
     const cardUrl = new URL(response.url, this.#baseUrl);
-    return this.#request(cardUrl, "html");
+    const card = await this.#request(cardUrl, "html");
+    this.#view = "card";
+    return card;
   }
 
   async #post(

@@ -276,8 +276,14 @@ export interface BuildApiOptions {
     mode: "live" | "fixture";
     objectStore: string;
     source?: { background: boolean; interactive: boolean };
-    /** Source ids enabled at boot (health reports the fan-out membership). */
+    /** Source ids the API intends to fan out to (health reports them as configured). */
     sources?: string[];
+    /**
+     * Live probe of the MCP child's source registry. When present, health
+     * reports the actual registry; a probe failure marks sources degraded —
+     * a configured-but-unregistered source must not look healthy.
+     */
+    sourcesProbe?: () => Promise<readonly string[]>;
     models?: { searchIntent: boolean; classifier: boolean; commercialReader: boolean };
     mail?: boolean;
     /** Bot token set and getMe answered. */
@@ -1978,10 +1984,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       classifier: false,
       commercialReader: false,
     };
+    let sources = health?.sources;
+    let sourcesProbeFailed = false;
+    if (health?.sourcesProbe !== undefined) {
+      try {
+        sources = [...(await health.sourcesProbe())];
+      } catch {
+        sourcesProbeFailed = true;
+      }
+    }
+    const missingSources = (health?.sources ?? []).filter(
+      (configured) => !(sources ?? []).includes(configured),
+    );
     const degraded: string[] = [];
     if (postgres === "failed") degraded.push("PostgreSQL");
     if (source === "off") degraded.push("Источник закупок");
     if (source === "fixture") degraded.push("Источник: тестовые данные");
+    if (sourcesProbeFailed) degraded.push("Источники: реестр MCP не отвечает");
+    if (missingSources.length > 0) {
+      degraded.push(`Источники не зарегистрированы: ${missingSources.join(", ")}`);
+    }
     if (!models.searchIntent) degraded.push("Модель: разбор запроса");
     if (!models.classifier) degraded.push("Модель: оценка карточек");
     if (!models.commercialReader) degraded.push("Модель: чтение условий");
@@ -2001,7 +2023,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       components: {
         postgres,
         source,
-        ...(health?.sources === undefined ? {} : { sources: health.sources }),
+        ...(sources === undefined ? {} : { sources }),
+        ...(health?.sources === undefined
+          ? {}
+          : { sourcesConfigured: health.sources }),
         objectStore: health?.objectStore ?? "unknown",
         models,
         mail: health?.mail === true,

@@ -102,6 +102,18 @@ export const ProcurementDownloadResponse = z.object({
 });
 export type ProcurementDownloadResponse = z.infer<typeof ProcurementDownloadResponse>;
 
+/**
+ * Introspection: which sources the MCP child actually registered. Health
+ * uses it so a flag reaching the API but not the child cannot fake health.
+ */
+export const ProcurementSourcesRequest = z.object({}).strict();
+export type ProcurementSourcesRequest = z.infer<typeof ProcurementSourcesRequest>;
+
+export const ProcurementSourcesResponse = z.object({
+  sources: z.array(SourceId),
+});
+export type ProcurementSourcesResponse = z.infer<typeof ProcurementSourcesResponse>;
+
 export interface ProcurementFileBytes {
   bytes: Uint8Array;
   contentType: string;

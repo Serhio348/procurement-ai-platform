@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SourceId } from "@procurement/contracts";
+import { RequestId, SourceId } from "@procurement/contracts";
+import { ProcurementMcpClient, ToolPolicyGate } from "@procurement/mcp-client";
 import { createLogger } from "@procurement/observability";
 import { buildSpecialistApi, type SpecialistApi } from "./app.js";
 import { createSmtpMailPort } from "./auth/mail.js";
@@ -311,7 +313,24 @@ async function main(): Promise<void> {
         background: mcp !== undefined,
         interactive: mcpInteractive !== undefined,
       },
-      sources: enabledSourceIds,
+      sources: enabledSourceIds.map(String),
+      // The child's registry is the truth: health must surface a source
+      // whose flag reached the API but never the spawned MCP process.
+      ...(mcpInteractive === undefined
+        ? {}
+        : {
+            sourcesProbe: async () => {
+              const probe = new ProcurementMcpClient({
+                caller: mcpInteractive.caller,
+                policyGate: new ToolPolicyGate({
+                  agentAllowedTools: ["procurement.sources"],
+                }),
+                timeoutMs: 10_000,
+                logger,
+              });
+              return (await probe.sources(RequestId.parse(randomUUID()))).sources.map(String);
+            },
+          }),
       models: {
         searchIntent: searchIntent !== undefined,
         classifier: classifier !== undefined,

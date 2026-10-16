@@ -8,6 +8,9 @@ describe("mcpChildEnv (R43)", () => {
       HOME: "/root",
       GOSZAKUPKI_BY_BASE_URL: "https://goszakupki.by",
       GOSZAKUPKI_BY_RATE_LIMIT_RPM: "20",
+      BUTB_ENABLED: "1",
+      BUTB_BY_BASE_URL: "https://zakupki.butb.by",
+      BUTB_BY_RATE_LIMIT_RPM: "12",
       DOCUMENT_BLOB_DIR: "/data/blobs",
       DOCUMENT_OCR_MAX_PAGES: "20",
       PROCUREMENT_SOURCE_MODE: "live",
@@ -25,6 +28,11 @@ describe("mcpChildEnv (R43)", () => {
     });
 
     expect(env["GOSZAKUPKI_BY_BASE_URL"]).toBe("https://goszakupki.by");
+    // BUTB_* must reach the child — the whitelist is what actually
+    // registers the source inside the MCP process (live smoke gap).
+    expect(env["BUTB_ENABLED"]).toBe("1");
+    expect(env["BUTB_BY_BASE_URL"]).toBe("https://zakupki.butb.by");
+    expect(env["BUTB_BY_RATE_LIMIT_RPM"]).toBe("12");
     expect(env["DOCUMENT_BLOB_DIR"]).toBe("/data/blobs");
     expect(env["PROCUREMENT_SOURCE_MODE"]).toBe("live");
     expect(env["PATH"]).toBe("/usr/bin");

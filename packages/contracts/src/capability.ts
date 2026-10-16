@@ -29,6 +29,7 @@ export const McpToolName = z.enum([
   "procurement.get_documents",
   "procurement.get_changes",
   "procurement.download",
+  "procurement.sources",
 
   "documents.list",
   "documents.download",

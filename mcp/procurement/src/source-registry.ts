@@ -1,4 +1,4 @@
-import type { ProcurementSourcePort, SourceId } from "@procurement/contracts";
+import { SourceId, type ProcurementSourcePort } from "@procurement/contracts";
 
 export class SourceUnavailableError extends Error {
   constructor(readonly sourceId: string) {
@@ -45,5 +45,9 @@ export class ProcurementSourceRegistry {
     const source = this.#sources.get(sourceId);
     if (source === undefined) throw new SourceUnavailableError(sourceId);
     return source;
+  }
+
+  list(): SourceId[] {
+    return [...this.#sources.keys()].map((id) => SourceId.parse(id));
   }
 }

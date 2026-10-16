@@ -54,7 +54,20 @@ describe("Procurement MCP", () => {
       "procurement.get_lots",
       "procurement.get_status",
       "procurement.search",
+      "procurement.sources",
     ]);
+  });
+
+  it("reports the sources actually registered in this process", async () => {
+    const result = await client.callTool({
+      name: "procurement.sources",
+      arguments: {},
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      sources: expect.arrayContaining(["fixture", "goszakupki_by"]),
+    });
   });
 
   it("carries the client correlation id into structured logs", async () => {

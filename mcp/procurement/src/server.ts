@@ -11,6 +11,8 @@ import {
   ProcurementGetStatusResponse,
   ProcurementSearchRequest,
   ProcurementSearchResponse,
+  ProcurementSourcesRequest,
+  ProcurementSourcesResponse,
   type ProcurementSourcePort,
 } from "@procurement/contracts";
 import type { Logger } from "@procurement/observability";
@@ -174,6 +176,25 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
           .getChanges(request.sourceProcurementId, request.since);
         return ProcurementGetChangesResponse.parse(output);
       }),
+  );
+
+  server.registerTool(
+    "procurement.sources",
+    {
+      description: "List the procurement sources registered in this MCP process.",
+      inputSchema: ProcurementSourcesRequest,
+      outputSchema: ProcurementSourcesResponse,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (_input, extra) =>
+      executeTool("procurement.sources", logger, correlationId(extra), async () =>
+        ProcurementSourcesResponse.parse({ sources: registry.list() }),
+      ),
   );
 
   return server;

@@ -11,6 +11,8 @@ import {
   ProcurementGetStatusResponse,
   ProcurementSearchRequest,
   ProcurementSearchResponse,
+  ProcurementSourcesRequest,
+  ProcurementSourcesResponse,
   type RequestId,
   type ProcurementDownloadRequest as ProcurementDownloadRequestValue,
   type ProcurementDownloadResponse as ProcurementDownloadResponseValue,
@@ -24,6 +26,7 @@ import {
   type ProcurementGetStatusResponse as ProcurementGetStatusResponseValue,
   type ProcurementSearchRequest as ProcurementSearchRequestValue,
   type ProcurementSearchResponse as ProcurementSearchResponseValue,
+  type ProcurementSourcesResponse as ProcurementSourcesResponseValue,
 } from "@procurement/contracts";
 import type { Logger } from "@procurement/observability";
 import { silentLogger } from "@procurement/observability";
@@ -158,6 +161,17 @@ export class ProcurementMcpClient {
     );
   }
 
+  /** Sources actually registered inside the MCP process (health probe). */
+  sources(requestId: RequestId): Promise<ProcurementSourcesResponseValue> {
+    return this.#call(
+      "procurement.sources",
+      {},
+      ProcurementSourcesRequest,
+      ProcurementSourcesResponse,
+      requestId,
+    );
+  }
+
   #call<Input extends Record<string, unknown>, Output>(
     toolName:
       | "procurement.search"
@@ -167,7 +181,8 @@ export class ProcurementMcpClient {
       | "procurement.get_documents"
       | "procurement.get_history"
       | "procurement.get_changes"
-      | "procurement.download",
+      | "procurement.download"
+      | "procurement.sources",
     input: Input,
     inputSchema: Parameters<typeof callValidatedTool<Input, Output>>[0]["inputSchema"],
     outputSchema: Parameters<typeof callValidatedTool<Input, Output>>[0]["outputSchema"],

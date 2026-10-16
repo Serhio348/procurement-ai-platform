@@ -30,6 +30,8 @@ const MCP_ENV_EXACT = new Set([
   "NODE_EXTRA_CA_CERTS",
   "SEARCH_PAGES",
   "GOSZAKUPKI_TLS_INSECURE",
+  "BUTB_ENABLED",
+  "BUTB_TLS_INSECURE",
   "REFRESH_LIVE_OFFICE",
   "PATH",
   "PATHEXT",
@@ -55,7 +57,14 @@ const MCP_ENV_EXACT = new Set([
   "USER",
   "LOGNAME",
 ]);
-const MCP_ENV_PREFIXES = ["GOSZAKUPKI_BY_", "DOCUMENT_", "PROCUREMENT_", "LC_", "XDG_"];
+const MCP_ENV_PREFIXES = [
+  "GOSZAKUPKI_BY_",
+  "BUTB_BY_",
+  "DOCUMENT_",
+  "PROCUREMENT_",
+  "LC_",
+  "XDG_",
+];
 
 export function mcpChildEnv(parent: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {};

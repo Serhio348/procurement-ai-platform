@@ -694,8 +694,10 @@ export const SpecialistServiceHealth = z.object({
   components: z.object({
     postgres: z.enum(["ok", "failed", "off"]),
     source: z.enum(["live", "fixture", "off"]),
-    /** Procurement sources the fan-out may use (e.g. goszakupki_by, butb). */
+    /** Sources actually registered in the MCP child (probed live). */
     sources: z.array(z.string().min(1)).optional(),
+    /** Sources the API intends to use — divergence from `sources` = misconfig. */
+    sourcesConfigured: z.array(z.string().min(1)).optional(),
     objectStore: z.string().min(1),
     models: z.object({
       searchIntent: z.boolean(),

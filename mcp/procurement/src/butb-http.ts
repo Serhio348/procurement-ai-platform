@@ -327,12 +327,21 @@ export class ButbHttpClient implements ButbPageClient {
     const response = await this.#post(state, fields, { ajax: true });
     const table = butbPartialUpdate(response.body, TABLE_ID);
     if (table === undefined) {
-      // A full-page answer means the view was lost; a bare ViewState update
-      // means the event was ignored — both are unrecoverable in-session.
-      if (response.body.includes("ViewState") || response.body.includes("<html")) {
+      // Any framed answer without our table means the view no longer
+      // matches the session: a full page, a bare ViewState update, or an
+      // ICEfaces <error>/<redirect> partial-response — reopen once.
+      if (
+        response.body.includes("ViewState") ||
+        response.body.includes("<html") ||
+        response.body.includes("partial-response")
+      ) {
         throw new ButbViewExpiredError();
       }
-      throw new SourceAccessError("butb", "pageChange returned no table update");
+      const snippet = response.body.replace(/\s+/g, " ").slice(0, 160);
+      throw new SourceAccessError(
+        "butb",
+        `pageChange returned no table update (HTTP ${String(response.status)}): ${snippet}`,
+      );
     }
     this.#adoptState(response.body);
     this.#view = "registry";

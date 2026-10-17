@@ -133,9 +133,11 @@ describe("ButbHttpClient session", () => {
       }
       if (request.method === "POST" && request.body?.includes("pageChange")) {
         pageChanges += 1;
-        // First postback answers a full page — the view is dead.
+        // First postback answers an ICEfaces error frame — the view is dead.
         return pageChanges === 1
-          ? htmlResponse("<html>full page, lost view</html>")
+          ? htmlResponse(
+              `<?xml version="1.0"?><partial-response><error><error-name>session expired</error-name></error></partial-response>`,
+            )
           : htmlResponse(pageChangeXml("VS9"));
       }
       throw new Error(`unexpected request: ${request.method} ${request.url}`);

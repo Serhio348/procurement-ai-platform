@@ -113,6 +113,36 @@ describe("ButbSource.search", () => {
     expect(client.calls.pages.length).toBe(5);
     expect(answer.hasMore).toBe(true);
   });
+
+  it("stops at the wall-clock budget instead of outliving the tool timeout", async () => {
+    // Pages exist forever; each read costs 30 s of clock — the 60 s budget
+    // must cut the scan after two pages and honestly report hasMore.
+    let tick = new Date("2026-10-16T00:00:00Z").getTime();
+    const client = fakeClient(
+      new Map(Array.from({ length: 40 }, (_, i) => [i + 1, registryHtml])),
+    );
+    const timed: ButbPageClient & { calls: typeof client.calls } = {
+      calls: client.calls,
+      registryPage: async (p) => {
+        tick += 30_000;
+        return client.registryPage(p);
+      },
+      openCard: client.openCard,
+      download: client.download,
+      withSession: client.withSession,
+    };
+    const source = new ButbSource({
+      client: timed,
+      maxSearchPages: 40,
+      maxSearchMs: 60_000,
+      now: () => new Date(tick),
+    });
+    const answer = await source.search(
+      query({ keywords: ["неттакогослова"], publishedFrom: "1900-01-01T00:00:00Z", limit: 500 }),
+    );
+    expect(client.calls.pages.length).toBe(2);
+    expect(answer.hasMore).toBe(true);
+  });
 });
 
 describe("ButbSource.get", () => {

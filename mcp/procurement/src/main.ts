@@ -73,6 +73,11 @@ function liveSources(logger: Logger): ProcurementSourcePort[] {
     sources.push(
       new ButbSource({
         logger,
+        maxSearchMs: positiveNumber(
+          process.env["BUTB_BY_MAX_SEARCH_MS"],
+          90_000,
+          "BUTB_BY_MAX_SEARCH_MS",
+        ),
         client: new ButbHttpClient({
           ...(process.env["BUTB_BY_BASE_URL"] === undefined
             ? {}

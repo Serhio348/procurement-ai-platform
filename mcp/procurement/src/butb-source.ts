@@ -35,6 +35,12 @@ export interface ButbSourceOptions {
   client: ButbPageClient;
   /** Registry pages a single search scan may read. */
   maxSearchPages?: number;
+  /**
+   * Wall-clock budget for one search scan. Registry pages are postbacks on
+   * a throttled session — the cap must fit the MCP call timeout even when
+   * no watermark stops the scan early, or every deep query dies silently.
+   */
+  maxSearchMs?: number;
   /** Page reads a single card lookup may spend locating the row. */
   maxGetPages?: number;
   cardCacheTtlMs?: number;
@@ -67,6 +73,7 @@ export class ButbSource implements ProcurementSourcePort {
   readonly sourceId = SourceId.parse("butb");
   readonly #client: ButbPageClient;
   readonly #maxSearchPages: number;
+  readonly #maxSearchMs: number;
   readonly #maxGetPages: number;
   readonly #cardCacheTtlMs: number;
   readonly #baseUrl: string;
@@ -85,6 +92,9 @@ export class ButbSource implements ProcurementSourcePort {
   constructor(options: ButbSourceOptions) {
     this.#client = options.client;
     this.#maxSearchPages = options.maxSearchPages ?? 30;
+    // 90 s leaves headroom under the 120 s procurement.search tool timeout
+    // at the default 12 rpm pacing (~5 s per page postback).
+    this.#maxSearchMs = options.maxSearchMs ?? 90_000;
     this.#maxGetPages = options.maxGetPages ?? 40;
     this.#cardCacheTtlMs = options.cardCacheTtlMs ?? 60_000;
     this.#baseUrl = options.baseUrl ?? "https://zakupki.butb.by";
@@ -104,8 +114,15 @@ export class ButbSource implements ProcurementSourcePort {
     let scannedRows = 0;
 
     const watermark = dateFloor(query.publishedFrom);
+    const deadline = this.#now().getTime() + this.#maxSearchMs;
     let hasMore = false;
     while (page <= this.#maxSearchPages) {
+      if (this.#now().getTime() >= deadline) {
+        // The scan ran out of wall clock, not out of registry — the tail
+        // is genuinely unread, so the window must admit more may follow.
+        hasMore = true;
+        break;
+      }
       const rendered = await this.#client.registryPage(page);
       if (rendered.status < 200 || rendered.status >= 300) {
         throw new SourceAccessError(

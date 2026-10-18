@@ -922,14 +922,25 @@ export function createSpecialistStore(db: Database) {
               .select({
                 sourceProcurementId: workspaceProcurements.sourceProcurementId,
                 card: workspaceProcurements.card,
+                procurementId: workspaceProcurements.procurementId,
+                linkedSourceId: procurements.sourceId,
+                linkedSourceRecordId: procurements.sourceRecordId,
               })
               .from(workspaceProcurements)
+              .leftJoin(procurements, eq(procurements.id, workspaceProcurements.procurementId))
               .where(eq(workspaceProcurements.workspaceId, workspaceId))
-          ).map((row) => [row.sourceProcurementId, comparableCardJson(row.card)]),
+          ).map((row) => [row.sourceProcurementId, row]),
         );
         for (const card of uniqueBySource(cards)) {
           const parsed = SpecialistProcurementCard.parse(jsonbSafe(card));
-          if (existingCards.get(parsed.sourceProcurementId) === comparableCardJson(parsed)) {
+          const existing = existingCards.get(parsed.sourceProcurementId);
+          // The same skip as saveWorkspaceCase: an equal card with a stale
+          // canonical link must still go through the repair pass.
+          if (
+            existing !== undefined &&
+            comparableCardJson(existing.card) === comparableCardJson(parsed) &&
+            !canonicalLinkNeedsRepair(existing, parsed)
+          ) {
             continue;
           }
           await saveWorkspaceCase(tx, workspaceId, parsed);
@@ -1645,8 +1656,12 @@ async function saveWorkspaceCase(
       foundAs: workspaceProcurements.foundAs,
       updatedAt: workspaceProcurements.updatedAt,
       card: workspaceProcurements.card,
+      procurementId: workspaceProcurements.procurementId,
+      linkedSourceId: procurements.sourceId,
+      linkedSourceRecordId: procurements.sourceRecordId,
     })
     .from(workspaceProcurements)
+    .leftJoin(procurements, eq(procurements.id, workspaceProcurements.procurementId))
     .where(
       and(
         eq(workspaceProcurements.workspaceId, workspaceId),
@@ -1657,8 +1672,14 @@ async function saveWorkspaceCase(
   const previous = existing[0];
   // Unchanged card: skip the canonical upsert, the row update, and the
   // profile-link delete/reinsert — persist must cost the change, not the
-  // whole cabinet (R37).
-  if (previous !== undefined && comparableCardJson(previous.card) === comparableCardJson(parsed)) {
+  // whole cabinet (R37). A stale canonical link breaks the skip: equal
+  // cards persisted before namespaced source ids still point at a
+  // wrong-lane canonical row, and only a full pass repoints them.
+  if (
+    previous !== undefined &&
+    comparableCardJson(previous.card) === comparableCardJson(parsed) &&
+    !canonicalLinkNeedsRepair(previous, parsed)
+  ) {
     return;
   }
   const canonicalId = await upsertCanonicalProcurement(tx, parsed, now);
@@ -1780,14 +1801,46 @@ export function canonicalIdToReuse(
     : undefined;
 }
 
+/** Canonical lane for a card — the single store-level source rule. */
+function expectedCanonicalSource(card: SpecialistProcurementCardValue): string {
+  return (
+    sourceIdFromProcurementId(card.sourceProcurementId) ??
+    (card.live ? "goszakupki_by" : "fixture")
+  );
+}
+
+/**
+ * The unchanged-card skip compares card content, but `comparableCardJson`
+ * strips `canonicalProcurementId` — so a row persisted before namespaced
+ * ids still compares equal while its `procurement_id` points at a
+ * wrong-lane canonical row (e.g. `goszakupki_by` + `butb/…`). Such a link
+ * must not satisfy the skip: the card is written again so the canonical
+ * upsert can resolve the right row and repoint the workspace link.
+ */
+export function canonicalLinkNeedsRepair(
+  link:
+    | {
+        procurementId: string | null;
+        linkedSourceId: string | null;
+        linkedSourceRecordId: string | null;
+      }
+    | undefined,
+  card: SpecialistProcurementCardValue,
+): boolean {
+  if (link === undefined) return false;
+  if (link.linkedSourceId === null || link.linkedSourceRecordId === null) return true;
+  return (
+    link.linkedSourceId !== expectedCanonicalSource(card) ||
+    link.linkedSourceRecordId !== card.sourceProcurementId
+  );
+}
+
 async function upsertCanonicalProcurement(
   tx: StoreTx,
   card: SpecialistProcurementCardValue,
   now: string,
 ): Promise<string> {
-  const sourceId: string =
-    sourceIdFromProcurementId(card.sourceProcurementId) ??
-    (card.live ? "goszakupki_by" : "fixture");
+  const sourceId = expectedCanonicalSource(card);
   const hashed = card.documents.some((item) => item.hash !== undefined);
   const status = card.status;
   let pinnedId: string | undefined;

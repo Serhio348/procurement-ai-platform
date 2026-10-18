@@ -1,5 +1,5 @@
 import { InboxFixtureItem, ProcedureCard, SpecialistProcurementCard } from "@procurement/contracts";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyBootstrap } from "./bootstrap.js";
 import { createDatabase, type Database } from "./client.js";
@@ -345,14 +345,14 @@ integration("PostgreSQL migrations and invariants", () => {
     // canonical id and crash on the primary key — outside the declared
     // (source_id, source_record_id) conflict target.
     const store = createSpecialistStore(db);
-    const user = "00000000-0000-4000-8000-000000000931";
+    const user = "00000000-0000-4000-8000-000000000980";
     await db.execute(sql`
       insert into auth_users (id, email, name, password_hash, role, access_status)
       values (${user}, 'legacy-butb@test.local', 'L', 'x', 'specialist', 'active')
       on conflict (email) do nothing
     `);
     const workspaceId = await store.ensurePersonalWorkspace(user, "L");
-    const legacyId = "00000000-0000-4000-8000-000000000932";
+    const legacyId = "00000000-0000-4000-8000-000000000981";
     await db.execute(sql`
       insert into procurements (id, source_id, source_record_id, canonical_url, title, kind, status, stage)
       values (
@@ -363,7 +363,7 @@ integration("PostgreSQL migrations and invariants", () => {
       on conflict do nothing
     `);
     const card = SpecialistProcurementCard.parse({
-      id: "00000000-0000-4000-8000-000000000933",
+      id: "00000000-0000-4000-8000-000000000982",
       title: "Насосы",
       status: "accepting_bids",
       statusLabel: "приём",
@@ -400,6 +400,89 @@ integration("PostgreSQL migrations and invariants", () => {
         sql`${procurements.sourceId} = 'butb' and ${procurements.sourceRecordId} = 'butb/AU-legacy'`,
       );
     expect(twice).toHaveLength(1);
+  });
+
+  it("repairs a stale canonical link even when the card itself is unchanged", async () => {
+    // The unchanged-card skip compares card JSON with canonicalProcurementId
+    // stripped — a workspace row already pointing at the wrong-lane canonical
+    // row would stay stale forever unless the skip also checks the link.
+    const store = createSpecialistStore(db);
+    const user = "00000000-0000-4000-8000-000000000983";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values (${user}, 'stale-butb@test.local', 'S', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceId = await store.ensurePersonalWorkspace(user, "S");
+    const legacyId = "00000000-0000-4000-8000-000000000984";
+    await db.execute(sql`
+      insert into procurements (id, source_id, source_record_id, canonical_url, title, kind, status, stage)
+      values (
+        ${legacyId}, 'goszakupki_by', 'butb/AU-stale',
+        'https://zakupki.butb.by/auctions/viewinvitation.html', 'Шкафы',
+        'other', 'accepting_bids', 'discovered'
+      )
+      on conflict do nothing
+    `);
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000985",
+      title: "Шкафы",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      sourceProcurementId: "butb/AU-stale",
+      live: true,
+      triage: "monitor",
+      canonicalProcurementId: legacyId,
+    });
+    await store.saveCases([card], workspaceId);
+    const healthy = await db
+      .select({ id: procurements.id })
+      .from(procurements)
+      .where(
+        sql`${procurements.sourceId} = 'butb' and ${procurements.sourceRecordId} = 'butb/AU-stale'`,
+      );
+    expect(healthy).toHaveLength(1);
+
+    // Force the stale state the pre-fix skip would protect: the workspace
+    // link and the stored card point back at the wrong-lane row while the
+    // card content itself is untouched.
+    const staleCard = SpecialistProcurementCard.parse({
+      ...card,
+      canonicalProcurementId: legacyId,
+    });
+    await db
+      .update(workspaceProcurements)
+      .set({ procurementId: legacyId, card: staleCard })
+      .where(
+        and(
+          eq(workspaceProcurements.workspaceId, workspaceId),
+          eq(workspaceProcurements.sourceProcurementId, "butb/AU-stale"),
+        ),
+      );
+
+    await store.saveCases([staleCard], workspaceId);
+
+    const relinked = await db
+      .select({ procurementId: workspaceProcurements.procurementId })
+      .from(workspaceProcurements)
+      .where(
+        and(
+          eq(workspaceProcurements.workspaceId, workspaceId),
+          eq(workspaceProcurements.sourceProcurementId, "butb/AU-stale"),
+        ),
+      );
+    expect(relinked[0]?.procurementId).toBe(healthy[0]?.id);
+    const loaded = await store.loadCases(workspaceId);
+    expect(loaded[0]?.canonicalProcurementId).toBe(healthy[0]?.id);
+    // A healed card must satisfy the skip again — the third identical save
+    // is a no-op and must not create another canonical row.
+    await store.saveCases([staleCard], workspaceId);
+    const rows = await db
+      .select({ id: procurements.id })
+      .from(procurements)
+      .where(eq(procurements.sourceRecordId, "butb/AU-stale"));
+    expect(rows.filter((row) => row.id === healthy[0]?.id)).toHaveLength(1);
   });
 
   it("keeps decision memory per cabinet and past the deleted card", async () => {

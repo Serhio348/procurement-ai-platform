@@ -3,6 +3,7 @@ import {
   blobStorageKey,
   canonicalIdToReuse,
   canonicalJson,
+  canonicalLinkNeedsRepair,
   caseListTimeShouldBump,
   comparableCardJson,
   jsonbSafe,
@@ -215,6 +216,100 @@ describe("canonicalIdToReuse", () => {
         "butb/AU-1",
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("canonicalLinkNeedsRepair", () => {
+  const butbCard = SpecialistProcurementCard.parse({
+    id: "00000000-0000-4000-8000-000000000010",
+    title: "Насосы",
+    status: "accepting_bids",
+    statusLabel: "приём",
+    url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+    sourceProcurementId: "butb/AU-1",
+    live: true,
+    triage: "monitor",
+  });
+
+  it("lets a healthy link satisfy the unchanged-card skip", () => {
+    expect(
+      canonicalLinkNeedsRepair(
+        {
+          procurementId: "00000000-0000-4000-8000-0000000000aa",
+          linkedSourceId: "butb",
+          linkedSourceRecordId: "butb/AU-1",
+        },
+        butbCard,
+      ),
+    ).toBe(false);
+  });
+
+  it("breaks the skip for a legacy goszakupki-lane link on a butb card", () => {
+    // Rows written before namespaced ids sit under
+    // (goszakupki_by, butb/…); the equal-card skip must not keep them there.
+    expect(
+      canonicalLinkNeedsRepair(
+        {
+          procurementId: "00000000-0000-4000-8000-0000000000aa",
+          linkedSourceId: "goszakupki_by",
+          linkedSourceRecordId: "butb/AU-1",
+        },
+        butbCard,
+      ),
+    ).toBe(true);
+  });
+
+  it("breaks the skip when the linked row belongs to another record", () => {
+    expect(
+      canonicalLinkNeedsRepair(
+        {
+          procurementId: "00000000-0000-4000-8000-0000000000aa",
+          linkedSourceId: "butb",
+          linkedSourceRecordId: "butb/AU-2",
+        },
+        butbCard,
+      ),
+    ).toBe(true);
+  });
+
+  it("breaks the skip when the canonical row cannot be read", () => {
+    expect(
+      canonicalLinkNeedsRepair(
+        {
+          procurementId: "00000000-0000-4000-8000-0000000000aa",
+          linkedSourceId: null,
+          linkedSourceRecordId: null,
+        },
+        butbCard,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not force a repair when the workspace row does not exist yet", () => {
+    expect(canonicalLinkNeedsRepair(undefined, butbCard)).toBe(false);
+  });
+
+  it("keeps the goszakupki fallback healthy for unprefixed live cards", () => {
+    const gosCard = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000011",
+      title: "Мебель",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://goszakupki.by/auction/view/1",
+      sourceProcurementId: "auction/1",
+      live: true,
+      triage: "monitor",
+    });
+    expect(
+      canonicalLinkNeedsRepair(
+        {
+          procurementId: "00000000-0000-4000-8000-0000000000ab",
+          linkedSourceId: "goszakupki_by",
+          linkedSourceRecordId: "auction/1",
+        },
+        gosCard,
+      ),
+    ).toBe(false);
   });
 });
 

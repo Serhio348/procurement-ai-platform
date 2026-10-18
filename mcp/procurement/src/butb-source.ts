@@ -13,10 +13,11 @@ import {
   type SourceProcurementId,
 } from "@procurement/contracts";
 import { silentLogger, type Logger } from "@procurement/observability";
-import type { ButbPageClient } from "./butb-http.js";
+import { ButbViewExpiredError, type ButbPage, type ButbPageClient } from "./butb-http.js";
 import {
   butbRegistryHit,
   butbRegistryPublishDate,
+  butbTotalRecords,
   parseButbCard,
   parseButbRegistryRows,
   butbKind,
@@ -88,6 +89,12 @@ export class ButbSource implements ProcurementSourcePort {
    * already inside every link id the parser sees.
    */
   readonly #positions = new Map<string, number>();
+  /**
+   * registryNumber → until when "absent from the registry" may be trusted.
+   * A vanished card costs a bounded probe per call otherwise — and one
+   * monitoring read can chain get/getStatus/getDocuments on the same id.
+   */
+  readonly #missing = new Map<string, number>();
 
   constructor(options: ButbSourceOptions) {
     this.#client = options.client;
@@ -130,7 +137,7 @@ export class ButbSource implements ProcurementSourcePort {
           `registry page ${page} returned HTTP ${rendered.status}`,
         );
       }
-      const rows = parseButbRegistryRows(rendered.body);
+      const rows = registryPageRows(page, rendered.body);
       if (rows.length === 0) break;
       scannedRows += rows.length;
       for (const row of rows) this.#rememberPosition(row);
@@ -288,18 +295,38 @@ export class ButbSource implements ProcurementSourcePort {
    */
   async #load(id: SourceProcurementId): Promise<ParsedButbCard> {
     const registryNumber = registryNumberOf(id);
-    const cached = this.#cache.get(registryNumber);
     const now = this.#now();
+    const missingUntil = this.#missing.get(registryNumber);
+    if (missingUntil !== undefined && missingUntil > now.getTime()) {
+      throw new SourceRecordNotFoundError(this.sourceId, id);
+    }
+    const cached = this.#cache.get(registryNumber);
     if (cached !== undefined && cached.expiresAt > now.getTime()) return cached.parsed;
 
     const targetDate = butbRegistryPublishDate(registryNumber);
     // Locate → open is one session sequence: a row link id exists only while
     // the table shows its page, so no other call may interleave a pageChange.
-    const cardPage = await this.#client.withSession(async () => {
-      const row = await this.#locateRow(registryNumber, targetDate);
-      if (row === undefined) throw new SourceRecordNotFoundError(this.sourceId, id);
-      return this.#client.openCard(row.cardLinkId);
-    });
+    const locateAndOpen = (): Promise<ButbPage> =>
+      this.#client.withSession(async () => {
+        const row = await this.#locateRow(registryNumber, targetDate);
+        if (row === undefined) {
+          if (this.#missing.size >= POSITION_CACHE_LIMIT) this.#missing.clear();
+          this.#missing.set(registryNumber, now.getTime() + this.#cardCacheTtlMs);
+          throw new SourceRecordNotFoundError(this.sourceId, id);
+        }
+        this.#missing.delete(registryNumber);
+        return this.#client.openCard(row.cardLinkId);
+      });
+    let cardPage: ButbPage;
+    try {
+      cardPage = await locateAndOpen();
+    } catch (error) {
+      // The transport retries a dead view by reposting the same stale link
+      // id, which cannot resolve on a fresh session — the whole locate+open
+      // sequence must run again instead.
+      if (!(error instanceof ButbViewExpiredError)) throw error;
+      cardPage = await locateAndOpen();
+    }
     if (cardPage.status < 200 || cardPage.status >= 300) {
       throw new SourceAccessError(
         this.sourceId,
@@ -350,7 +377,7 @@ export class ButbSource implements ProcurementSourcePort {
           `registry page ${page} returned HTTP ${rendered.status}`,
         );
       }
-      const rows = parseButbRegistryRows(rendered.body);
+      const rows = registryPageRows(page, rendered.body);
       for (const row of rows) this.#rememberPosition(row);
       return rows;
     };
@@ -369,8 +396,18 @@ export class ButbSource implements ProcurementSourcePort {
       const rows = await readPage(hintPage);
       const hit = rows.find((row) => row.registryNumber === registryNumber);
       if (hit !== undefined) return hit;
+      const newestOnHint = dateOfFirstRow(rows);
       if (rows.length === 0) {
         // Registry is shorter than the hint — it shrank; search above.
+        boundaryHigh = hintPage;
+      } else if (
+        targetDate !== undefined &&
+        newestOnHint !== undefined &&
+        newestOnHint <= targetDate
+      ) {
+        // Every row on the hinted page is at-or-older than the card's date —
+        // removals above pushed the row UP, so bound the probe above.
+        boundaryLow = 0;
         boundaryHigh = hintPage;
       } else {
         boundaryLow = hintPage;
@@ -450,6 +487,33 @@ export class ButbSource implements ProcurementSourcePort {
     }
     return undefined;
   }
+}
+
+/**
+ * Parses a registry page and refuses silently-degraded markup: when the
+ * paginator advertises records the page index is inside, but no rows — or
+ * fewer than a full page on a non-final page — parsed, the table markup
+ * regressed. A loud error beats a quiet partial read: rows skipped mid-scan
+ * are rows nobody ever sees.
+ */
+function registryPageRows(page: number, body: string): ButbRegistryRow[] {
+  const rows = parseButbRegistryRows(body);
+  const total = butbTotalRecords(body);
+  if (total === undefined || total === 0) return rows;
+  const lastPage = Math.ceil(total / PAGE_SIZE);
+  if (rows.length === 0 && page <= lastPage) {
+    throw new SourceAccessError(
+      "butb",
+      `registry page ${page} parsed to zero rows while the paginator reports ${String(total)} records`,
+    );
+  }
+  if (rows.length > 0 && rows.length < PAGE_SIZE && page < lastPage) {
+    throw new SourceAccessError(
+      "butb",
+      `registry page ${page} parsed ${String(rows.length)} of ${String(PAGE_SIZE)} rows — incomplete markup, refusing a partial read`,
+    );
+  }
+  return rows;
 }
 
 function registryNumberOf(id: SourceProcurementId): string {

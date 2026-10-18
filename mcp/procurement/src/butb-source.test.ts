@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SearchQuery, SourceProcurementId } from "@procurement/contracts";
 import { ButbSource } from "./butb-source.js";
-import type { ButbPage, ButbPageClient } from "./butb-http.js";
+import { ButbViewExpiredError, type ButbPage, type ButbPageClient } from "./butb-http.js";
 import { parseButbRegistryRows } from "./butb-parser.js";
 
 const registryHtml = readFileSync(
@@ -143,6 +143,44 @@ describe("ButbSource.search", () => {
     expect(client.calls.pages.length).toBe(2);
     expect(answer.hasMore).toBe(true);
   });
+
+  it("refuses a page the paginator says has records but parses to no rows", async () => {
+    // Degraded table markup must surface as a source failure — a silent
+    // empty page would tell the caller the registry tail was read.
+    const degraded =
+      `<div><script>var w = {"paginator":new YAHOO.widget.Paginator({"rowsPerPage":20,"totalRecords":500})};</script></div>`;
+    const client = fakeClient(new Map([[1, degraded]]));
+    const source = new ButbSource({ client });
+    await expect(
+      source.search(
+        query({ keywords: [], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+      ),
+    ).rejects.toMatchObject({ name: "SourceAccessError" });
+  });
+
+  it("refuses a non-final page that parses fewer rows than a page holds", async () => {
+    const partial =
+      syntheticPage(0, "15.10.2026") +
+      `<script>var w = {"paginator":new YAHOO.widget.Paginator({"rowsPerPage":20,"totalRecords":500})};</script>`;
+    const client = fakeClient(new Map([[1, partial]]));
+    const source = new ButbSource({ client });
+    await expect(
+      source.search(
+        query({ keywords: [], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+      ),
+    ).rejects.toMatchObject({ name: "SourceAccessError" });
+  });
+
+  it("treats a genuinely empty page past the advertised end as the tail", async () => {
+    const client = fakeClient(
+      new Map([[1, registryHtml], [2, "<table></table>"]]),
+    );
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({ keywords: [], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    expect(answer.hasMore).toBe(false);
+  });
 });
 
 describe("ButbSource.get", () => {
@@ -163,7 +201,7 @@ describe("ButbSource.get", () => {
       [2, syntheticPage(20, "10.10.2026")],
       [4, syntheticPage(60, "01.10.2026", "AU20261001999001")],
     ]);
-    const client = fakeClient(pages);
+    const client = fakeClient(pages, cardHtml.replace("AU20261015396707", "AU20261001999001"));
     const source = new ButbSource({ client });
     const card = await source.get(SourceProcurementId.parse("butb/AU20261001999001"));
     expect(client.calls.pages).toEqual([1, 2, 4]);
@@ -176,7 +214,7 @@ describe("ButbSource.get", () => {
       [1, registryHtml],
       [3, syntheticPage(42, "01.10.2026", "AU20261001999001")],
     ]);
-    const client = fakeClient(pages);
+    const client = fakeClient(pages, cardHtml.replace("AU20261015396707", "AU20261001999001"));
     let now = Date.parse("2026-10-20T00:00:00Z");
     const source = new ButbSource({ client, cardCacheTtlMs: 1_000, now: () => new Date(now) });
     const id = SourceProcurementId.parse("butb/AU20261001999001");
@@ -212,6 +250,68 @@ describe("ButbSource.get", () => {
     expect(card.sourceProcurementId).toBe(`butb/${firstRow.registryNumber}`);
     // Hint from the scan pointed at page 1 — no probing needed.
     expect(client.calls.pages).toEqual([1]);
+  });
+
+  it("re-probes above the hint when removals pushed the row up", async () => {
+    const pages = new Map<number, string>([
+      [1, registryHtml],
+      [2, syntheticPage(20, "10.10.2026")],
+      [3, syntheticPage(42, "01.10.2026", "AU20261001999001")],
+    ]);
+    const client = fakeClient(pages, cardHtml.replace("AU20261015396707", "AU20261001999001"));
+    let now = Date.parse("2026-10-20T00:00:00Z");
+    const source = new ButbSource({ client, cardCacheTtlMs: 1_000, now: () => new Date(now) });
+    const id = SourceProcurementId.parse("butb/AU20261001999001");
+    await source.get(id); // seeds the remembered position at row 42 → page 3
+
+    // Rows above were removed: the card now sits on page 2 and the hinted
+    // page only carries older rows — probing deeper would never find it.
+    pages.set(2, syntheticPage(30, "01.10.2026", "AU20261001999001"));
+    pages.set(3, syntheticPage(45, "25.09.2026"));
+    now += 60_000;
+    client.calls.pages = [];
+    client.calls.links = [];
+
+    const card = await source.get(id);
+    expect(card.sourceProcurementId).toBe("butb/AU20261001999001");
+    expect(client.calls.pages).toEqual([3, 1, 2]);
+    expect(client.calls.links).toEqual(["fra:reestrAu:30:_t344"]);
+  });
+
+  it("re-runs locate+open after a dead session instead of reposting the stale link id", async () => {
+    const client = fakeClient(new Map([[1, registryHtml]]));
+    let openAttempts = 0;
+    const flaky: ButbPageClient & { calls: typeof client.calls } = {
+      calls: client.calls,
+      registryPage: client.registryPage,
+      openCard: async (linkId) => {
+        openAttempts += 1;
+        if (openAttempts === 1) throw new ButbViewExpiredError();
+        return client.openCard(linkId);
+      },
+      download: client.download,
+      withSession: client.withSession,
+    };
+    const source = new ButbSource({ client: flaky });
+    const card = await source.get(
+      SourceProcurementId.parse(`butb/${firstRow.registryNumber}`),
+    );
+    expect(card.sourceProcurementId).toBe(`butb/${firstRow.registryNumber}`);
+    // The whole sequence re-ran: locate happened twice, the stale link id
+    // from the dead session was not reposted as-is.
+    expect(client.calls.pages).toEqual([1, 1]);
+    expect(openAttempts).toBe(2);
+  });
+
+  it("rejects a card whose registry number differs from the requested id", async () => {
+    // The postback opened the wrong row — the card's own field names a
+    // different procedure. Relabelling it would monitor a stranger's case.
+    const wrongCard = cardHtml.replace("AU20261015396707", "AU20261015396708");
+    const client = fakeClient(new Map([[1, registryHtml]]), wrongCard);
+    const source = new ButbSource({ client });
+    await expect(
+      source.get(SourceProcurementId.parse(`butb/${firstRow.registryNumber}`)),
+    ).rejects.toMatchObject({ name: "SourceAccessError" });
   });
 
   it("answers not-found for an id the registry no longer lists", async () => {

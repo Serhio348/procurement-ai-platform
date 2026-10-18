@@ -538,9 +538,15 @@ export class ButbHttpClient implements ButbPageClient {
   }
 }
 
-class ButbViewExpiredError extends Error {
+/**
+ * The session's JSF view died (or a card postback resolved against a fresh
+ * session where the row link id does not exist). Exported so a caller whose
+ * operation spans several calls — locate-then-open — can retry the whole
+ * sequence, which the per-call retry inside `#guarded` cannot do.
+ */
+export class ButbViewExpiredError extends SourceAccessError {
   constructor() {
-    super("BUTB JSF view expired");
+    super("butb", "JSF view expired");
     this.name = "ButbViewExpiredError";
   }
 }

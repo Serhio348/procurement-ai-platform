@@ -4,6 +4,7 @@ import {
   SpecialistSearchRun,
   SpecialistWorkingProfile,
   SpecialistWorkspaceState,
+  sourceIdFromProcurementId,
   type InboxFixtureItem as InboxFixtureItemValue,
   type SpecialistCaseDocument,
   type SpecialistProcurementCard as SpecialistProcurementCardValue,
@@ -1761,7 +1762,9 @@ async function upsertCanonicalProcurement(
   card: SpecialistProcurementCardValue,
   now: string,
 ): Promise<string> {
-  const sourceId = card.live ? "goszakupki_by" : "fixture";
+  const sourceId: string =
+    sourceIdFromProcurementId(card.sourceProcurementId) ??
+    (card.live ? "goszakupki_by" : "fixture");
   const hashed = card.documents.some((item) => item.hash !== undefined);
   const status = card.status;
   const rows = await tx

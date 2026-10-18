@@ -39,37 +39,50 @@ async function fixtureSource(): Promise<FixtureProcurementSource> {
 }
 
 function liveSources(logger: Logger): ProcurementSourcePort[] {
-  const sources: ProcurementSourcePort[] = [
-    new GoszakupkiBySource({
-      logger,
-      client: new GoszakupkiHttpClient({
-        ...(process.env["GOSZAKUPKI_BY_BASE_URL"] === undefined
-          ? {}
-          : { baseUrl: process.env["GOSZAKUPKI_BY_BASE_URL"] }),
-        requestsPerMinute: positiveNumber(
-          process.env["GOSZAKUPKI_BY_RATE_LIMIT_RPM"],
-          20,
-          "GOSZAKUPKI_BY_RATE_LIMIT_RPM",
-        ),
-        timeoutMs: positiveNumber(
-          process.env["GOSZAKUPKI_BY_TIMEOUT_MS"],
-          20_000,
-          "GOSZAKUPKI_BY_TIMEOUT_MS",
-        ),
-        maxDownloadBytes: positiveNumber(
-          process.env["GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES"],
-          2 * 1024 * 1024 * 1024,
-          "GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES",
-        ),
-        ...(process.env["GOSZAKUPKI_BY_USER_AGENT"] === undefined
-          ? {}
-          : { userAgent: process.env["GOSZAKUPKI_BY_USER_AGENT"] }),
+  // Per-source children: the API spawns one MCP process per platform so a
+  // slow lane cannot starve a sibling on the shared stdio pipe. Empty filter
+  // registers everything — the single-child topology stays the default.
+  const only = new Set(
+    (process.env["PROCUREMENT_ONLY_SOURCES"] ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0),
+  );
+  const wanted = (sourceId: string) => only.size === 0 || only.has(sourceId);
+  const sources: ProcurementSourcePort[] = [];
+  if (wanted("goszakupki_by")) {
+    sources.push(
+      new GoszakupkiBySource({
+        logger,
+        client: new GoszakupkiHttpClient({
+          ...(process.env["GOSZAKUPKI_BY_BASE_URL"] === undefined
+            ? {}
+            : { baseUrl: process.env["GOSZAKUPKI_BY_BASE_URL"] }),
+          requestsPerMinute: positiveNumber(
+            process.env["GOSZAKUPKI_BY_RATE_LIMIT_RPM"],
+            20,
+            "GOSZAKUPKI_BY_RATE_LIMIT_RPM",
+          ),
+          timeoutMs: positiveNumber(
+            process.env["GOSZAKUPKI_BY_TIMEOUT_MS"],
+            20_000,
+            "GOSZAKUPKI_BY_TIMEOUT_MS",
+          ),
+          maxDownloadBytes: positiveNumber(
+            process.env["GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES"],
+            2 * 1024 * 1024 * 1024,
+            "GOSZAKUPKI_BY_MAX_DOWNLOAD_BYTES",
+          ),
+          ...(process.env["GOSZAKUPKI_BY_USER_AGENT"] === undefined
+            ? {}
+            : { userAgent: process.env["GOSZAKUPKI_BY_USER_AGENT"] }),
+        }),
       }),
-    }),
-  ];
+    );
+  }
   // BUTB is opt-in: the JSF session protocol is still being proven, and the
   // adapter must never disturb the goszakupki lane for active specialists.
-  if (process.env["BUTB_ENABLED"] === "1") {
+  if (process.env["BUTB_ENABLED"] === "1" && wanted("butb")) {
     sources.push(
       new ButbSource({
         logger,

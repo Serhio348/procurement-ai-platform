@@ -42,7 +42,10 @@ function sourceIdFromProcurementId(id: string, fallback: SourceIdValue): SourceI
 /** Downloads route to BUTB only for documents hosted on its domain. */
 function sourceIdFromDocumentUrl(url: string, fallback: SourceIdValue): SourceIdValue {
   try {
-    if (new URL(url).hostname.endsWith("butb.by")) return SourceId.parse("butb");
+    const hostname = new URL(url).hostname;
+    if (hostname === "butb.by" || hostname.endsWith(".butb.by")) {
+      return SourceId.parse("butb");
+    }
   } catch {
     // Non-URL strings keep the default source — download() validates anyway.
   }

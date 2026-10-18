@@ -3,8 +3,13 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RequestId, SourceId } from "@procurement/contracts";
-import { ProcurementMcpClient, ToolPolicyGate } from "@procurement/mcp-client";
-import { createLogger } from "@procurement/observability";
+import {
+  createSourceRoutingCaller,
+  ProcurementMcpClient,
+  ToolPolicyGate,
+  type McpToolCaller,
+} from "@procurement/mcp-client";
+import { createLogger, type Logger } from "@procurement/observability";
 import { buildSpecialistApi, type SpecialistApi } from "./app.js";
 import { createSmtpMailPort } from "./auth/mail.js";
 import { resolveBlobDirectory } from "./blobs.js";
@@ -17,7 +22,7 @@ import { loadDotEnv } from "./load-env.js";
 import { createBlobStoreFromEnv, objectStoreKind } from "./object-store.js";
 import { recordJournal } from "./admin/journal.js";
 import { openSpecialistPersistence } from "./persist.js";
-import { connectProcurementMcp } from "./procurement-mcp.js";
+import { connectProcurementMcp, type ProcurementMcpProcess } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
 import { createProfileSuggestFromEnv } from "./profile-suggest.js";
 import { createAssistantDirectionFromEnv } from "./assistant-directions.js";
@@ -56,6 +61,62 @@ function resolveBuildSha(repoRoot: string): string | undefined {
   }
 }
 
+interface SourceLane {
+  caller: McpToolCaller;
+  /** Per-source callers — used to probe each child's registry for health. */
+  callersBySource: ReadonlyMap<string, McpToolCaller>;
+  close: () => Promise<void>;
+}
+
+/**
+ * One stdio child per source on this lane: searches, card reads and
+ * downloads for different platforms get their own pipe, queue and timeout
+ * budget — a slow lane can no longer starve siblings (a BUTB registry scan
+ * used to hold the shared pipe long enough to time out every queued call).
+ * The first configured source is required for boot; extra sources degrade
+ * to `source_unavailable` instead of taking the API down.
+ */
+async function connectSourceLane(options: {
+  lane: string;
+  sourceIds: readonly SourceId[];
+  logger: Logger;
+  blobDirectory: string;
+}): Promise<SourceLane | undefined> {
+  const callersBySource = new Map<string, McpToolCaller>();
+  const missing = new Set<string>();
+  const children: ProcurementMcpProcess[] = [];
+  for (const sourceId of options.sourceIds) {
+    try {
+      const child = await connectProcurementMcp({
+        mode: "live",
+        logger: options.logger,
+        blobDirectory: options.blobDirectory,
+        lane: `${options.lane}:${String(sourceId)}`,
+        onlySources: [String(sourceId)],
+      });
+      callersBySource.set(String(sourceId), child.caller);
+      children.push(child);
+    } catch (error) {
+      if (children.length === 0) throw error;
+      missing.add(String(sourceId));
+      options.logger.error(
+        "Source child failed to start — its calls report source_unavailable",
+        error,
+        { sourceId },
+      );
+    }
+  }
+  const fallback = callersBySource.values().next().value;
+  if (fallback === undefined) return undefined;
+  return {
+    caller: createSourceRoutingCaller({ callers: callersBySource, missing, fallback }),
+    callersBySource,
+    close: async () => {
+      await Promise.all(children.map((child) => child.close().catch(() => undefined)));
+    },
+  };
+}
+
 async function main(): Promise<void> {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
   await loadDotEnv(path.join(repoRoot, ".env"));
@@ -72,17 +133,6 @@ async function main(): Promise<void> {
     databaseUrl: process.env["DATABASE_URL"],
     logger,
   });
-  const mcp =
-    mode === "live"
-      ? await connectProcurementMcp({ mode: "live", logger, blobDirectory, lane: "background" })
-      : undefined;
-  // Interactive reads (card open, decision hydrate) get their own child process:
-  // one stdio pipe is strictly serial, so a card click would otherwise queue
-  // behind every background search/discovery/ingest call.
-  const mcpInteractive =
-    mode === "live"
-      ? await connectProcurementMcp({ mode: "live", logger, blobDirectory, lane: "interactive" })
-      : undefined;
   // BUTB: registered in MCP only under BUTB_ENABLED, and its hits reach a
   // cabinet only while BUTB_WORKSPACE_IDS pilots it — two separate gates so
   // the adapter can deploy dark and still never disturb other specialists.
@@ -90,9 +140,35 @@ async function main(): Promise<void> {
     SourceId.parse("goszakupki_by"),
     ...(process.env["BUTB_ENABLED"] === "1" ? [SourceId.parse("butb")] : []),
   ];
+  const mcp =
+    mode === "live"
+      ? await connectSourceLane({
+          lane: "background",
+          sourceIds: enabledSourceIds,
+          logger,
+          blobDirectory,
+        })
+      : undefined;
+  // Interactive reads (card open, decision hydrate) get their own lane:
+  // one stdio pipe per source is strictly serial, so a card click would
+  // otherwise queue behind every background search/discovery/ingest call.
+  const mcpInteractive =
+    mode === "live"
+      ? await connectSourceLane({
+          lane: "interactive",
+          sourceIds: enabledSourceIds,
+          logger,
+          blobDirectory,
+        })
+      : undefined;
   const butbPilot = assistantPilotFromEnv(process.env["BUTB_WORKSPACE_IDS"]);
   const sourcesForWorkspace = (workspaceId: string | undefined): readonly SourceId[] =>
     enabledSourceIds.filter((id) => id !== "butb" || butbPilot(workspaceId ?? ""));
+  const searchTimeoutRaw = Number(process.env["PROCUREMENT_SEARCH_TIMEOUT_MS"]);
+  const searchTimeout =
+    Number.isFinite(searchTimeoutRaw) && searchTimeoutRaw > 0
+      ? { timeoutMs: searchTimeoutRaw }
+      : {};
   // searchHits is created before the app, so the workspace lookup is indirect.
   const appRef: { current?: SpecialistApi } = {};
   const activeWorkspaceId = () => appRef.current?.currentWorkspaceId();
@@ -105,6 +181,7 @@ async function main(): Promise<void> {
           sourcesForWorkspace,
           activeWorkspaceId,
           logger,
+          ...searchTimeout,
         });
   const cardWatch =
     mcpInteractive === undefined
@@ -146,6 +223,7 @@ async function main(): Promise<void> {
           sourcesForWorkspace,
           activeWorkspaceId,
           logger,
+          ...searchTimeout,
         });
   logger.info("Search intent configured", { model: searchIntent !== undefined });
   if (mcp !== undefined) {
@@ -320,15 +398,27 @@ async function main(): Promise<void> {
         ? {}
         : {
             sourcesProbe: async () => {
-              const probe = new ProcurementMcpClient({
-                caller: mcpInteractive.caller,
-                policyGate: new ToolPolicyGate({
-                  agentAllowedTools: ["procurement.sources"],
+              // Each source lives in its own child: probe every registry and
+              // merge — a child that never started simply reports nothing,
+              // and configured-but-unregistered marks the lane degraded.
+              const listed = await Promise.all(
+                [...mcpInteractive.callersBySource.values()].map(async (caller) => {
+                  const probe = new ProcurementMcpClient({
+                    caller,
+                    policyGate: new ToolPolicyGate({
+                      agentAllowedTools: ["procurement.sources"],
+                    }),
+                    timeoutMs: 10_000,
+                    logger,
+                  });
+                  try {
+                    return (await probe.sources(RequestId.parse(randomUUID()))).sources.map(String);
+                  } catch {
+                    return [] as string[];
+                  }
                 }),
-                timeoutMs: 10_000,
-                logger,
-              });
-              return (await probe.sources(RequestId.parse(randomUUID()))).sources.map(String);
+              );
+              return [...new Set(listed.flat())];
             },
           }),
       models: {

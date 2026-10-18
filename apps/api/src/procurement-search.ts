@@ -39,10 +39,16 @@ export interface ProcurementSearchHitsOptions {
  * current working profile at call time, not from the HTTP body.
  *
  * With several sources enabled the query fans out to each one independently:
- * a source that times out or errors contributes an empty page (and a warn
- * line), never an exception — one platform must not dark the whole console.
+ * a source that times out or errors keeps the others' hits but is named in
+ * `failedSources` — a background pass must not treat a partially-read window
+ * as covered. When every lane fails the error propagates: an empty page is
+ * not an honest answer for a total outage.
  * Hits merge by publication date; `hasMore` ORs across sources so a
  * truncated lane keeps paging alive.
+ *
+ * Lanes fan out in parallel: each source is served by its own MCP child
+ * (the routing caller), so a lane gets its own pipe, queue and full timeout
+ * budget — a slow source can no longer starve a healthy sibling.
  */
 export function createProcurementSearchHits(
   options: ProcurementSearchHitsOptions,
@@ -50,7 +56,12 @@ export function createProcurementSearchHits(
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
   searchDetailed: (
     query: Omit<SearchQuery, "sourceId">,
-  ) => Promise<{ hits: readonly SearchHit[]; hasMore?: boolean }>;
+  ) => Promise<{
+    hits: readonly SearchHit[];
+    hasMore?: boolean;
+    /** Sources whose call failed — their window is unread, not empty. */
+    failedSources?: readonly string[];
+  }>;
 } {
   const logger = options.logger ?? silentLogger;
   const defaultSourceIds: readonly SourceIdValue[] =
@@ -60,7 +71,10 @@ export function createProcurementSearchHits(
     policyGate: new ToolPolicyGate({
       agentAllowedTools: ["procurement.search"],
     }),
-    timeoutMs: options.timeoutMs ?? 120_000,
+    // Scan budget plus queue headroom on the source's own pipe: a bounded
+    // registry scan runs ~90 s, and the call may still sit behind card
+    // lookups of the same source before it even starts.
+    timeoutMs: options.timeoutMs ?? 240_000,
     logger,
   });
 
@@ -73,25 +87,31 @@ export function createProcurementSearchHits(
       );
     }
     const sourceIds = options.sourcesForWorkspace?.(options.activeWorkspaceId?.()) ?? defaultSourceIds;
-    const pages = await Promise.all(
+    const lanes = await Promise.all(
       sourceIds.map(async (sourceId) => {
         try {
-          return await client.search(
+          const page = await client.search(
             ProcurementSearchRequest.parse({ sourceId, ...query }),
             RequestId.parse(randomUUID()),
           );
+          return { sourceId, page, error: undefined };
         } catch (error) {
-          logger.warn("Source search failed — returning an empty page", {
+          logger.warn("Source search failed — lane reported as failed", {
             sourceId,
             err: error instanceof Error ? error.message : String(error),
           });
-          return { hits: [] as readonly SearchHit[], hasMore: false };
+          return { sourceId, page: undefined, error };
         }
       }),
     );
+    const failures = lanes.filter((lane) => lane.page === undefined);
+    if (lanes.length > 0 && failures.length === lanes.length) {
+      throw failures[0]?.error;
+    }
     return {
-      hits: mergeHits(pages.flatMap((page) => page.hits)),
-      hasMore: pages.some((page) => page.hasMore === true),
+      hits: mergeHits(lanes.flatMap((lane) => lane.page?.hits ?? [])),
+      hasMore: lanes.some((lane) => lane.page?.hasMore === true),
+      failedSources: failures.map((lane) => lane.sourceId as string),
     };
   };
 
@@ -101,9 +121,17 @@ export function createProcurementSearchHits(
     },
     async searchDetailed(
       query: Omit<SearchQuery, "sourceId">,
-    ): Promise<{ hits: readonly SearchHit[]; hasMore?: boolean }> {
+    ): Promise<{
+      hits: readonly SearchHit[];
+      hasMore?: boolean;
+      failedSources?: readonly string[];
+    }> {
       const response = await call(query);
-      return { hits: response.hits, hasMore: response.hasMore };
+      return {
+        hits: response.hits,
+        hasMore: response.hasMore,
+        failedSources: response.failedSources,
+      };
     },
   };
 }

@@ -104,7 +104,7 @@ describe("createProcurementSearchHits", () => {
     expect(page.hasMore).toBe(true);
   });
 
-  it("returns the healthy source's page when the other source fails", async () => {
+  it("returns the healthy source's page but names the failed lane", async () => {
     const callTool = vi.fn<McpToolCaller["callTool"]>().mockImplementation(async (_tool, args) => {
       if ((args as { sourceId: string }).sourceId === "butb") {
         throw new Error("jsf session lost");
@@ -127,9 +127,50 @@ describe("createProcurementSearchHits", () => {
       sourceIds: [SourceId.parse("goszakupki_by"), SourceId.parse("butb")],
     });
 
-    const hits = await port.search(baseQuery());
+    const page = await port.searchDetailed(baseQuery());
 
-    expect(hits.map((hit) => hit.sourceProcurementId)).toEqual(["auction/1"]);
+    expect(page.hits.map((hit) => hit.sourceProcurementId)).toEqual(["auction/1"]);
+    // A failed lane is an unread window, not an empty one — the background
+    // pass must see it so the watermark does not move past the gap.
+    expect(page.failedSources).toEqual(["butb"]);
+  });
+
+  it("issues all source lanes together — each has its own pipe and budget", async () => {
+    // Every source is served by its own MCP child, so lanes run in parallel:
+    // the second call must be issued without waiting for the first to finish.
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const callTool = vi.fn<McpToolCaller["callTool"]>().mockImplementation(async (_tool, args) => {
+      started.push((args as { sourceId: string }).sourceId);
+      await gate;
+      return { structuredContent: { hits: [] } };
+    });
+    const port = createProcurementSearchHits({
+      caller: { callTool },
+      sourceIds: [SourceId.parse("goszakupki_by"), SourceId.parse("butb")],
+    });
+
+    const pending = port.searchDetailed(baseQuery());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started.sort()).toEqual(["butb", "goszakupki_by"]);
+    release();
+    await pending;
+  });
+
+  it("throws when every source fails — an outage is not an empty window", async () => {
+    const callTool = vi
+      .fn<McpToolCaller["callTool"]>()
+      .mockRejectedValue(new Error("timeout"));
+    const port = createProcurementSearchHits({
+      caller: { callTool },
+      sourceIds: [SourceId.parse("goszakupki_by"), SourceId.parse("butb")],
+    });
+
+    await expect(port.searchDetailed(baseQuery())).rejects.toThrow("timeout");
+    await expect(port.search(baseQuery())).rejects.toThrow("timeout");
   });
 
   it("lets the workspace gate drop the pilot source outside the pilot", async () => {

@@ -83,6 +83,11 @@ export async function connectProcurementMcp(options: {
   blobDirectory?: string;
   /** Distinguishes parallel children in logs (background vs interactive lane). */
   lane?: string;
+  /**
+   * Registers only these sources inside the child — the API spawns one
+   * process per source so a slow lane cannot starve siblings on one pipe.
+   */
+  onlySources?: readonly string[];
 }): Promise<ProcurementMcpProcess> {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const mcpMain = fileURLToPath(
@@ -91,6 +96,12 @@ export async function connectProcurementMcp(options: {
   const tsxCli = fileURLToPath(new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url));
   const env = mcpChildEnv(process.env);
   env["PROCUREMENT_SOURCE_MODE"] = options.mode;
+  if (options.onlySources !== undefined) {
+    env["PROCUREMENT_ONLY_SOURCES"] = options.onlySources.join(",");
+  } else {
+    // Never leak a parent-level filter into a child meant to serve everything.
+    delete env["PROCUREMENT_ONLY_SOURCES"];
+  }
   if (options.blobDirectory !== undefined) {
     env["DOCUMENT_BLOB_DIR"] = options.blobDirectory;
   }

@@ -170,15 +170,27 @@ const PROFILE_EXCLUSION_LIMIT = 50;
 /** «За день» до дедлайна — окно предупреждения «истекает завтра». */
 const DEADLINE_SOON_MS = 36 * 60 * 60 * 1000;
 
+/**
+ * Верхняя граница страниц выдачи, дочитываемых фоновым проходом на профиль,
+ * пока источник сообщает `hasMore`. Хвост за границей остаётся непрочитанным —
+ * тогда watermark не двигается и окно перечитывается следующим проходом.
+ */
+const DISCOVERY_MAX_PAGES = 3;
+
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
   /**
    * Same search plus the source's own truncation flag when the adapter
-   * reports one. Optional so simple test doubles can return plain hits.
+   * reports one, and the ids of source lanes that failed — their window is
+   * unread, not empty. Optional so simple test doubles can return plain hits.
    */
   searchDetailed?: (
     query: Omit<SearchQuery, "sourceId">,
-  ) => Promise<{ hits: readonly SearchHit[]; hasMore?: boolean }>;
+  ) => Promise<{
+    hits: readonly SearchHit[];
+    hasMore?: boolean;
+    failedSources?: readonly string[];
+  }>;
 }
 
 export interface SpecialistApi extends FastifyInstance {
@@ -983,7 +995,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     limit: number,
     offset: number,
     publishedFrom?: string,
-  ): Promise<{ plan: SearchIntentPlan; hits: SearchHit[]; hasMore: boolean }> {
+  ): Promise<{
+    plan: SearchIntentPlan;
+    hits: SearchHit[];
+    hasMore: boolean;
+    failedSources: readonly string[];
+    /** Same profile/terms/plan at a deeper offset — paging costs no new plan. */
+    nextPage: (
+      nextOffset: number,
+    ) => Promise<{ hits: SearchHit[]; hasMore: boolean; failedSources: readonly string[] }>;
+  }> {
     const inferred = inferSearchIntentPlan({
       name: profileDisplayName(profile),
       keywords: profile.keywords,
@@ -992,15 +1013,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const listingTerms = platformSearchTerms(inferred, profile.keywords);
     const searchDetailed = async (
       query: Omit<SearchQuery, "sourceId">,
-    ): Promise<{ hits: readonly SearchHit[]; hasMore: boolean }> => {
+    ): Promise<{ hits: readonly SearchHit[]; hasMore: boolean; failedSources: readonly string[] }> => {
       if (searchHits.searchDetailed !== undefined) {
         const page = await searchHits.searchDetailed(query);
         // undefined means the source did not report truncation — a full
         // window is the honest "more may follow" signal.
-        return { hits: page.hits, hasMore: page.hasMore ?? page.hits.length >= query.limit };
+        return {
+          hits: page.hits,
+          hasMore: page.hasMore ?? page.hits.length >= query.limit,
+          failedSources: page.failedSources ?? [],
+        };
       }
       const hits = await searchHits.search(query);
-      return { hits, hasMore: hits.length >= query.limit };
+      return { hits, hasMore: hits.length >= query.limit, failedSources: [] };
     };
     const siteQuery = buildSearchQuery(profile, limit, offset, publishedFrom, listingTerms);
     logger.info("Specialist profile search query", {
@@ -1017,12 +1042,16 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       searchDetailed(siteQuery),
     ]);
     const extraTerms = extraPlatformSearchTerms(listingTerms, plan, profile.keywords);
-    const extraPage =
-      extraTerms.length === 0
-        ? { hits: [] as readonly SearchHit[], hasMore: false }
+    const fetchExtraPage = async (
+      pageOffset: number,
+    ): Promise<{ hits: readonly SearchHit[]; hasMore: boolean; failedSources: readonly string[] }> => {
+      return extraTerms.length === 0
+        ? { hits: [] as readonly SearchHit[], hasMore: false, failedSources: [] as readonly string[] }
         : await searchDetailed(
-            buildSearchQuery(profile, limit, offset, publishedFrom, extraTerms),
+            buildSearchQuery(profile, limit, pageOffset, publishedFrom, extraTerms),
           );
+    };
+    const extraPage = await fetchExtraPage(offset);
     const hits = mergeSearchHits(firstPage.hits, extraPage.hits);
     logger.info("Specialist profile search retrieval", {
       profileName: profileDisplayName(profile),
@@ -1034,7 +1063,23 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       candidates: hits.length,
       perTerm: countHitsPerTerm(hits),
     });
-    return { plan, hits, hasMore: firstPage.hasMore || extraPage.hasMore };
+    return {
+      plan,
+      hits,
+      hasMore: firstPage.hasMore || extraPage.hasMore,
+      failedSources: [...firstPage.failedSources, ...extraPage.failedSources],
+      nextPage: async (nextOffset: number) => {
+        const nextFirst = await searchDetailed(
+          buildSearchQuery(profile, limit, nextOffset, publishedFrom, listingTerms),
+        );
+        const nextExtra = await fetchExtraPage(nextOffset);
+        return {
+          hits: mergeSearchHits(nextFirst.hits, nextExtra.hits),
+          hasMore: nextFirst.hasMore || nextExtra.hasMore,
+          failedSources: [...nextFirst.failedSources, ...nextExtra.failedSources],
+        };
+      },
+    };
   }
 
   /**
@@ -1741,7 +1786,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       relevantCount: items.length,
       discardedCount,
       ambiguousCount,
-      hasMore: hasMore || hits.length >= limit,
+      // An empty page ends paging even when the source still claims more:
+      // clicking «Загрузить ещё» would only rescan the same head pages.
+      hasMore: hits.length > 0 && (hasMore || hits.length >= limit),
       items,
       ...(run === undefined ? {} : { run }),
     });
@@ -1788,23 +1835,49 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       let skippedDecidedCount = 0;
       const known = new Set(catalog().procurements().map((item) => item.sourceProcurementId));
       const failed: Array<{ profile: SpecialistWorkingProfile; error: unknown }> = [];
+      // Profiles whose window was only partially read: their hits still get
+      // processed, but the watermark stays — the interval is not covered.
+      const degraded: Array<{ profile: SpecialistWorkingProfile; reason: string }> = [];
       const succeeded: SpecialistWorkingProfile[] = [];
       for (const profile of ready) {
         // One profile's failure must not cost the others their pass, nor lose
         // what earlier profiles already found: the loop goes on and persists.
         let hits: readonly SearchHit[];
         let plan: SearchIntentPlan;
+        let degradedReason: string | undefined;
         const startedAt = clock();
         try {
           await discoveryController.beforeRequest(new Date());
-          const fetched = await fetchProfileHits(
-            profile,
-            limit,
-            0,
-            discoveryPublishedFrom(profile),
-          );
+          const publishedFrom = discoveryPublishedFrom(profile);
+          const fetched = await fetchProfileHits(profile, limit, 0, publishedFrom);
           plan = fetched.plan;
-          hits = fetched.hits;
+          const failedSources = new Set<string>(fetched.failedSources);
+          let collected = fetched.hits;
+          let hasMore = fetched.hasMore;
+          let lastPageSize = fetched.hits.length;
+          // A window is fully read only when the source stops reporting more:
+          // page deeper while it claims unread rows. Empty page or the bound
+          // ends paging — deeper rows then stay unread and gate the watermark.
+          for (
+            let offset = limit;
+            hasMore && lastPageSize > 0 && offset < limit * DISCOVERY_MAX_PAGES;
+            offset += limit
+          ) {
+            const page = await fetched.nextPage(offset);
+            for (const source of page.failedSources) failedSources.add(source);
+            collected = mergeSearchHits(collected, page.hits);
+            lastPageSize = page.hits.length;
+            hasMore = page.hasMore;
+          }
+          hits = collected;
+          const reasons: string[] = [];
+          if (failedSources.size > 0) {
+            reasons.push(`источники не ответили: ${[...failedSources].join(", ")}`);
+          }
+          if (hasMore) {
+            reasons.push("выдача усечена — прочитаны не все страницы");
+          }
+          degradedReason = reasons.length === 0 ? undefined : reasons.join("; ");
         } catch (error) {
           logger.error("Specialist discovery search failed", error, {
             profileName: profileDisplayName(profile),
@@ -1847,8 +1920,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           addedCount += 1;
         }
         // The watermark is the pass start, not its end: a procedure posted while
-        // the pass ran must fall into the next window.
-        workspace().markDiscovered(profile.id, startedAt);
+        // the pass ran must fall into the next window. It moves only over a
+        // fully-read window — a failed lane or a truncated scan leaves unread
+        // rows inside, so the interval stays open for the next pass.
+        if (degradedReason === undefined) {
+          workspace().markDiscovered(profile.id, startedAt);
+        } else {
+          degraded.push({ profile, reason: degradedReason });
+          logger.warn("Specialist discovery pass incomplete — watermark held", {
+            profileName: profileDisplayName(profile),
+            reason: degradedReason,
+          });
+        }
         logger.info("Specialist discovery recorded", {
           profileName: profileDisplayName(profile),
           addedCount,
@@ -1863,6 +1946,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           kind: "discovery",
           level: "error",
           message: discoveryFailedMessage(profileDisplayName(item.profile), item.error),
+        });
+      }
+      for (const item of degraded) {
+        await recordJournal(journal, {
+          kind: "discovery",
+          level: "error",
+          message: `Фоновый поиск по «${profileDisplayName(item.profile)}» неполный: ${item.reason}. Интервал будет перечитан.`,
         });
       }
       if (succeeded.length === 0) {

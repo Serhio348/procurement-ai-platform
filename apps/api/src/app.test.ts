@@ -2508,6 +2508,86 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("holds the watermark when a source lane fails — its window was never read", async () => {
+    const journal = createMemoryAdminJournal();
+    const searchDetailed = vi.fn(async () => ({
+      hits: [
+        SearchHit.parse({
+          sourceId: "goszakupki_by",
+          sourceProcurementId: "auction/ok-1",
+          url: "https://goszakupki.by/auction/view/ok-1",
+          title: "Поставка КТПБ-250",
+        }),
+      ] as SearchHit[],
+      hasMore: false,
+      failedSources: ["butb"],
+    }));
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+      journal,
+    });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(ran.statusCode).toBe(200);
+
+    // The healthy lane's hits were processed, but the failed lane's window
+    // went unread — the interval must stay open for the next pass.
+    const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      lastDiscoveryAt?: string;
+    };
+    expect(profile.lastDiscoveryAt).toBeUndefined();
+    const log = await journal.list();
+    expect(log.some((item) => item.level === "error" && item.message.includes("неполный"))).toBe(true);
+    expect(log.some((item) => item.message.includes("butb"))).toBe(true);
+
+    await app.close();
+  });
+
+  it("keeps paging while the source reports more, and holds the watermark when it still truncates", async () => {
+    const journal = createMemoryAdminJournal();
+    const searchDetailed = vi.fn(async (query: { offset: number }) => ({
+      hits:
+        query.offset === 0
+          ? ([
+              SearchHit.parse({
+                sourceId: "goszakupki_by",
+                sourceProcurementId: "auction/ok-1",
+                url: "https://goszakupki.by/auction/view/ok-1",
+                title: "Поставка КТПБ-250",
+              }),
+            ] as SearchHit[])
+          : [],
+      hasMore: true,
+      failedSources: [] as string[],
+    }));
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+      journal,
+    });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(ran.statusCode).toBe(200);
+
+    // The pass paged deeper until the bound, then honestly admitted the
+    // window is not covered — watermark stays, next pass re-reads it.
+    const offsets = searchDetailed.mock.calls.map((call) => (call[0] as { offset: number }).offset);
+    expect(offsets.filter((offset) => offset > 0).length).toBeGreaterThan(0);
+    const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      lastDiscoveryAt?: string;
+    };
+    expect(profile.lastDiscoveryAt).toBeUndefined();
+    const log = await journal.list();
+    expect(log.some((item) => item.level === "error" && item.message.includes("усечена"))).toBe(true);
+
+    await app.close();
+  });
+
   it("does not ask the card or the model twice about the same hit", async () => {
     const hits = [
       SearchHit.parse({

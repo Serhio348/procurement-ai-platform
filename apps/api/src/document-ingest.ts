@@ -5,6 +5,7 @@ import {
   RequestId,
   SourceId,
   SourceProcurementId,
+  sourceIdFromProcurementId,
   SpecialistCaseDocument,
   Sha256,
   type CommercialClaim,
@@ -120,7 +121,9 @@ export function createProcurementDocumentIngest(
     ): Promise<SpecialistProcurementCardValue> {
       const progress = bindIngestScope(options.progress, workspaceId);
       const requestId = RequestId.parse(randomUUID());
-      const sourceId = SourceId.parse(card.live ? "goszakupki_by" : "fixture");
+      const sourceId =
+        sourceIdFromProcurementId(card.sourceProcurementId) ??
+        SourceId.parse(card.live ? "goszakupki_by" : "fixture");
       const listed = await client.getDocuments(
         {
           sourceId,

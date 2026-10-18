@@ -209,9 +209,13 @@ export function parseButbCard(input: {
 }): ParsedButbCard {
   const $ = cheerio.load(input.html);
   const fields = cardFields($);
+  // The card's own field wins over the requested number: when the postback
+  // opened the wrong row, the card says so and the caller's identity check
+  // catches the mismatch instead of relabelling a stranger's card.
   const registryNumber =
+    fields.get("регистрационный номер")?.match(/[A-Z]{2}\d{10,}/)?.[0] ??
     input.registryNumber ??
-    (fields.get("регистрационный номер")?.match(/[A-Z]{2}\d{10,}/)?.[0] ?? "unknown");
+    "unknown";
   const gias = fields.get("номер закупки в гиас");
   const title =
     emptyToUndefined(fields.get("наименование закупки")) ??

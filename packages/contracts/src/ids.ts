@@ -115,3 +115,14 @@ export type SourceId = z.infer<typeof SourceId>;
  */
 export const SourceProcurementId = z.string().min(1).brand<"SourceProcurementId">();
 export type SourceProcurementId = z.infer<typeof SourceProcurementId>;
+
+/**
+ * Source owning a namespaced `sourceProcurementId`: `butb/…` → `butb`.
+ * Un-prefixed ids are the legacy single-source id space — the caller knows
+ * whether such an id is live (goszakupki) or a fixture, so undefined is
+ * returned and the fallback stays at the call site.
+ */
+export function sourceIdFromProcurementId(id: string): SourceId | undefined {
+  if (id.startsWith("butb/")) return SourceId.parse("butb");
+  return undefined;
+}

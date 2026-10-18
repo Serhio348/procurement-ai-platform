@@ -165,6 +165,7 @@ export async function fetchProcurementExport(
 export async function searchProcurements(
   profileId: string,
   offset = 0,
+  scanCursors?: Readonly<Record<string, string>>,
   fetcher: typeof fetch = fetch,
 ): Promise<SpecialistSearchResponseValue> {
   const response = await fetcher(
@@ -172,7 +173,12 @@ export async function searchProcurements(
     withCredentials({
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 400, offset, profileId }),
+      body: JSON.stringify({
+        limit: 400,
+        offset,
+        profileId,
+        ...(scanCursors === undefined ? {} : { scanCursors }),
+      }),
     }),
   );
   if (!response.ok) {

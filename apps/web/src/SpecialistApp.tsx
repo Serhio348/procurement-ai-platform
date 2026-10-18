@@ -48,7 +48,11 @@ export interface SpecialistAppProps {
   procurements: readonly SpecialistProcurementCard[];
   profiles: readonly SpecialistWorkingProfile[];
   activeProfileId?: string;
-  search?: (profileId: string, offset?: number) => Promise<SpecialistSearchResponse>;
+  search?: (
+    profileId: string,
+    offset?: number,
+    scanCursors?: Readonly<Record<string, string>>,
+  ) => Promise<SpecialistSearchResponse>;
   createProfile?: () => Promise<SpecialistWorkingProfile>;
   deleteProfile?: (id: string) => Promise<SpecialistProfileListResponse>;
   activateProfile?: (id: string) => Promise<SpecialistWorkingProfile>;

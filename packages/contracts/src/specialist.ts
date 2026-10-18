@@ -402,6 +402,13 @@ export type SpecialistProcurementListResponse = z.infer<typeof SpecialistProcure
 export const SpecialistSearchRequest = z.object({
   limit: z.number().int().positive().max(500).default(100),
   offset: z.number().int().nonnegative().default(0),
+  /**
+   * Source resume tokens echoed back from the previous search response.
+   * «Загрузить ещё» continues each lane below its recorded position instead
+   * of re-reading the listing head. Honoured only when offset > 0 — a fresh
+   * search always scans from the head. Opaque to the API; sources validate.
+   */
+  scanCursors: z.record(z.string().min(1).max(64), z.string().min(1).max(8192)).optional(),
 });
 export type SpecialistSearchRequest = z.infer<typeof SpecialistSearchRequest>;
 
@@ -475,6 +482,12 @@ export const SpecialistSearchResponse = z.object({
   ambiguousCount: z.number().int().nonnegative().default(0),
   /** True when the source returned a full page — more results may follow. */
   hasMore: z.boolean().default(false),
+  /**
+   * Resume tokens of source lanes that truncated mid-window. The client
+   * echoes them on the next «Загрузить ещё» call so the lane continues
+   * below its recorded position instead of re-reading the head.
+   */
+  scanCursors: z.record(z.string(), z.string()).optional(),
   items: z.array(SpecialistProcurementCard),
   run: SpecialistSearchRun.optional(),
 });

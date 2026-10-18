@@ -85,17 +85,39 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     const statusIds = await this.#resolvedStatusIds(query);
     const filteredQuery = { ...query, statusIds };
     const terms = filteredQuery.keywords.length === 0 ? [undefined] : filteredQuery.keywords;
-    const budget = filteredQuery.offset + filteredQuery.limit;
+    // Resume token from a truncated scan: per-term next page positions plus
+    // the terms already read to their end. `offset` counts results of the
+    // previous window — inside a resumed window it would skip the very rows
+    // the resume exists to return, so it rebases to 0.
+    const parsed = parseGoszakupkiScanCursor(query.scanCursor);
+    // Filters change the result set behind every saved term position —
+    // a fingerprint mismatch must rescan from page 1 instead of trusting
+    // pages read for another query.
+    const resume =
+      parsed !== undefined && parsed.t === goszakupkiSearchFingerprint(filteredQuery)
+        ? parsed
+        : undefined;
+    if (query.scanCursor !== undefined && resume === undefined) {
+      this.#logger.warn("goszakupki scan cursor could not be parsed — fresh scan", {
+        component: "goszakupki-by-source",
+      });
+    }
+    const effectiveOffset = resume === undefined ? filteredQuery.offset : 0;
+    const budget = effectiveOffset + filteredQuery.limit;
     const unique = new Set<string>();
-    const scans: TermScan[] = terms.map((term) => ({
-      term,
-      rows: [],
-      seen: new Set<string>(),
-      nextPage: 1,
-      hasNext: true,
-      pages: 0,
-      seenRows: 0,
-    }));
+    const scans: TermScan[] = terms.map((term) => {
+      const key = term ?? "";
+      const done = resume !== undefined && resume.e.includes(key);
+      return {
+        term,
+        rows: [],
+        seen: new Set<string>(),
+        nextPage: done ? 1 : (resume?.p[key] ?? 1),
+        hasNext: !done,
+        pages: 0,
+        seenRows: 0,
+      };
+    });
 
     const fetchNextPage = async (scan: TermScan): Promise<void> => {
       const path = searchPath(filteredQuery, scan.term, scan.nextPage);
@@ -131,6 +153,9 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     };
 
     for (const scan of scans) {
+      // A term the previous pass already read to its end is skipped — its
+      // page 1 would only re-report rows the caller already saw.
+      if (!scan.hasNext) continue;
       await fetchNextPage(scan);
     }
     const alive = (): TermScan[] =>
@@ -164,21 +189,36 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     }));
     const merged = interleaveSearchBuckets(buckets);
     const hits = merged
-      .slice(filteredQuery.offset, filteredQuery.offset + filteredQuery.limit)
+      .slice(effectiveOffset, effectiveOffset + filteredQuery.limit)
       .map(({ row, terms: found }) =>
         found.length === 0 ? row.hit : { ...row.hit, matchedSearchTerms: found },
       );
     // An unread phrase page is the source's own "more may follow" signal —
     // including a phrase that stopped at the page cap.
     const hasMore = scans.some((scan) => scan.hasNext);
+    const scanCursor = hasMore
+      ? encodeGoszakupkiScanCursor(
+          scans.map((scan) => ({
+            key: scan.term ?? "",
+            nextPage: scan.nextPage,
+            done: !scan.hasNext,
+          })),
+          filteredQuery,
+        )
+      : undefined;
     this.#logger.info("goszakupki.by search merged", {
       component: "goszakupki-by-source",
       terms: terms.map((term) => term ?? ""),
       candidates: merged.length,
       returned: hits.length,
       hasMore,
+      resumed: resume !== undefined,
     });
-    return ProcurementSearchResponse.parse({ hits, hasMore });
+    return ProcurementSearchResponse.parse({
+      hits,
+      hasMore,
+      ...(scanCursor === undefined ? {} : { scanCursor }),
+    });
   }
 
   async #resolvedStatusIds(query: SearchQuery): Promise<string[]> {
@@ -421,4 +461,88 @@ function interleaveSearchBuckets(
 function sourceSequence(id: string): number {
   const value = Number(id.split("/").at(-1));
   return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Resume token for a truncated scan: per-term next page positions plus the
+ * terms already read to their last page. Unlike the BUTB registry — which
+ * is one shared ordered list — each phrase here is its own server-side
+ * result set, so the position is per term. New posts shift page contents
+ * between calls; a resumed page may overlap or skip a row — downstream
+ * dedup absorbs the overlap, and the window watermark bounds the risk.
+ */
+interface GoszakupkiScanCursor {
+  v: 1;
+  /**
+   * Query fingerprint minus keywords — per-term `p` keys already handle a
+   * changed term set (an unseen term simply starts at page 1), while a
+   * changed filter must rescan every term because the site returns
+   * different result sets for it.
+   */
+  t: string;
+  /** term ("" for the term-less scan) → next unread page. */
+  p: Record<string, number>;
+  /** terms read to their end — their next unread page does not exist. */
+  e: string[];
+}
+
+const GOSZAKUPKI_SCAN_CURSOR_VERSION = 1;
+
+function goszakupkiSearchFingerprint(query: SearchQuery): string {
+  return JSON.stringify([
+    query.excludeKeywords,
+    query.buyerUnp,
+    query.buyerText,
+    query.procurementNumber,
+    query.priceFrom ?? null,
+    query.priceTo ?? null,
+    query.publishedFrom ?? "",
+    query.publishedTo ?? "",
+    query.requestEndFrom ?? "",
+    query.requestEndTo ?? "",
+    query.auctionFrom ?? "",
+    query.auctionTo ?? "",
+    query.regionIds,
+    query.typeIds,
+    query.statusIds,
+    query.statuses,
+    query.kinds,
+  ]);
+}
+
+function encodeGoszakupkiScanCursor(
+  terms: ReadonlyArray<{ key: string; nextPage: number; done: boolean }>,
+  query: SearchQuery,
+): string {
+  const cursor: GoszakupkiScanCursor = {
+    v: GOSZAKUPKI_SCAN_CURSOR_VERSION,
+    t: goszakupkiSearchFingerprint(query),
+    p: {},
+    e: [],
+  };
+  for (const term of terms) {
+    if (term.done) cursor.e.push(term.key);
+    else cursor.p[term.key] = term.nextPage;
+  }
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function parseGoszakupkiScanCursor(token: string | undefined): GoszakupkiScanCursor | undefined {
+  if (token === undefined || token.length === 0) return undefined;
+  try {
+    const decoded: unknown = JSON.parse(Buffer.from(token, "base64url").toString("utf8"));
+    if (typeof decoded !== "object" || decoded === null) return undefined;
+    const cursor = decoded as GoszakupkiScanCursor;
+    if (cursor.v !== GOSZAKUPKI_SCAN_CURSOR_VERSION) return undefined;
+    if (typeof cursor.t !== "string" || cursor.t.length === 0) return undefined;
+    if (typeof cursor.p !== "object" || cursor.p === null) return undefined;
+    if (!Array.isArray(cursor.e)) return undefined;
+    for (const page of Object.values(cursor.p)) {
+      if (typeof page !== "number" || !Number.isInteger(page) || page < 1) return undefined;
+    }
+    if (cursor.e.some((term) => typeof term !== "string")) return undefined;
+    return cursor;
+  } catch {
+    return undefined;
+  }
 }

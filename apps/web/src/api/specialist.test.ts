@@ -109,6 +109,7 @@ describe("searchProcurements", () => {
     const result = await searchProcurements(
       "00000000-0000-4000-8000-000000000901",
       0,
+      undefined,
       async (input, init) => {
         method = typeof input === "string" ? init?.method : undefined;
         body = typeof init?.body === "string" ? init.body : null;
@@ -124,6 +125,33 @@ describe("searchProcurements", () => {
     );
     expect(result.relevantCount).toBe(1);
     expect(result.items[0]?.title).toBe("Комплектная трансформаторная подстанция");
+  });
+
+  it("echoes scan cursors into the continuation request", async () => {
+    // «Загрузить ещё» must send the previous response's resume tokens —
+    // without them every page re-read the registry head.
+    const payload = SpecialistSearchResponse.parse({
+      profileName: "Электротехническое оборудование",
+      relevantCount: 0,
+      discardedCount: 0,
+      items: [],
+    });
+    let body: string | null | undefined;
+    await searchProcurements(
+      "00000000-0000-4000-8000-000000000901",
+      400,
+      { butb: "tok-tail" },
+      async (_input, init) => {
+        body = typeof init?.body === "string" ? init.body : null;
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
+    expect(body).toBe(
+      '{"limit":400,"offset":400,"profileId":"00000000-0000-4000-8000-000000000901","scanCursors":{"butb":"tok-tail"}}',
+    );
   });
 
   it("explains a blocked live source in Russian instead of a generic failure", async () => {

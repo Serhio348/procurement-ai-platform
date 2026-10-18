@@ -325,6 +325,72 @@ describe("ProcurementsApp", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("echoes the returned scan cursors on «Загрузить ещё»", async () => {
+    // «Ещё» used to send only offset+400 — the source lanes re-read the
+    // listing head every page. Now the response's resume tokens go back.
+    const user = userEvent.setup();
+    const card = (id: string, title: string) =>
+      SpecialistProcurementCard.parse({
+        id,
+        title,
+        status: "unknown",
+        statusLabel: "Прием предложений",
+        url: "https://example.test/auction/001",
+        sourceProcurementId: `auction-${id.slice(-3)}`,
+        profileIds: [searchProfile.id],
+      });
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce({
+        profileName: "КТП",
+        relevantCount: 1,
+        discardedCount: 0,
+        hasMore: true,
+        scanCursors: { butb: "tok-tail" },
+        items: [card("00000000-0000-4000-8000-000000000401", "КТП первая")],
+      })
+      .mockResolvedValueOnce({
+        profileName: "КТП",
+        relevantCount: 1,
+        discardedCount: 0,
+        hasMore: false,
+        items: [card("00000000-0000-4000-8000-000000000402", "КТП вторая")],
+      });
+
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route
+            path="/procurements"
+            element={
+              <ProcurementsApp
+                items={[]}
+                profiles={[searchProfile]}
+                activeProfileId={searchProfile.id}
+                search={search}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Искать по профилю" }));
+    await user.click(await screen.findByRole("button", { name: "Загрузить ещё" }));
+
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(search.mock.calls[0]).toEqual([searchProfile.id, 0, undefined]);
+    expect(search.mock.calls[1]).toEqual([
+      searchProfile.id,
+      400,
+      { butb: "tok-tail" },
+    ]);
+    // No token came back — «ещё» is gone with the completed window.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Загрузить ещё" })).toBeNull(),
+    );
+  });
+
   it("shows card-reading percent while the search run is scoring", () => {
     render(
       <MemoryRouter initialEntries={["/procurements"]}>

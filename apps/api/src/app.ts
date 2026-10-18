@@ -1745,8 +1745,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     profile: SpecialistWorkingProfileValue,
     limit: number,
     offset: number,
+    scanCursors?: Readonly<Record<string, string>>,
   ): Promise<ReturnType<typeof SpecialistSearchResponse.parse>> {
-    const { plan, hits, hasMore } = await fetchProfileHits(profile, limit, offset);
+    // Resume tokens belong to a paging sequence: a fresh search (offset 0)
+    // always scans from the head, so stale cursors must not skip it.
+    const resume = offset > 0 ? scanCursors : undefined;
+    const { plan, hits, hasMore, scanCursors: nextCursors } = await fetchProfileHits(
+      profile,
+      limit,
+      offset,
+      undefined,
+      resume,
+    );
     const selected = selectRelevantSearchCards(
       hits,
       {
@@ -1829,6 +1839,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       // An empty page ends paging even when the source still claims more:
       // clicking «Загрузить ещё» would only rescan the same head pages.
       hasMore: hits.length > 0 && (hasMore || hits.length >= limit),
+      // Tokens for lanes still mid-window — the client echoes them on the
+      // next page call so the lane resumes below its recorded position.
+      ...(Object.keys(nextCursors).length === 0 ? {} : { scanCursors: nextCursors }),
       items,
       ...(run === undefined ? {} : { run }),
     });
@@ -2767,7 +2780,12 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       return reply.code(400).send({ error: "no_keywords" });
     }
     try {
-      return await runManualSearch(profile, parsed.data.limit, parsed.data.offset);
+      return await runManualSearch(
+        profile,
+        parsed.data.limit,
+        parsed.data.offset,
+        parsed.data.scanCursors,
+      );
     } catch (error) {
       logger.error("Specialist profile search failed", error);
       await noteSearchFailure(journal, error);

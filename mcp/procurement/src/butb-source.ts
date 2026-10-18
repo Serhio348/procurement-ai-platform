@@ -115,7 +115,6 @@ export class ButbSource implements ProcurementSourcePort {
     const excluded = query.excludeKeywords
       .map((term) => normalize(term))
       .filter((term) => term.length > 0);
-    const budget = query.offset + query.limit;
     const candidates = new Map<string, { row: ButbRegistryRow; terms: string[] }>();
     let page = 1;
     let scannedRows = 0;
@@ -130,14 +129,28 @@ export class ButbSource implements ProcurementSourcePort {
     // pass that wrote the token (they only ever sit at the top) and looks
     // for the cursor row or the first row older than its date band —
     // everything below that point is the unread tail either way.
-    const resume = parseButbScanCursor(query.scanCursor);
+    const parsed = parseButbScanCursor(query.scanCursor);
+    // A token written under other terms or filters marks a window this
+    // query never scanned — resuming it would skip rows unread for these
+    // terms, so a fingerprint mismatch falls back to a fresh scan.
+    const resume =
+      parsed !== undefined && parsed.t === butbSearchFingerprint(query) ? parsed : undefined;
     if (query.scanCursor !== undefined && resume === undefined) {
       this.#logger.warn("butb scan cursor could not be parsed — fresh scan", {
         component: "butb-source",
       });
     }
+    // A resumed window is a fresh range: the caller's offset counts rows of
+    // the previous window and must not skip candidates inside this one —
+    // the cursor itself is the position.
+    const effectiveOffset = resume === undefined ? query.offset : 0;
+    const budget = effectiveOffset + query.limit;
     let tail = resume === undefined;
     let deepestRead: ButbRegistryRow | undefined;
+    // Last row of the page before the current one — needed so a truncation
+    // that already collected more candidates than the page returns can
+    // resume from a position that re-reads the overflow instead of losing it.
+    let beforeDeepestPage: ButbRegistryRow | undefined;
     while (page <= this.#maxSearchPages) {
       if (this.#now().getTime() >= deadline) {
         // The scan ran out of wall clock, not out of registry — the tail
@@ -156,6 +169,7 @@ export class ButbSource implements ProcurementSourcePort {
       if (rows.length === 0) break;
       scannedRows += rows.length;
       for (const row of rows) this.#rememberPosition(row);
+      beforeDeepestPage = deepestRead;
       deepestRead = rows[rows.length - 1] ?? deepestRead;
       let pageBeforeWatermark = false;
       let belowCursor = false;
@@ -207,26 +221,37 @@ export class ButbSource implements ProcurementSourcePort {
       page += 1;
     }
 
-    // A truncated scan hands back where it stopped: the deepest row this
-    // call actually read — or the incoming token when the head phase never
-    // passed it, because a shallower token would rewind the window.
+    const merged = [...candidates.values()]
+      .map(({ row, terms: matched }) => ({ row, terms: matched }))
+      .sort((left, right) => compareInstant(right.row.publishedAt, left.row.publishedAt));
+
+    // A truncated scan hands back where it stopped. The token points at the
+    // deepest row whose page was fully returned: when the stop page pushed
+    // candidates past the slice, its overflow rows were read but not sent —
+    // anchoring on the previous page's last row re-reads exactly that page.
     let scanCursor: string | undefined;
     if (hasMore) {
-      if (tail && deepestRead !== undefined) {
-        scanCursor = encodeButbScanCursor(deepestRead);
+      const unreturned = merged.length > effectiveOffset + query.limit;
+      const anchor =
+        tail && unreturned && beforeDeepestPage !== undefined
+          ? beforeDeepestPage
+          : tail
+            ? deepestRead
+            : undefined;
+      if (anchor !== undefined) {
+        scanCursor = encodeButbScanCursor(anchor, query);
       } else {
+        // The head phase never passed the old cursor — re-emitting a
+        // shallower position would rewind the window.
         scanCursor = query.scanCursor;
         if (scanCursor === undefined && deepestRead !== undefined) {
-          scanCursor = encodeButbScanCursor(deepestRead);
+          scanCursor = encodeButbScanCursor(deepestRead, query);
         }
       }
     }
 
-    const merged = [...candidates.values()]
-      .map(({ row, terms: matched }) => ({ row, terms: matched }))
-      .sort((left, right) => compareInstant(right.row.publishedAt, left.row.publishedAt));
     const hits = merged
-      .slice(query.offset, query.offset + query.limit)
+      .slice(effectiveOffset, effectiveOffset + query.limit)
       .map(({ row, terms: matched }) => {
         const hit = butbRegistryHit(row, this.#baseUrl);
         return matched.length === 0 ? hit : { ...hit, matchedSearchTerms: matched };
@@ -609,6 +634,8 @@ function dateFloor(instant: IsoDateTime | undefined): string | undefined {
  */
 interface ButbScanCursor {
   v: 1;
+  /** Query fingerprint — a token written for other terms/filters cannot bound this window. */
+  t: string;
   n?: string;
   i?: number;
   d?: string;
@@ -616,8 +643,41 @@ interface ButbScanCursor {
 
 const BUTB_SCAN_CURSOR_VERSION = 1;
 
-function encodeButbScanCursor(row: ButbRegistryRow): string {
-  const cursor: ButbScanCursor = { v: BUTB_SCAN_CURSOR_VERSION, n: row.registryNumber, i: row.rowIndex };
+/**
+ * The fields that decide which registry rows this query collects — terms,
+ * filters and the watermark bound. Paging fields (limit/offset/scanCursor)
+ * are deliberately outside: they change per call inside one window.
+ */
+function butbSearchFingerprint(query: SearchQuery): string {
+  return JSON.stringify([
+    query.keywords,
+    query.excludeKeywords,
+    query.buyerUnp,
+    query.buyerText,
+    query.procurementNumber,
+    query.priceFrom ?? null,
+    query.priceTo ?? null,
+    query.publishedFrom ?? "",
+    query.publishedTo ?? "",
+    query.requestEndFrom ?? "",
+    query.requestEndTo ?? "",
+    query.auctionFrom ?? "",
+    query.auctionTo ?? "",
+    query.regionIds,
+    query.typeIds,
+    query.statusIds,
+    query.statuses,
+    query.kinds,
+  ]);
+}
+
+function encodeButbScanCursor(row: ButbRegistryRow, query: SearchQuery): string {
+  const cursor: ButbScanCursor = {
+    v: BUTB_SCAN_CURSOR_VERSION,
+    t: butbSearchFingerprint(query),
+    n: row.registryNumber,
+    i: row.rowIndex,
+  };
   const date = rowDateOf(row);
   if (date !== undefined) cursor.d = date;
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
@@ -630,6 +690,7 @@ function parseButbScanCursor(token: string | undefined): ButbScanCursor | undefi
     if (typeof decoded !== "object" || decoded === null) return undefined;
     const cursor = decoded as ButbScanCursor;
     if (cursor.v !== BUTB_SCAN_CURSOR_VERSION) return undefined;
+    if (typeof cursor.t !== "string" || cursor.t.length === 0) return undefined;
     if (typeof cursor.n !== "string" || cursor.n.length === 0) return undefined;
     return cursor;
   } catch {

@@ -585,6 +585,165 @@ describe("GoszakupkiBySource", () => {
     expect(result.hits.every((item) => !item.title.includes("АСКУЭ"))).toBe(true);
   });
 
+  it("emits a per-term resume cursor and a fresh instance continues from the saved page", async () => {
+    // «Загрузить ещё» is a new HTTP call — the term scans' nextPage state
+    // used to die with the response, so every continuation re-read page 1.
+    // The cursor carries each term's next unread page; the resuming call
+    // runs on a NEW source instance to prove the token is self-contained.
+    const get = vi.fn(async (path: string) => {
+      const url = new URL(`https://goszakupki.by${path}`);
+      const page = Number(url.searchParams.get("page") ?? "1");
+      return {
+        status: 200,
+        url: `https://goszakupki.by${path}`,
+        body: pagedSearchBody(page, 1, page < 3),
+      };
+    });
+    const source = new GoszakupkiBySource({ client: { get } });
+    const first = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["трансформатор"],
+        limit: 1,
+      }),
+    );
+    expect(first.hasMore).toBe(true);
+    expect(first.scanCursor).toBeDefined();
+    const headCalls = get.mock.calls.length;
+
+    const resumed = new GoszakupkiBySource({ client: { get } });
+    const second = await resumed.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["трансформатор"],
+        limit: 400,
+        offset: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+
+    // No request for page 1 — the term continued where the token left it.
+    for (const call of get.mock.calls.slice(headCalls)) {
+      const page = new URL(`https://goszakupki.by${String(call[0])}`).searchParams.get("page");
+      expect(page).not.toBeNull();
+      expect(Number(page)).toBeGreaterThanOrEqual(2);
+    }
+    // The stale offset must not slice the resumed window away.
+    expect(second.hits.length).toBeGreaterThan(0);
+    expect(second.hasMore).toBe(false);
+    expect(second.scanCursor).toBeUndefined();
+  });
+
+  it("resumes live terms and never re-reads a term the token marks exhausted", async () => {
+    const get = vi.fn(async (path: string) => {
+      const url = new URL(`https://goszakupki.by${path}`);
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const term = url.searchParams.get("TendersSearch[text]") ?? "";
+      // Phrase B's result set ends on page 1; phrase A keeps paging.
+      const hasNext = term === "A" ? page < 2 : false;
+      return {
+        status: 200,
+        url: `https://goszakupki.by${path}`,
+        body: pagedSearchBody(page, term === "A" ? 1 : 2, hasNext),
+      };
+    });
+    const source = new GoszakupkiBySource({ client: { get } });
+    const first = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["A", "B"],
+        limit: 1,
+      }),
+    );
+    expect(first.scanCursor).toBeDefined();
+    const headCalls = get.mock.calls.length;
+
+    const resumed = new GoszakupkiBySource({ client: { get } });
+    const second = await resumed.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["A", "B"],
+        limit: 400,
+        offset: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+
+    for (const call of get.mock.calls.slice(headCalls)) {
+      const url = new URL(`https://goszakupki.by${String(call[0])}`);
+      // The exhausted phrase is not queried again — re-reading its page 1
+      // would only re-report rows the caller already saw.
+      expect(url.searchParams.get("TendersSearch[text]")).toBe("A");
+      expect(Number(url.searchParams.get("page"))).toBe(2);
+    }
+    expect(second.hits.length).toBeGreaterThan(0);
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("rescans from page 1 when the cursor was written for other filters", async () => {
+    // The profile's status filter changed between pages — pages recorded
+    // under the old filter say nothing about this result set.
+    const get = vi.fn(async (path: string) => {
+      const url = new URL(`https://goszakupki.by${path}`);
+      const page = Number(url.searchParams.get("page") ?? "1");
+      return {
+        status: 200,
+        url: `https://goszakupki.by${path}`,
+        body: pagedSearchBody(page, 1, page < 3),
+      };
+    });
+    const source = new GoszakupkiBySource({ client: { get } });
+    const first = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["трансформатор"],
+        publishedFrom: "2026-09-01T00:00:00+03:00",
+        limit: 1,
+      }),
+    );
+    expect(first.scanCursor).toBeDefined();
+    const headCalls = get.mock.calls.length;
+
+    const resumed = new GoszakupkiBySource({ client: { get } });
+    await resumed.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["трансформатор"],
+        publishedFrom: "2026-10-01T00:00:00+03:00",
+        limit: 400,
+        offset: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+
+    // The fingerprint rejected the token — the window reopened at page 1.
+    const pages = get.mock.calls
+      .slice(headCalls)
+      .map((call) => new URL(`https://goszakupki.by${String(call[0])}`).searchParams.get("page"));
+    expect(pages[0]).toBeNull();
+    expect(pages).toHaveLength(3);
+  });
+
+  it("ignores an unparseable cursor instead of trusting it", async () => {
+    const get = vi.fn(async (path: string) => ({
+      status: 200,
+      url: `https://goszakupki.by${path}`,
+      body: pagedSearchBody(1, 1, false),
+    }));
+    const source = new GoszakupkiBySource({ client: { get } });
+    const result = await source.search(
+      SearchQuery.parse({
+        sourceId: "goszakupki_by",
+        keywords: ["трансформатор"],
+        limit: 10,
+        scanCursor: "%%%not-a-cursor%%%",
+      }),
+    );
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hasMore).toBe(false);
+    expect(result.scanCursor).toBeUndefined();
+  });
+
   it("loads a limited contest card by family/id the same way as other families", async () => {
     const limitedHtml = await readFile(
       fileURLToPath(
@@ -611,3 +770,27 @@ describe("GoszakupkiBySource", () => {
     expect(card.lots[0]?.positions[0]?.title).toMatch(/электрооборудования/i);
   });
 });
+
+/** Synthetic listing page: two rows per page, optional «next» pager. */
+function pagedSearchBody(page: number, seed: number, hasNext: boolean): string {
+  const rows = Array.from({ length: 2 }, (_unused, index) => {
+    const id = 9100000 + seed * 1000 + page * 100 + index;
+    return `<tr data-key="${index}">
+      <td><input type="checkbox"></td>
+      <td><a href="https://gias.by/gias/#/purchase/current/view/${id}">${id}</a></td>
+      <td>Заказчик<br><a href="/auction/view/${id}">Закупка ${id}</a></td>
+      <td>Электронный аукцион</td>
+      <td><span class="badge">Подача предложений</span></td>
+      <td>27.09.2026</td>
+      <td>1 BYN</td>
+    </tr>`;
+  }).join("\n");
+  const pager = hasNext
+    ? `<ul class="pagination"><li class="next"><a href="/tenders/posted?page=${page + 1}">›</a></li></ul>`
+    : "";
+  return `<!doctype html><table><thead><tr>
+    <th></th><th>Номер закупки</th><th>Организация / Предмет закупки</th>
+    <th>Вид процедуры закупки</th><th>Статус</th>
+    <th>Предложения, документы до</th><th>Стоимость</th>
+  </tr></thead><tbody>${rows}</tbody></table>${pager}`;
+}

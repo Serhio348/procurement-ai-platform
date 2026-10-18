@@ -290,6 +290,112 @@ describe("ButbSource.search", () => {
     expect(second.hasMore).toBe(false);
   });
 
+  it("returns the tail window when the request still carries the old offset", async () => {
+    // «Загрузить ещё» sends offset=400 for page two — but a resumed scan's
+    // candidates only cover the unread tail. Slicing them by that offset
+    // would return an empty page and mark the window read: the cursor is
+    // the position, the offset must rebase to the resumed window.
+    const pages = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000002")],
+      [3, syntheticPage(40, "17.10.2026", "AU20261017000003")],
+    ]);
+    const client = fakeClient(pages);
+    const shallow = new ButbSource({ client, maxSearchPages: 1 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 400 }),
+    );
+    expect(first.scanCursor).toBeDefined();
+
+    const resumed = new ButbSource({ client });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 400,
+        offset: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    const ids = second.hits.map((hit) => hit.sourceProcurementId);
+    expect(ids).toContain("butb/AU20261018000002");
+    expect(ids).toContain("butb/AU20261017000003");
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("re-reads the stop page when its candidates overflowed the slice", async () => {
+    // Two matching rows on the stop page but only one fits the window: the
+    // second was read yet never returned. Anchoring the cursor at the page
+    // itself — not past it — makes the resume re-read exactly that page.
+    const pages = new Map<number, string>([
+      [
+        1,
+        syntheticMultiPage([
+          { rowIndex: 0, date: "20.10.2026", regNo: "AU20261020000001" },
+          { rowIndex: 1, date: "20.10.2026", regNo: "AU20261020000002" },
+        ]),
+      ],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000003")],
+    ]);
+    const client = fakeClient(pages);
+    const source = new ButbSource({ client });
+    const first = await source.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 1 }),
+    );
+    expect(first.hits).toHaveLength(1);
+    expect(first.hasMore).toBe(true);
+    expect(first.scanCursor).toBeDefined();
+
+    const resumed = new ButbSource({ client });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 400,
+        offset: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    const ids = second.hits.map((hit) => hit.sourceProcurementId);
+    // The overflow row from the truncated page is not lost — and the
+    // already-returned row re-reads once, deduped by the caller.
+    expect(ids).toContain("butb/AU20261020000002");
+    expect(ids).toContain("butb/AU20261018000003");
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("refuses a cursor written for different search terms", async () => {
+    // The profile was edited between «Загрузить ещё» clicks — the saved
+    // position marks a window these terms never scanned, so the lane must
+    // rescan the head instead of skipping it.
+    const pages = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000002")],
+    ]);
+    const client = fakeClient(pages);
+    const shallow = new ButbSource({ client, maxSearchPages: 1 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 400 }),
+    );
+    expect(first.scanCursor).toBeDefined();
+
+    const resumed = new ButbSource({ client });
+    const second = await resumed.search(
+      query({
+        keywords: ["электродвигатель"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 400,
+        offset: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    // Fresh scan under the new terms — page 1 was read again (twice in
+    // total across both calls) and its row evaluated against the new
+    // keyword (it does not match → no hits).
+    expect(client.calls.pages.filter((p) => p === 1)).toHaveLength(2);
+    expect(second.hits).toEqual([]);
+  });
+
   it("ignores an unparseable cursor instead of trusting it", async () => {
     const client = fakeClient(new Map([[1, registryHtml], [2, "<table></table>"]]));
     const source = new ButbSource({ client });
@@ -455,10 +561,24 @@ describe("ButbSource.get", () => {
   });
 });
 
-/** A synthetic registry page: one row with the given date/reg number. */
-function syntheticPage(rowIndex: number, date: string, regNo = "AU20261010396700"): string {
-  return `<table><tbody><tr id="fra:reestrAu_row_${rowIndex}"><td><span>${regNo}</span></td>` +
+/** A synthetic registry row with the given date/reg number. */
+function syntheticRow(rowIndex: number, date: string, regNo = "AU20261010396700"): string {
+  return `<tr id="fra:reestrAu_row_${rowIndex}"><td><span>${regNo}</span></td>` +
     `<td><a href="#" id="fra:reestrAu:${rowIndex}:_t344" onclick="mojarra.jsfcljs()">Инструментарий</a></td>` +
     `<td>аукцион</td><td>${date}</td><td>1 710 704,01 BYN</td><td>Заказчик</td>` +
-    `<td>Госзакупка</td><td>30.10.2026</td><td></td><td>Подача предложений / документов</td><td></td></tr></tbody></table>`;
+    `<td>Госзакупка</td><td>30.10.2026</td><td></td><td>Подача предложений / документов</td><td></td></tr>`;
+}
+
+/** A synthetic registry page: one row with the given date/reg number. */
+function syntheticPage(rowIndex: number, date: string, regNo = "AU20261010396700"): string {
+  return `<table><tbody>${syntheticRow(rowIndex, date, regNo)}</tbody></table>`;
+}
+
+/** A synthetic registry page holding several rows — for overflow regressions. */
+function syntheticMultiPage(
+  rows: ReadonlyArray<{ rowIndex: number; date: string; regNo?: string }>,
+): string {
+  return `<table><tbody>${rows
+    .map((row) => syntheticRow(row.rowIndex, row.date, row.regNo ?? "AU20261010396700"))
+    .join("")}</tbody></table>`;
 }

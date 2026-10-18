@@ -199,7 +199,11 @@ export function ProcurementsApp({
   items: readonly SpecialistProcurementCard[];
   profiles?: readonly SpecialistWorkingProfile[];
   activeProfileId?: string;
-  search?: (profileId: string, offset?: number) => Promise<SpecialistSearchResponse>;
+  search?: (
+    profileId: string,
+    offset?: number,
+    scanCursors?: Readonly<Record<string, string>>,
+  ) => Promise<SpecialistSearchResponse>;
   selectProfile?: (id: string) => Promise<void>;
   decide?: (id: string, kind: SpecialistTriageKind) => Promise<readonly SpecialistProcurementCard[]>;
   ingestProgress?: (id: string) => Promise<SpecialistIngestProgress>;
@@ -221,6 +225,11 @@ export function ProcurementsApp({
   const [clearQueueConfirm, setClearQueueConfirm] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
+  // Per-source resume tokens from the last search response — «Загрузить ещё»
+  // echoes them so each lane continues below its recorded position instead
+  // of re-reading the listing head. Reset with every fresh search (offset 0)
+  // and when the chosen profile changes.
+  const [scanCursors, setScanCursors] = useState<Readonly<Record<string, string>>>({});
   const [searchPct, setSearchPct] = useState(0);
   const scoring = searchRun?.status === "retrieving" || searchRun?.status === "scoring";
   const listing = busy && busyKind === undefined && !scoring;
@@ -354,7 +363,10 @@ export function ProcurementsApp({
 
   const searchGeneration = useRef(0);
 
-  async function runSearch(offset = 0): Promise<void> {
+  async function runSearch(
+    offset = 0,
+    cursors: Readonly<Record<string, string>> = {},
+  ): Promise<void> {
     if (search === undefined || busy || chosenProfileId.length === 0) return;
     const generation = ++searchGeneration.current;
     setBusy(true);
@@ -362,7 +374,11 @@ export function ProcurementsApp({
       if (selectProfile !== undefined) {
         await selectProfile(chosenProfileId);
       }
-      const result = await search(chosenProfileId, offset);
+      const result = await search(
+        chosenProfileId,
+        offset,
+        offset > 0 && Object.keys(cursors).length > 0 ? cursors : undefined,
+      );
       // The specialist stopped the listing — its late response must not
       // resurrect the list or the busy state (R35).
       if (searchGeneration.current !== generation) return;
@@ -376,6 +392,7 @@ export function ProcurementsApp({
       });
       setHasMore(result.hasMore);
       setNextOffset(offset + 400);
+      setScanCursors(result.scanCursors ?? {});
       const run = result.run;
       const scored = run === undefined ? undefined : `${String(run.scoredCount)} из ${String(run.retrievedCount)}`;
       setNotice(
@@ -531,6 +548,7 @@ export function ProcurementsApp({
                     onChange={(event) => {
                       const id = event.target.value;
                       setChosenProfileId(id);
+                      setScanCursors({});
                       showingSearch.current = false;
                       const next = catalog.filter((item) => belongsToChosenProfile(item, id));
                       setCatalogItems(uniqueBySource(next));
@@ -590,7 +608,7 @@ export function ProcurementsApp({
                   className="search-profile"
                   disabled={listing || scoring}
                   onClick={() => {
-                    void runSearch(nextOffset);
+                    void runSearch(nextOffset, scanCursors);
                   }}
                 >
                   Загрузить ещё

@@ -2704,6 +2704,73 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("manual search echoes scan cursors so «Загрузить ещё» resumes the lanes", async () => {
+    // HTTP calls are stateless — without the token each «ещё» re-read the
+    // registry head. The response now hands back per-source tokens and the
+    // next request must echo them into the lane query.
+    const cursorsSeen: Array<Record<string, string> | undefined> = [];
+    const searchDetailed = vi.fn(
+      async (_query: { offset: number }, options?: { cursors?: Record<string, string> }) => {
+        cursorsSeen.push(options?.cursors);
+        const resumed = options?.cursors?.["butb"] === "tok-tail";
+        return {
+          hits: [
+            SearchHit.parse({
+              sourceId: "butb",
+              sourceProcurementId: resumed ? "butb/AU20261018000002" : "butb/AU20261020000001",
+              url: "https://zakupki.butb.by/auctions/viewinvitation.html?id=1",
+              title: "Поставка КТПБ-250",
+            }),
+          ] as SearchHit[],
+          hasMore: !resumed,
+          failedSources: [] as string[],
+          cursors: resumed ? {} : { butb: "tok-tail" },
+        };
+      },
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+    });
+    const profileId = await activeProfileId(app);
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${profileId}`,
+      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+    });
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId, limit: 400, offset: 0 },
+    });
+    const firstBody = first.json() as { hasMore: boolean; scanCursors?: Record<string, string> };
+    expect(firstBody.hasMore).toBe(true);
+    expect(firstBody.scanCursors).toEqual({ butb: "tok-tail" });
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId, limit: 400, offset: 400, scanCursors: { butb: "tok-tail" } },
+    });
+    const secondBody = second.json() as { hasMore: boolean; scanCursors?: Record<string, string> };
+    expect(cursorsSeen).toContainEqual({ butb: "tok-tail" });
+    expect(secondBody.hasMore).toBe(false);
+    expect(secondBody.scanCursors).toBeUndefined();
+
+    // A fresh search must not inherit stale tokens — offset 0 always scans
+    // from the head, even if the client echoed the last window's cursors.
+    await app.inject({
+      method: "POST",
+      url: "/api/procurements/search",
+      payload: { profileId, limit: 400, offset: 0, scanCursors: { butb: "tok-tail" } },
+    });
+    const lastCall = cursorsSeen.at(-1);
+    expect(lastCall === undefined || Object.keys(lastCall).length === 0).toBe(true);
+
+    await app.close();
+  });
+
   it("does not ask the card or the model twice about the same hit", async () => {
     const hits = [
       SearchHit.parse({

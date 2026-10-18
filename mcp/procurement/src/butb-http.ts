@@ -2,7 +2,7 @@ import { Agent, fetch as undiciFetch } from "undici";
 import { readFileSync } from "node:fs";
 import * as tls from "node:tls";
 import { butbPartialUpdate, parseButbViewState, type ButbViewState } from "./butb-parser.js";
-import { SourceAccessError } from "./source-registry.js";
+import { SourceAccessError, SourceAbortedError, throwIfAborted } from "./source-registry.js";
 
 export interface ButbPage {
   status: number;
@@ -19,9 +19,9 @@ export interface ButbDownload {
 
 /** Structural port so tests can fake the session without HTTP. */
 export interface ButbPageClient {
-  registryPage(page: number): Promise<ButbPage>;
-  openCard(cardLinkId: string): Promise<ButbPage>;
-  download(path: string): Promise<ButbDownload>;
+  registryPage(page: number, signal?: AbortSignal): Promise<ButbPage>;
+  openCard(cardLinkId: string, signal?: AbortSignal): Promise<ButbPage>;
+  download(path: string, signal?: AbortSignal): Promise<ButbDownload>;
   /**
    * Runs `fn` holding the session lock. A card link id is valid only while
    * the session's table shows its row, so «scan pages → openCard» must run
@@ -136,15 +136,15 @@ export class ButbHttpClient implements ButbPageClient {
    * goes through pageChange postbacks. After a card was opened the whole
    * session is degraded, so it is dropped and rebuilt instead of reused.
    */
-  async registryPage(page: number): Promise<ButbPage> {
+  async registryPage(page: number, signal?: AbortSignal): Promise<ButbPage> {
     if (page < 1) throw new Error("registryPage pages are 1-based");
     return this.#serialized(() => this.#guarded(async () => {
       if (this.#view === "card") this.#resetSession();
-      const boot = await this.#ensureSession();
+      const boot = await this.#ensureSession(signal);
       if (boot !== undefined && this.#currentPage === page) return boot;
-      const body = await this.#pageChange(page);
+      const body = await this.#pageChange(page, signal);
       return { status: 200, url: this.#registryUrl(), body };
-    }));
+    }, signal));
   }
 
   /**
@@ -152,7 +152,7 @@ export class ButbHttpClient implements ButbPageClient {
    * exists while the session's dataTable shows the row's page — callers must
    * page to it first. Returns the rendered card page.
    */
-  async openCard(cardLinkId: string): Promise<ButbPage> {
+  async openCard(cardLinkId: string, signal?: AbortSignal): Promise<ButbPage> {
     if (!/^fra:reestrAu:\d+:_t\d+$/.test(cardLinkId)) {
       throw new Error(`not a registry row link id: ${cardLinkId}`);
     }
@@ -160,26 +160,26 @@ export class ButbHttpClient implements ButbPageClient {
       // A row link id only resolves while the registry table renders its
       // page — and a card view leaves the session degraded, so reopen.
       if (this.#view === "card") this.#resetSession();
-      await this.#ensureSession();
-      return this.#postbackForCard(cardLinkId);
-    }));
+      await this.#ensureSession(signal);
+      return this.#postbackForCard(cardLinkId, signal);
+    }, signal));
   }
 
-  async download(path: string): Promise<ButbDownload> {
+  async download(path: string, signal?: AbortSignal): Promise<ButbDownload> {
     return this.#serialized(() => this.#guarded(async () => {
       const url = new URL(path, this.#baseUrl);
       if (url.origin !== this.#baseUrl.origin) {
         throw new SourceAccessError("butb", "refused cross-origin download");
       }
-      await this.#ensureSession();
-      const loaded = await this.#request(url, "binary");
+      await this.#ensureSession(signal);
+      const loaded = await this.#request(url, "binary", signal);
       return {
         status: loaded.status,
         url: loaded.url,
         bytes: loaded.bytes,
         ...(loaded.contentType === undefined ? {} : { contentType: loaded.contentType }),
       };
-    }));
+    }, signal));
   }
 
   async withSession<T>(fn: () => Promise<T>): Promise<T> {
@@ -218,17 +218,24 @@ export class ButbHttpClient implements ButbPageClient {
     }
   }
 
-  /** Circuit, retry-once-on-expired-view and error normalization. */
-  async #guarded<T>(operation: () => Promise<T>): Promise<T> {
+  /**
+   * Circuit, retry-once-on-expired-view and error normalization. `signal`
+   * carries the caller's cancellation: an aborted call throws
+   * SourceAbortedError — a cancellation is not a transport failure and must
+   * not feed the circuit breaker or trigger a session-rebuild retry.
+   */
+  async #guarded<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (this.#circuitOpenedUntil > this.#now()) {
       throw new SourceAccessError("butb", "source circuit is open");
     }
+    throwIfAborted("butb", signal);
     try {
       try {
         const result = await operation();
         this.#recordSuccess();
         return result;
       } catch (error) {
+        throwIfAborted("butb", signal);
         if (error instanceof ButbViewExpiredError) {
           // Session/view died: reopen and run the operation once more.
           this.#invalidateSession();
@@ -239,6 +246,7 @@ export class ButbHttpClient implements ButbPageClient {
         throw error;
       }
     } catch (error) {
+      if (error instanceof SourceAbortedError) throw error;
       this.#recordFailure();
       if (error instanceof SourceAccessError) throw error;
       throw new SourceAccessError("butb", transportReason(error));
@@ -249,11 +257,15 @@ export class ButbHttpClient implements ButbPageClient {
    * Opens the session if needed. Returns the freshly rendered registry page
    * when a bootstrap GET happened, undefined when a session was already live.
    */
-  async #ensureSession(): Promise<ButbPage | undefined> {
+  async #ensureSession(signal?: AbortSignal): Promise<ButbPage | undefined> {
     if (this.#state !== undefined) return undefined;
     if (this.#sessionBootstrap !== undefined) return this.#sessionBootstrap;
     this.#sessionBootstrap = (async () => {
-      const page = await this.#request(new URL(REGISTRY_PATH, this.#baseUrl), "html");
+      const page = await this.#request(
+        new URL(REGISTRY_PATH, this.#baseUrl),
+        "html",
+        signal,
+      );
       if (page.status < 200 || page.status >= 300) {
         throw new SourceAccessError("butb", `session bootstrap returned HTTP ${page.status}`);
       }
@@ -309,7 +321,7 @@ export class ButbHttpClient implements ButbPageClient {
     };
   }
 
-  async #pageChange(page: number): Promise<string> {
+  async #pageChange(page: number, signal?: AbortSignal): Promise<string> {
     const state = this.#requireState();
     const fields: Record<string, string> = {
       "javax.faces.source": TABLE_ID,
@@ -324,7 +336,7 @@ export class ButbHttpClient implements ButbPageClient {
       "ice.event.captured": TABLE_ID,
       "ice.event.type": "onpagechange",
     };
-    const response = await this.#post(state, fields, { ajax: true });
+    const response = await this.#post(state, fields, { ajax: true }, signal);
     const table = butbPartialUpdate(response.body, TABLE_ID);
     if (table === undefined) {
       // Any framed answer without our table means the view no longer
@@ -349,10 +361,15 @@ export class ButbHttpClient implements ButbPageClient {
     return table;
   }
 
-  async #postbackForCard(cardLinkId: string): Promise<ButbPage> {
+  async #postbackForCard(cardLinkId: string, signal?: AbortSignal): Promise<ButbPage> {
     const state = this.#requireState();
     // mojarra.jsfcljs convention: the link posts its own id as name=value.
-    const response = await this.#post(state, { [cardLinkId]: cardLinkId }, { ajax: false });
+    const response = await this.#post(
+      state,
+      { [cardLinkId]: cardLinkId },
+      { ajax: false },
+      signal,
+    );
     if (!response.redirectedToCard) {
       // Redirected back to the registry with a fresh jsessionid = dead view.
       if (response.url.includes("reestrauctions")) throw new ButbViewExpiredError();
@@ -362,7 +379,7 @@ export class ButbHttpClient implements ButbPageClient {
       );
     }
     const cardUrl = new URL(response.url, this.#baseUrl);
-    const card = await this.#request(cardUrl, "html");
+    const card = await this.#request(cardUrl, "html", signal);
     this.#view = "card";
     return card;
   }
@@ -371,8 +388,9 @@ export class ButbHttpClient implements ButbPageClient {
     state: ButbViewState,
     fields: Record<string, string>,
     options: { ajax: boolean },
+    signal?: AbortSignal,
   ): Promise<{ status: number; url: string; body: string; redirectedToCard: boolean }> {
-    await this.#reserveRequestSlot();
+    await this.#reserveRequestSlot(signal);
     const action = state.formAction ?? REGISTRY_PATH;
     const params = new URLSearchParams();
     params.set("fra", "fra");
@@ -386,7 +404,7 @@ export class ButbHttpClient implements ButbPageClient {
     const response = await this.#fetch(url, {
       method: "POST",
       redirect: "manual",
-      signal: AbortSignal.timeout(this.#timeoutMs),
+      signal: this.#requestSignal(signal),
       headers: {
         "content-type": "application/x-www-form-urlencoded",
         "user-agent": this.#userAgent,
@@ -439,16 +457,17 @@ export class ButbHttpClient implements ButbPageClient {
   async #request(
     url: URL,
     mode: "html" | "binary",
+    signal?: AbortSignal,
   ): Promise<{ status: number; url: string; bytes: Uint8Array; body: string; contentType?: string }> {
     if (url.origin !== this.#baseUrl.origin) {
       throw new SourceAccessError("butb", "refused cross-origin request");
     }
-    await this.#reserveRequestSlot();
+    await this.#reserveRequestSlot(signal);
     const cookie = this.#cookieHeader();
     const response = await this.#fetch(url, {
       method: "GET",
       redirect: "follow",
-      signal: AbortSignal.timeout(this.#timeoutMs),
+      signal: this.#requestSignal(signal),
       headers: {
         accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
         "user-agent": this.#userAgent,
@@ -508,7 +527,18 @@ export class ButbHttpClient implements ButbPageClient {
     return [...this.#cookies].map(([name, value]) => `${name}=${value}`).join("; ");
   }
 
-  async #reserveRequestSlot(): Promise<void> {
+  /**
+   * Per-request budget always applies; the caller's signal joins it so a
+   * cancelled call aborts the in-flight fetch instead of running to the
+   * transport timeout while its queue slot is already dead.
+   */
+  #requestSignal(outer?: AbortSignal): AbortSignal {
+    const own = AbortSignal.timeout(this.#timeoutMs);
+    return outer === undefined ? own : AbortSignal.any([own, outer]);
+  }
+
+  async #reserveRequestSlot(signal?: AbortSignal): Promise<void> {
+    throwIfAborted("butb", signal);
     const previous = this.#queue;
     let release = (): void => undefined;
     this.#queue = new Promise<void>((resolve) => {
@@ -516,6 +546,7 @@ export class ButbHttpClient implements ButbPageClient {
     });
     await previous;
     try {
+      throwIfAborted("butb", signal);
       const waitMs = Math.max(0, this.#nextRequestAt - this.#now());
       if (waitMs > 0) await this.#sleep(waitMs);
       this.#nextRequestAt = this.#now() + this.#minimumIntervalMs;

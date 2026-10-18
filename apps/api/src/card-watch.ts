@@ -60,7 +60,10 @@ export function createProcurementCardWatch(
     policyGate: new ToolPolicyGate({
       agentAllowedTools: ["procurement.get", "procurement.download"],
     }),
-    timeoutMs: options.timeoutMs ?? 60_000,
+    // A BUTB card read is a locate+open session sequence bounded by
+    // maxGetPages (~60 page postbacks on a throttled pipe ≈ 300 s worst
+    // case) — a 60 s budget could never finish it.
+    timeoutMs: options.timeoutMs ?? 300_000,
     // A watch read is short and latency-sensitive: on the shared background
     // lane it jumps ahead of queued bulk downloads from ingest jobs (R43).
     priority: "high",

@@ -7,6 +7,7 @@ import {
   ProcurementSearchResponse,
   SourceId,
   type IsoDateTime,
+  type ProcurementCallContext,
   type ProcurementFileBytes,
   type ProcurementSourcePort,
   type SearchQuery,
@@ -30,7 +31,11 @@ import {
   createSafePublicFetch,
   type PublicDocumentationFetch,
 } from "./public-download.js";
-import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.js";
+import {
+  SourceAccessError,
+  SourceRecordNotFoundError,
+  throwIfAborted,
+} from "./source-registry.js";
 
 export interface ButbSourceOptions {
   client: ButbPageClient;
@@ -110,7 +115,10 @@ export class ButbSource implements ProcurementSourcePort {
     this.#logger = options.logger ?? silentLogger;
   }
 
-  async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
+  async search(
+    query: SearchQuery,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementSearchResponse> {
     const terms = query.keywords.map((term) => term.trim()).filter((term) => term.length > 0);
     const excluded = query.excludeKeywords
       .map((term) => normalize(term))
@@ -152,13 +160,14 @@ export class ButbSource implements ProcurementSourcePort {
     // resume from a position that re-reads the overflow instead of losing it.
     let beforeDeepestPage: ButbRegistryRow | undefined;
     while (page <= this.#maxSearchPages) {
+      throwIfAborted(this.sourceId, ctx?.signal);
       if (this.#now().getTime() >= deadline) {
         // The scan ran out of wall clock, not out of registry — the tail
         // is genuinely unread, so the window must admit more may follow.
         hasMore = true;
         break;
       }
-      const rendered = await this.#client.registryPage(page);
+      const rendered = await this.#client.registryPage(page, ctx?.signal);
       if (rendered.status < 200 || rendered.status >= 300) {
         throw new SourceAccessError(
           this.sourceId,
@@ -306,12 +315,15 @@ export class ButbSource implements ProcurementSourcePort {
     return true;
   }
 
-  async get(id: SourceProcurementId) {
-    return (await this.#load(id)).card;
+  async get(id: SourceProcurementId, ctx?: ProcurementCallContext) {
+    return (await this.#load(id, ctx)).card;
   }
 
-  async getStatus(id: SourceProcurementId): Promise<ProcurementGetStatusResponse> {
-    const card = (await this.#load(id)).card;
+  async getStatus(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetStatusResponse> {
+    const card = (await this.#load(id, ctx)).card;
     return ProcurementGetStatusResponse.parse({
       status: card.status,
       sourceStatus: card.sourceStatus,
@@ -320,31 +332,46 @@ export class ButbSource implements ProcurementSourcePort {
     });
   }
 
-  async getLots(id: SourceProcurementId): Promise<ProcurementGetLotsResponse> {
-    return ProcurementGetLotsResponse.parse({ lots: (await this.#load(id)).card.lots });
+  async getLots(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetLotsResponse> {
+    return ProcurementGetLotsResponse.parse({
+      lots: (await this.#load(id, ctx)).card.lots,
+    });
   }
 
-  async getDocuments(id: SourceProcurementId): Promise<ProcurementGetDocumentsResponse> {
+  async getDocuments(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetDocumentsResponse> {
     return ProcurementGetDocumentsResponse.parse({
-      documents: (await this.#load(id)).documents,
+      documents: (await this.#load(id, ctx)).documents,
     });
   }
 
   /** The public card carries no chronology table — verified on live markup. */
-  async getHistory(id: SourceProcurementId): Promise<ProcurementGetHistoryResponse> {
-    await this.#load(id);
+  async getHistory(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetHistoryResponse> {
+    await this.#load(id, ctx);
     return ProcurementGetHistoryResponse.parse({ clarifications: [] });
   }
 
   async getChanges(
     id: SourceProcurementId,
     _since?: IsoDateTime,
+    ctx?: ProcurementCallContext,
   ): Promise<ProcurementGetChangesResponse> {
-    await this.#load(id);
+    await this.#load(id, ctx);
     return ProcurementGetChangesResponse.parse({ changes: [] });
   }
 
-  async download(downloadUrl: string): Promise<ProcurementFileBytes> {
+  async download(
+    downloadUrl: string,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementFileBytes> {
     let parsed: URL;
     try {
       parsed = new URL(downloadUrl);
@@ -353,7 +380,10 @@ export class ButbSource implements ProcurementSourcePort {
     }
     const host = parsed.hostname.toLocaleLowerCase("en-US");
     if (host === "zakupki.butb.by" || host.endsWith(".butb.by")) {
-      const file = await this.#client.download(`${parsed.pathname}${parsed.search}`);
+      const file = await this.#client.download(
+        `${parsed.pathname}${parsed.search}`,
+        ctx?.signal,
+      );
       if (file.status < 200 || file.status >= 300) {
         throw new SourceAccessError(
           this.sourceId,
@@ -376,7 +406,10 @@ export class ButbSource implements ProcurementSourcePort {
    * binary-searches the gap. A card that vanished from the registry answers
    * not-found instead of failing the whole pass.
    */
-  async #load(id: SourceProcurementId): Promise<ParsedButbCard> {
+  async #load(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ParsedButbCard> {
     const registryNumber = registryNumberOf(id);
     const now = this.#now();
     const missingUntil = this.#missing.get(registryNumber);
@@ -391,14 +424,15 @@ export class ButbSource implements ProcurementSourcePort {
     // the table shows its page, so no other call may interleave a pageChange.
     const locateAndOpen = (): Promise<ButbPage> =>
       this.#client.withSession(async () => {
-        const row = await this.#locateRow(registryNumber, targetDate);
+        throwIfAborted(this.sourceId, ctx?.signal);
+        const row = await this.#locateRow(registryNumber, targetDate, ctx?.signal);
         if (row === undefined) {
           if (this.#missing.size >= POSITION_CACHE_LIMIT) this.#missing.clear();
           this.#missing.set(registryNumber, now.getTime() + this.#cardCacheTtlMs);
           throw new SourceRecordNotFoundError(this.sourceId, id);
         }
         this.#missing.delete(registryNumber);
-        return this.#client.openCard(row.cardLinkId);
+        return this.#client.openCard(row.cardLinkId, ctx?.signal);
       });
     let cardPage: ButbPage;
     try {
@@ -443,9 +477,11 @@ export class ButbSource implements ProcurementSourcePort {
   async #locateRow(
     registryNumber: string,
     targetDate: string | undefined,
+    signal?: AbortSignal,
   ): Promise<ButbRegistryRow | undefined> {
     let reads = 0;
     const readPage = async (page: number): Promise<ButbRegistryRow[]> => {
+      throwIfAborted(this.sourceId, signal);
       reads += 1;
       if (reads > this.#maxGetPages) {
         throw new SourceAccessError(
@@ -453,7 +489,7 @@ export class ButbSource implements ProcurementSourcePort {
           `card lookup exceeded the page bound (${String(this.#maxGetPages)} pages)`,
         );
       }
-      const rendered = await this.#client.registryPage(page);
+      const rendered = await this.#client.registryPage(page, signal);
       if (rendered.status < 200 || rendered.status >= 300) {
         throw new SourceAccessError(
           this.sourceId,

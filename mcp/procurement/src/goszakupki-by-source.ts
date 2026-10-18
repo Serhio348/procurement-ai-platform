@@ -8,6 +8,7 @@ import {
   SourceId,
   type ProcurementFileBytes,
   type IsoDateTime,
+  type ProcurementCallContext,
   type ProcurementSourcePort,
   type SearchQuery,
   type SourceProcurementId,
@@ -31,7 +32,11 @@ import {
   downloadPublicDocumentation,
   type PublicDocumentationFetch,
 } from "./public-download.js";
-import { SourceAccessError, SourceRecordNotFoundError } from "./source-registry.js";
+import {
+  SourceAccessError,
+  SourceRecordNotFoundError,
+  throwIfAborted,
+} from "./source-registry.js";
 
 export interface GoszakupkiBySourceOptions {
   client: GoszakupkiPageClient;
@@ -81,8 +86,11 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
    * Rows are merged round-robin and de-duplicated by procedure id, keeping
    * every phrase that found them. Nothing here decides relevance.
    */
-  async search(query: SearchQuery): Promise<ProcurementSearchResponse> {
-    const statusIds = await this.#resolvedStatusIds(query);
+  async search(
+    query: SearchQuery,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementSearchResponse> {
+    const statusIds = await this.#resolvedStatusIds(query, ctx?.signal);
     const filteredQuery = { ...query, statusIds };
     const terms = filteredQuery.keywords.length === 0 ? [undefined] : filteredQuery.keywords;
     // Resume token from a truncated scan: per-term next page positions plus
@@ -120,8 +128,9 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     });
 
     const fetchNextPage = async (scan: TermScan): Promise<void> => {
+      throwIfAborted(this.sourceId, ctx?.signal);
       const path = searchPath(filteredQuery, scan.term, scan.nextPage);
-      const response = await this.#client.get(path);
+      const response = await this.#client.get(path, ctx?.signal);
       scan.pages += 1;
       scan.nextPage += 1;
       if (response.status < 200 || response.status >= 300) {
@@ -221,17 +230,17 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     });
   }
 
-  async #resolvedStatusIds(query: SearchQuery): Promise<string[]> {
+  async #resolvedStatusIds(query: SearchQuery, signal?: AbortSignal): Promise<string[]> {
     if (query.statuses.length === 0 && query.statusIds.length === 0) {
       return query.statusIds;
     }
-    const options = await this.#loadStatusOptions();
+    const options = await this.#loadStatusOptions(signal);
     return searchQueryStatusIds(query, options);
   }
 
-  async #loadStatusOptions(): Promise<readonly GoszakupkiStatusOption[]> {
+  async #loadStatusOptions(signal?: AbortSignal): Promise<readonly GoszakupkiStatusOption[]> {
     if (this.#statusOptions !== undefined) return this.#statusOptions;
-    const response = await this.#client.get("/tenders/posted");
+    const response = await this.#client.get("/tenders/posted", signal);
     if (response.status < 200 || response.status >= 300) {
       this.#statusOptions = FALLBACK_STATUS_OPTIONS;
       return this.#statusOptions;
@@ -241,12 +250,15 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     return this.#statusOptions;
   }
 
-  async get(id: SourceProcurementId) {
-    return (await this.#load(id)).card;
+  async get(id: SourceProcurementId, ctx?: ProcurementCallContext) {
+    return (await this.#load(id, ctx)).card;
   }
 
-  async getStatus(id: SourceProcurementId): Promise<ProcurementGetStatusResponse> {
-    const card = (await this.#load(id)).card;
+  async getStatus(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetStatusResponse> {
+    const card = (await this.#load(id, ctx)).card;
     return ProcurementGetStatusResponse.parse({
       status: card.status,
       sourceStatus: card.sourceStatus,
@@ -255,12 +267,20 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     });
   }
 
-  async getLots(id: SourceProcurementId): Promise<ProcurementGetLotsResponse> {
-    return ProcurementGetLotsResponse.parse({ lots: (await this.#load(id)).card.lots });
+  async getLots(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetLotsResponse> {
+    return ProcurementGetLotsResponse.parse({
+      lots: (await this.#load(id, ctx)).card.lots,
+    });
   }
 
-  async getDocuments(id: SourceProcurementId): Promise<ProcurementGetDocumentsResponse> {
-    const parsed = await this.#load(id);
+  async getDocuments(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetDocumentsResponse> {
+    const parsed = await this.#load(id, ctx);
     const documents = await expandPublicDocumentation(
       parsed.documents,
       this.#publicFetch,
@@ -269,21 +289,28 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     return ProcurementGetDocumentsResponse.parse({ documents });
   }
 
-  async getHistory(id: SourceProcurementId): Promise<ProcurementGetHistoryResponse> {
+  async getHistory(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetHistoryResponse> {
     return ProcurementGetHistoryResponse.parse({
-      clarifications: (await this.#load(id)).history,
+      clarifications: (await this.#load(id, ctx)).history,
     });
   }
 
   async getChanges(
     id: SourceProcurementId,
     _since?: IsoDateTime,
+    ctx?: ProcurementCallContext,
   ): Promise<ProcurementGetChangesResponse> {
-    await this.#load(id);
+    await this.#load(id, ctx);
     return ProcurementGetChangesResponse.parse({ changes: [] });
   }
 
-  async download(downloadUrl: string): Promise<ProcurementFileBytes> {
+  async download(
+    downloadUrl: string,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementFileBytes> {
     let parsed: URL;
     try {
       parsed = new URL(downloadUrl);
@@ -295,7 +322,10 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
       if (this.#client.download === undefined) {
         throw new SourceAccessError(this.sourceId, "this client cannot download files");
       }
-      const file = await this.#client.download(`${parsed.pathname}${parsed.search}`);
+      const file = await this.#client.download(
+        `${parsed.pathname}${parsed.search}`,
+        ctx?.signal,
+      );
       if (file.status < 200 || file.status >= 300) {
         throw new SourceAccessError(
           this.sourceId,
@@ -310,13 +340,19 @@ export class GoszakupkiBySource implements ProcurementSourcePort {
     return downloadPublicDocumentation(downloadUrl, this.#publicFetch);
   }
 
-  async #load(id: SourceProcurementId): Promise<ParsedGoszakupkiCard> {
+  async #load(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ParsedGoszakupkiCard> {
     const path = sourcePath(id);
     const cached = this.#cache.get(path);
     const now = this.#now();
     if (cached !== undefined && cached.expiresAt > now.getTime()) return cached.parsed;
 
-    const response = await this.#client.get(`/${path.replace("/", "/view/")}`);
+    const response = await this.#client.get(
+      `/${path.replace("/", "/view/")}`,
+      ctx?.signal,
+    );
     if (response.status === 404) {
       throw new SourceRecordNotFoundError(this.sourceId, id);
     }

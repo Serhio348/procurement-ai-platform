@@ -54,7 +54,7 @@ describe("GoszakupkiBySource", () => {
     expect(history.clarifications).toEqual([]);
     expect(changes.changes).toEqual([]);
     expect(get).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith("/request/view/9000003");
+    expect(get).toHaveBeenCalledWith("/request/view/9000003", undefined);
   });
 
   it("downloads an attachment only from goszakupki.by through the session client", async () => {
@@ -77,7 +77,7 @@ describe("GoszakupkiBySource", () => {
 
     expect(file.contentType).toBe("application/pdf");
     expect(file.bytes).toEqual(new Uint8Array([1, 2, 3]));
-    expect(download).toHaveBeenCalledWith("/files/get?id=1&download=1");
+    expect(download).toHaveBeenCalledWith("/files/get?id=1&download=1", undefined);
     await expect(source.download("http://127.0.0.1/tz.pdf")).rejects.toThrow(
       /public documentation host/,
     );
@@ -194,6 +194,7 @@ describe("GoszakupkiBySource", () => {
     });
     expect(get).toHaveBeenCalledWith(
       "/tenders/posted?TendersSearch%5Btext%5D=%D1%82%D1%80%D0%B0%D0%BD%D1%81%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%82%D0%BE%D1%80&TendersSearch%5Bcreated_from%5D=01.09.2026&TendersSearch%5Bcreated_to%5D=02.09.2026",
+      undefined,
     );
   });
 
@@ -223,7 +224,7 @@ describe("GoszakupkiBySource", () => {
       }),
     );
 
-    expect(get).toHaveBeenNthCalledWith(1, "/tenders/posted");
+    expect(get).toHaveBeenNthCalledWith(1, "/tenders/posted", undefined);
     const searchPath = String(get.mock.calls[1]?.[0]);
     expect(decodeURIComponent(searchPath)).toContain("TendersSearch[text]=КТПБ");
     expect(decodeURIComponent(searchPath)).toContain("TendersSearch[status][]=1");
@@ -763,7 +764,7 @@ describe("GoszakupkiBySource", () => {
 
     const card = await source.get(SourceProcurementId.parse("limited/3669746"));
 
-    expect(get).toHaveBeenCalledWith("/limited/view/3669746");
+    expect(get).toHaveBeenCalledWith("/limited/view/3669746", undefined);
     expect(card.title).toContain("Жлобине");
     expect(card.lots[0]?.title).toMatch(/монтаж.*электрооборудования/i);
     expect(card.lots[0]?.title).toMatch(/АСКУЭ/);

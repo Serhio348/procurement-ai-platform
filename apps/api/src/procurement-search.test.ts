@@ -173,6 +173,60 @@ describe("createProcurementSearchHits", () => {
     await expect(port.search(baseQuery())).rejects.toThrow("timeout");
   });
 
+  it("forwards the caller's remaining budget and signal to every lane", async () => {
+    const callTool = vi.fn<McpToolCaller["callTool"]>().mockResolvedValue({
+      structuredContent: { hits: [] },
+    });
+    const port = createProcurementSearchHits({
+      caller: { callTool },
+      sourceIds: [SourceId.parse("goszakupki_by"), SourceId.parse("butb")],
+    });
+    const controller = new AbortController();
+
+    await port.searchDetailed(baseQuery(), {
+      timeoutMs: 42_000,
+      signal: controller.signal,
+    });
+
+    for (const call of callTool.mock.calls) {
+      expect(call[2]?.timeoutMs).toBe(42_000);
+      expect(call[2]?.signal).toBe(controller.signal);
+    }
+  });
+
+  it("uses the default budget when a call carries none", async () => {
+    const callTool = vi.fn<McpToolCaller["callTool"]>().mockResolvedValue({
+      structuredContent: { hits: [] },
+    });
+    const port = createProcurementSearchHits({
+      caller: { callTool },
+      sourceIds: [SourceId.parse("goszakupki_by")],
+      timeoutMs: 123_000,
+    });
+
+    await port.searchDetailed(baseQuery());
+
+    expect(callTool.mock.calls[0]?.[2]?.timeoutMs).toBe(123_000);
+  });
+
+  it("allowEmpty returns the failed lanes instead of throwing a total outage", async () => {
+    const callTool = vi
+      .fn<McpToolCaller["callTool"]>()
+      .mockRejectedValue(new Error("timeout"));
+    const port = createProcurementSearchHits({
+      caller: { callTool },
+      sourceIds: [SourceId.parse("goszakupki_by"), SourceId.parse("butb")],
+    });
+
+    const page = await port.searchDetailed(baseQuery(), { allowEmpty: true });
+
+    expect(page.hits).toEqual([]);
+    expect(page.failedSources).toEqual(["goszakupki_by", "butb"]);
+    expect(page.cursors).toEqual({});
+    // Without the flag the same outage must still throw.
+    await expect(port.searchDetailed(baseQuery())).rejects.toThrow("timeout");
+  });
+
   it("lets the workspace gate drop the pilot source outside the pilot", async () => {
     const callTool = vi.fn<McpToolCaller["callTool"]>().mockResolvedValue({
       structuredContent: { hits: [] },

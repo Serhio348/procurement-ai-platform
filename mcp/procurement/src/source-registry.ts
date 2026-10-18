@@ -27,6 +27,24 @@ export class SourceRecordNotFoundError extends Error {
   }
 }
 
+/**
+ * The caller's deadline fired and the MCP layer cancelled the call. Kept
+ * apart from SourceAccessError on purpose: a cancellation is not a transport
+ * failure — it must not count against the circuit breaker or read as
+ * "source unavailable".
+ */
+export class SourceAbortedError extends Error {
+  constructor(readonly sourceId: string) {
+    super(`Operation on ${sourceId} was cancelled by the caller`);
+    this.name = "SourceAbortedError";
+  }
+}
+
+/** Raises SourceAbortedError when the caller's signal already fired. */
+export function throwIfAborted(sourceId: string, signal?: AbortSignal): void {
+  if (signal?.aborted === true) throw new SourceAbortedError(sourceId);
+}
+
 export class ProcurementSourceRegistry {
   readonly #sources: ReadonlyMap<string, ProcurementSourcePort>;
 

@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import * as tls from "node:tls";
 import { Agent, fetch as undiciFetch } from "undici";
-import { SourceAccessError } from "./source-registry.js";
+import {
+  SourceAccessError,
+  SourceAbortedError,
+  throwIfAborted,
+} from "./source-registry.js";
 
 export interface GoszakupkiPageResponse {
   status: number;
@@ -17,8 +21,8 @@ export interface GoszakupkiDownloadResponse {
 }
 
 export interface GoszakupkiPageClient {
-  get(path: string): Promise<GoszakupkiPageResponse>;
-  download?(path: string): Promise<GoszakupkiDownloadResponse>;
+  get(path: string, signal?: AbortSignal): Promise<GoszakupkiPageResponse>;
+  download?(path: string, signal?: AbortSignal): Promise<GoszakupkiDownloadResponse>;
 }
 
 export interface GoszakupkiHttpClientOptions {
@@ -83,13 +87,13 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     this.#bootstrapSession = options.bootstrapSession ?? true;
   }
 
-  async get(path: string): Promise<GoszakupkiPageResponse> {
-    const loaded = await this.#load(path, "html");
+  async get(path: string, signal?: AbortSignal): Promise<GoszakupkiPageResponse> {
+    const loaded = await this.#load(path, "html", signal);
     return { status: loaded.status, url: loaded.url, body: loaded.body ?? "" };
   }
 
-  async download(path: string): Promise<GoszakupkiDownloadResponse> {
-    const loaded = await this.#load(path, "binary");
+  async download(path: string, signal?: AbortSignal): Promise<GoszakupkiDownloadResponse> {
+    const loaded = await this.#load(path, "binary", signal);
     return {
       status: loaded.status,
       url: loaded.url,
@@ -98,7 +102,11 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     };
   }
 
-  async #load(path: string, mode: "html" | "binary"): Promise<{
+  async #load(
+    path: string,
+    mode: "html" | "binary",
+    signal?: AbortSignal,
+  ): Promise<{
     status: number;
     url: string;
     bytes: Uint8Array;
@@ -114,11 +122,16 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     }
 
     try {
-      if (this.#bootstrapSession && url.pathname !== "/") await this.#ensureSession();
-      const result = await this.#requestWithSessionRecovery(url, mode);
+      throwIfAborted("goszakupki_by", signal);
+      if (this.#bootstrapSession && url.pathname !== "/") {
+        await this.#ensureSession(signal);
+      }
+      const result = await this.#requestWithSessionRecovery(url, mode, signal);
       this.#recordSuccess();
       return result;
     } catch (error) {
+      // A cancelled call is not a transport failure — no circuit counting.
+      if (error instanceof SourceAbortedError) throw error;
       this.#recordFailure();
       if (error instanceof SourceAccessError) throw error;
       throw new SourceAccessError("goszakupki_by", transportReason(error));
@@ -128,6 +141,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
   async #requestWithSessionRecovery(
     url: URL,
     mode: "html" | "binary",
+    signal?: AbortSignal,
   ): Promise<{
     status: number;
     url: string;
@@ -136,16 +150,17 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     contentType: string | undefined;
   }> {
     try {
-      return await this.#request(url, mode);
+      return await this.#request(url, mode, signal);
     } catch (error) {
+      throwIfAborted("goszakupki_by", signal);
       if (
         this.#bootstrapSession &&
         error instanceof SourceAccessError &&
         error.reason === "anonymous session was redirected to login"
       ) {
         this.#invalidateSession();
-        await this.#ensureSession();
-        return this.#request(url, mode);
+        await this.#ensureSession(signal);
+        return this.#request(url, mode, signal);
       }
       throw error;
     }
@@ -154,6 +169,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
   async #request(
     url: URL,
     mode: "html" | "binary",
+    signal?: AbortSignal,
   ): Promise<{
     status: number;
     url: string;
@@ -161,13 +177,18 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     body?: string;
     contentType: string | undefined;
   }> {
-    await this.#reserveRequestSlot();
+    await this.#reserveRequestSlot(signal);
     const cookie = this.#cookieHeader();
+    // Pages stay on the clock. A file may be a large archive on a slow link.
+    // The caller's cancellation joins either way.
+    const requestSignal =
+      mode === "html" || signal !== undefined
+        ? this.#requestSignal(mode === "html" ? this.#timeoutMs : 0, signal)
+        : undefined;
     const response = await this.#fetch(url, {
       method: "GET",
       redirect: "follow",
-      // Pages stay on the clock. A file may be a large archive on a slow link.
-      ...(mode === "html" ? { signal: AbortSignal.timeout(this.#timeoutMs) } : {}),
+      ...(requestSignal === undefined ? {} : { signal: requestSignal }),
       headers: {
         accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
         "user-agent": this.#userAgent,
@@ -178,12 +199,12 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     return this.#readResponse(response, mode);
   }
 
-  async #ensureSession(): Promise<void> {
+  async #ensureSession(signal?: AbortSignal): Promise<void> {
     if (this.#sessionReady) return;
     if (this.#sessionBootstrap !== undefined) return this.#sessionBootstrap;
 
     this.#sessionBootstrap = (async () => {
-      const response = await this.#request(this.#baseUrl, "html");
+      const response = await this.#request(this.#baseUrl, "html", signal);
       if (response.status < 200 || response.status >= 300) {
         throw new SourceAccessError(
           "goszakupki_by",
@@ -296,7 +317,18 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     return { status: response.status, url: finalUrl, bytes, contentType };
   }
 
-  async #reserveRequestSlot(): Promise<void> {
+  /**
+   * `timeoutMs` 0 means "no own budget" (binary downloads) — the caller's
+   * signal then rides alone. Otherwise both fire together.
+   */
+  #requestSignal(timeoutMs: number, outer?: AbortSignal): AbortSignal | undefined {
+    const own = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+    if (own === undefined) return outer;
+    return outer === undefined ? own : AbortSignal.any([own, outer]);
+  }
+
+  async #reserveRequestSlot(signal?: AbortSignal): Promise<void> {
+    throwIfAborted("goszakupki_by", signal);
     const previous = this.#queue;
     let release = (): void => undefined;
     this.#queue = new Promise<void>((resolve) => {
@@ -304,6 +336,7 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     });
     await previous;
     try {
+      throwIfAborted("goszakupki_by", signal);
       const waitMs = Math.max(0, this.#nextRequestAt - this.#now());
       if (waitMs > 0) await this.#sleep(waitMs);
       this.#nextRequestAt = this.#now() + this.#minimumIntervalMs;

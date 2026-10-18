@@ -69,7 +69,9 @@ export function createProcurementSearchReview(
   const client = new ProcurementMcpClient({
     caller: options.caller,
     policyGate: new ToolPolicyGate({ agentAllowedTools: ["procurement.get"] }),
-    timeoutMs: options.timeoutMs ?? 60_000,
+    // Same bound as card-watch: a BUTB locate+open sequence may need up to
+    // maxGetPages throttled postbacks (~300 s) — 60 s cut it mid-flight.
+    timeoutMs: options.timeoutMs ?? 300_000,
     logger,
   });
   const minConfidence = options.minConfidence ?? DEFAULT_REVIEW_MIN_CONFIDENCE;

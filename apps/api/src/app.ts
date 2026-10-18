@@ -134,6 +134,7 @@ import { createIngestProgressHub } from "./ingest-progress.js";
 import { createSearchProgressHub } from "./search-progress.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
+import type { SourcesHealthSnapshot } from "./source-health.js";
 import type { ReviewBudget, SpecialistReviewPort } from "./search-review.js";
 import type { ProfileSuggestPort } from "./profile-suggest.js";
 import type { SearchIntentPort } from "./search-intent.js";
@@ -186,7 +187,22 @@ export interface SpecialistSearchHitsPort {
    */
   searchDetailed?: (
     query: Omit<SearchQuery, "sourceId">,
-    options?: { cursors?: Readonly<Record<string, string>> },
+    options?: {
+      cursors?: Readonly<Record<string, string>>;
+      /**
+       * Per-call budget — the remainder of the caller's operation deadline,
+       * not a fresh full budget. Sequential stages share one deadline.
+       */
+      timeoutMs?: number;
+      /**
+       * When set, a total fan-out failure returns empty hits + failedSources
+       * instead of throwing — later stages may degrade while earlier results
+       * and cursors stay intact.
+       */
+      allowEmpty?: boolean;
+      /** Caller-side cancellation for the whole fan-out. */
+      signal?: AbortSignal;
+    },
   ) => Promise<{
     hits: readonly SearchHit[];
     hasMore?: boolean;
@@ -280,6 +296,12 @@ export interface BuildApiOptions {
   internalApiToken?: string;
   journal?: AdminJournalPort;
   discoveryController?: DiscoveryController;
+  /**
+   * Whole-operation budget for one retrieval pass — plan resolve, first-term
+   * search, extra-terms search and continuation pages share this deadline.
+   * Default matches the MCP search timeout (300 s), under nginx's 330 s.
+   */
+  searchBudgetMs?: number;
   /** PostgreSQL is the live system of record (reported by /api/health). */
   postgres?: boolean;
   /**
@@ -294,9 +316,20 @@ export interface BuildApiOptions {
     /** Source ids the API intends to fan out to (health reports them as configured). */
     sources?: string[];
     /**
-     * Live probe of the MCP child's source registry. When present, health
-     * reports the actual registry; a probe failure marks sources degraded —
-     * a configured-but-unregistered source must not look healthy.
+     * Configured sources whose failure must fail readiness — extra sources
+     * degrade the report without taking the service down (the optional BUTB
+     * pilot must not mask a healthy goszakupki lane).
+     */
+    requiredSources?: string[];
+    /**
+     * Cached lifecycle+probe snapshot per lane×source. Synchronous and
+     * enqueue-free — /api/health reads it and never touches a child pipe.
+     */
+    sourcesSnapshot?: () => SourcesHealthSnapshot;
+    /**
+     * Legacy live probe of the MCP child's source registry — used only when
+     * no snapshot is wired (fixtures/tests). Real deployments must not probe
+     * synchronously from the health path.
      */
     sourcesProbe?: () => Promise<readonly string[]>;
     models?: { searchIntent: boolean; classifier: boolean; commercialReader: boolean };
@@ -1023,9 +1056,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       excludeKeywords: profile.excludeKeywords,
     });
     const listingTerms = platformSearchTerms(inferred, profile.keywords);
+    // One deadline for the whole retrieval operation: plan resolution, the
+    // first-term pass, the extra-terms pass and any continuation pages all
+    // draw from it — a sequential stage gets what is left, never a fresh
+    // full budget. Sized to sit under the nginx proxy timeout for the
+    // manual-search route (330 s).
+    const operationDeadline = Date.now() + (options.searchBudgetMs ?? 300_000);
+    const remainingBudget = () => Math.max(1, operationDeadline - Date.now());
     const searchDetailed = async (
       query: Omit<SearchQuery, "sourceId">,
-      callOptions?: { cursors?: Readonly<Record<string, string>> },
+      callOptions?: {
+        cursors?: Readonly<Record<string, string>>;
+        allowEmpty?: boolean;
+      },
     ): Promise<{
       hits: readonly SearchHit[];
       hasMore: boolean;
@@ -1033,7 +1076,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       cursors: Record<string, string>;
     }> => {
       if (searchHits.searchDetailed !== undefined) {
-        const page = await searchHits.searchDetailed(query, callOptions);
+        const page = await searchHits.searchDetailed(query, {
+          ...callOptions,
+          timeoutMs: remainingBudget(),
+        });
         // undefined means the source did not report truncation — a full
         // window is the honest "more may follow" signal.
         return {
@@ -1079,16 +1125,25 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           }
         : await searchDetailed(
             buildSearchQuery(profile, limit, pageOffset, publishedFrom, extraTerms),
-            { cursors: pageCursors ?? {} },
+            // A later stage may degrade: its failure must not throw away the
+            // first pass's hits — failedSources still marks the unread lane.
+            { cursors: pageCursors ?? {}, allowEmpty: true },
           );
     };
     const extraPage = await fetchExtraPage(offset, scanCursors);
     const hits = mergeSearchHits(firstPage.hits, extraPage.hits);
     // The extra-terms pass reads the same registry window after the first —
     // its per-source token is the freshest answer about how far the scan
-    // got, so it wins over the first page's.
+    // got, so it wins over the first page's. A totally failed extra pass
+    // never reached a position: resume from the first page's cursors.
+    const extraFailedAll =
+      extraTerms.length > 0 &&
+      extraPage.hits.length === 0 &&
+      extraPage.failedSources.length > 0;
     const pageCursors =
-      extraTerms.length === 0 ? { ...firstPage.cursors } : { ...extraPage.cursors };
+      extraTerms.length === 0 || extraFailedAll
+        ? { ...firstPage.cursors }
+        : { ...extraPage.cursors };
     logger.info("Specialist profile search retrieval", {
       profileName: profileDisplayName(profile),
       originalTerms: [...profile.keywords],
@@ -1111,12 +1166,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           { cursors: nextCursors ?? {} },
         );
         const nextExtra = await fetchExtraPage(nextOffset, nextCursors);
+        const nextExtraFailedAll =
+          extraTerms.length > 0 &&
+          nextExtra.hits.length === 0 &&
+          nextExtra.failedSources.length > 0;
         return {
           hits: mergeSearchHits(nextFirst.hits, nextExtra.hits),
           hasMore: nextFirst.hasMore || nextExtra.hasMore,
           failedSources: [...nextFirst.failedSources, ...nextExtra.failedSources],
           scanCursors:
-            extraTerms.length === 0 ? { ...nextFirst.cursors } : { ...nextExtra.cursors },
+            extraTerms.length === 0 || nextExtraFailedAll
+              ? { ...nextFirst.cursors }
+              : { ...nextExtra.cursors },
         };
       },
     };
@@ -2157,7 +2218,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     };
     let sources = health?.sources;
     let sourcesProbeFailed = false;
-    if (health?.sourcesProbe !== undefined) {
+    const snapshot = health?.sourcesSnapshot?.();
+    if (snapshot !== undefined) {
+      sources = [...snapshot.sources];
+    } else if (health?.sourcesProbe !== undefined) {
       try {
         sources = [...(await health.sourcesProbe())];
       } catch {
@@ -2172,7 +2236,36 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (source === "off") degraded.push("Источник закупок");
     if (source === "fixture") degraded.push("Источник: тестовые данные");
     if (sourcesProbeFailed) degraded.push("Источники: реестр MCP не отвечает");
-    if (missingSources.length > 0) {
+    // The lane matrix speaks before the union list: a lane whose probe never
+    // finished has no verdict on registration, so its sources are reported
+    // by status — never as "не зарегистрированы".
+    const laneStatusLabel: Record<string, string> = {
+      not_started: "процесс не запущен",
+      dead: "процесс остановлен",
+      probe_failed: "опрос MCP не завершился",
+      stale: "данные опроса устарели",
+      pending: "опрос ещё не выполнялся",
+    };
+    const requiredOk = new Set(snapshot?.servingSources ?? []);
+    let requiredSourcesServed = true;
+    if (snapshot !== undefined) {
+      for (const [lane, cells] of Object.entries(snapshot.lanes)) {
+        for (const [sourceId, cell] of Object.entries(cells)) {
+          if (cell.status === "ok") {
+            if (!cell.registered?.includes(sourceId)) {
+              degraded.push(`Источник ${sourceId}: не зарегистрирован в MCP (${lane})`);
+            }
+            continue;
+          }
+          degraded.push(
+            `Источник ${sourceId}: ${laneStatusLabel[cell.status] ?? cell.status} (${lane})`,
+          );
+        }
+      }
+      for (const required of health?.requiredSources ?? []) {
+        if (!requiredOk.has(required)) requiredSourcesServed = false;
+      }
+    } else if (missingSources.length > 0) {
       degraded.push(`Источники не зарегистрированы: ${missingSources.join(", ")}`);
     }
     if (!models.searchIntent) degraded.push("Модель: разбор запроса");
@@ -2184,7 +2277,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       postgres !== "failed" &&
       source !== "off" &&
       models.searchIntent &&
-      models.classifier;
+      models.classifier &&
+      requiredSourcesServed;
     const body = SpecialistServiceHealth.parse({
       ok: true as const,
       ready,
@@ -2198,6 +2292,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         ...(health?.sources === undefined
           ? {}
           : { sourcesConfigured: health.sources }),
+        ...(snapshot === undefined ? {} : { lanes: snapshot.lanes }),
         objectStore: health?.objectStore ?? "unknown",
         models,
         mail: health?.mail === true,

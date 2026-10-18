@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ProcurementSearchRequest,
+  ProcurementSearchResponse,
   RequestId,
   type SearchQuery,
   SourceId,
@@ -8,8 +9,8 @@ import {
   type SourceId as SourceIdValue,
 } from "@procurement/contracts";
 import {
+  callValidatedTool,
   McpToolCallError,
-  ProcurementMcpClient,
   ToolPolicyGate,
   type McpToolCaller,
 } from "@procurement/mcp-client";
@@ -56,7 +57,12 @@ export function createProcurementSearchHits(
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
   searchDetailed: (
     query: Omit<SearchQuery, "sourceId">,
-    options?: { cursors?: Readonly<Record<string, string>> },
+    options?: {
+      cursors?: Readonly<Record<string, string>>;
+      timeoutMs?: number;
+      allowEmpty?: boolean;
+      signal?: AbortSignal;
+    },
   ) => Promise<{
     hits: readonly SearchHit[];
     hasMore?: boolean;
@@ -69,21 +75,23 @@ export function createProcurementSearchHits(
   const logger = options.logger ?? silentLogger;
   const defaultSourceIds: readonly SourceIdValue[] =
     options.sourceIds ?? [SourceId.parse("goszakupki_by")];
-  const client = new ProcurementMcpClient({
-    caller: options.caller,
-    policyGate: new ToolPolicyGate({
-      agentAllowedTools: ["procurement.search"],
-    }),
-    // Scan budget plus queue headroom on the source's own pipe: a bounded
-    // registry scan runs up to ~180 s, and the call may still sit behind
-    // card lookups of the same source before it even starts.
-    timeoutMs: options.timeoutMs ?? 300_000,
-    logger,
+  const policyGate = new ToolPolicyGate({
+    agentAllowedTools: ["procurement.search"],
   });
+  // Scan budget plus queue headroom on the source's own pipe: a bounded
+  // registry scan runs up to ~180 s, and the call may still sit behind
+  // card lookups of the same source before it even starts. Callers running
+  // several stages inside one operation pass the *remainder* per call.
+  const defaultTimeoutMs = options.timeoutMs ?? 300_000;
 
   const call = async (
     query: Omit<SearchQuery, "sourceId">,
-    callOptions?: { cursors?: Readonly<Record<string, string>> },
+    callOptions?: {
+      cursors?: Readonly<Record<string, string>>;
+      timeoutMs?: number;
+      allowEmpty?: boolean;
+      signal?: AbortSignal;
+    },
   ) => {
     if (query.keywords.length === 0) {
       throw new McpToolCallError(
@@ -97,14 +105,26 @@ export function createProcurementSearchHits(
       sourceIds.map(async (sourceId) => {
         try {
           const scanCursor = callOptions?.cursors?.[sourceId];
-          const page = await client.search(
-            ProcurementSearchRequest.parse({
-              sourceId,
-              ...query,
-              ...(scanCursor === undefined ? {} : { scanCursor }),
-            }),
-            RequestId.parse(randomUUID()),
-          );
+          const request = ProcurementSearchRequest.parse({
+            sourceId,
+            ...query,
+            ...(scanCursor === undefined ? {} : { scanCursor }),
+          });
+          // Sequential stages of one operation pass their remaining budget —
+          // the per-call timeoutMs is a share of a deadline, never a fresh
+          // full budget.
+          const page = await callValidatedTool({
+            toolName: "procurement.search",
+            input: request,
+            inputSchema: ProcurementSearchRequest,
+            outputSchema: ProcurementSearchResponse,
+            caller: options.caller,
+            policyGate,
+            requestId: RequestId.parse(randomUUID()),
+            timeoutMs: callOptions?.timeoutMs ?? defaultTimeoutMs,
+            ...(callOptions?.signal === undefined ? {} : { signal: callOptions.signal }),
+            logger,
+          });
           return { sourceId, page, error: undefined };
         } catch (error) {
           logger.warn("Source search failed — lane reported as failed", {
@@ -116,7 +136,7 @@ export function createProcurementSearchHits(
       }),
     );
     const failures = lanes.filter((lane) => lane.page === undefined);
-    if (lanes.length > 0 && failures.length === lanes.length) {
+    if (lanes.length > 0 && failures.length === lanes.length && callOptions?.allowEmpty !== true) {
       throw failures[0]?.error;
     }
     return {
@@ -139,7 +159,12 @@ export function createProcurementSearchHits(
     },
     async searchDetailed(
       query: Omit<SearchQuery, "sourceId">,
-      callOptions?: { cursors?: Readonly<Record<string, string>> },
+      callOptions?: {
+        cursors?: Readonly<Record<string, string>>;
+        timeoutMs?: number;
+        allowEmpty?: boolean;
+        signal?: AbortSignal;
+      },
     ): Promise<{
       hits: readonly SearchHit[];
       hasMore?: boolean;

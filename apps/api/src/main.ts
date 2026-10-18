@@ -1,12 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RequestId, SourceId } from "@procurement/contracts";
+import { SourceId } from "@procurement/contracts";
 import {
   createSourceRoutingCaller,
-  ProcurementMcpClient,
-  ToolPolicyGate,
   type McpToolCaller,
 } from "@procurement/mcp-client";
 import { createLogger, type Logger } from "@procurement/observability";
@@ -24,6 +21,10 @@ import { recordJournal } from "./admin/journal.js";
 import { openSpecialistPersistence } from "./persist.js";
 import { connectProcurementMcp, type ProcurementMcpProcess } from "./procurement-mcp.js";
 import { createProcurementSearchHits } from "./procurement-search.js";
+import {
+  createSourceHealthMonitor,
+  type SourceHealthMonitor,
+} from "./source-health.js";
 import { createProfileSuggestFromEnv } from "./profile-suggest.js";
 import { createAssistantDirectionFromEnv } from "./assistant-directions.js";
 import { createSearchClassifierFromEnv } from "./search-classifier.js";
@@ -75,12 +76,15 @@ interface SourceLane {
  * used to hold the shared pipe long enough to time out every queued call).
  * The first configured source is required for boot; extra sources degrade
  * to `source_unavailable` instead of taking the API down.
+ * `health` receives lifecycle facts (started / spawn-failed / transport
+ * closed) so /api/health reports observed state, not configured intent.
  */
 async function connectSourceLane(options: {
   lane: string;
   sourceIds: readonly SourceId[];
   logger: Logger;
   blobDirectory: string;
+  health?: SourceHealthMonitor | undefined;
 }): Promise<SourceLane | undefined> {
   const callersBySource = new Map<string, McpToolCaller>();
   const missing = new Set<string>();
@@ -93,10 +97,14 @@ async function connectSourceLane(options: {
         blobDirectory: options.blobDirectory,
         lane: `${options.lane}:${String(sourceId)}`,
         onlySources: [String(sourceId)],
+        onProcessClosed: () =>
+          options.health?.noteClosed(options.lane, String(sourceId)),
       });
       callersBySource.set(String(sourceId), child.caller);
       children.push(child);
+      options.health?.noteStarted(options.lane, String(sourceId), child.caller);
     } catch (error) {
+      options.health?.noteFailed(options.lane, String(sourceId), error);
       if (children.length === 0) throw error;
       missing.add(String(sourceId));
       options.logger.error(
@@ -140,6 +148,10 @@ async function main(): Promise<void> {
     SourceId.parse("goszakupki_by"),
     ...(process.env["BUTB_ENABLED"] === "1" ? [SourceId.parse("butb")] : []),
   ];
+  // Lifecycle + cached registry probes per lane×source — /api/health reads
+  // this snapshot and never enters a child pipe itself.
+  const sourceHealth =
+    mode === "live" ? createSourceHealthMonitor({ logger }) : undefined;
   const mcp =
     mode === "live"
       ? await connectSourceLane({
@@ -147,6 +159,7 @@ async function main(): Promise<void> {
           sourceIds: enabledSourceIds,
           logger,
           blobDirectory,
+          health: sourceHealth,
         })
       : undefined;
   // Interactive reads (card open, decision hydrate) get their own lane:
@@ -159,8 +172,10 @@ async function main(): Promise<void> {
           sourceIds: enabledSourceIds,
           logger,
           blobDirectory,
+          health: sourceHealth,
         })
       : undefined;
+  sourceHealth?.start();
   const butbPilot = assistantPilotFromEnv(process.env["BUTB_WORKSPACE_IDS"]);
   const sourcesForWorkspace = (workspaceId: string | undefined): readonly SourceId[] =>
     enabledSourceIds.filter((id) => id !== "butb" || butbPilot(workspaceId ?? ""));
@@ -168,6 +183,20 @@ async function main(): Promise<void> {
   const searchTimeout =
     Number.isFinite(searchTimeoutRaw) && searchTimeoutRaw > 0
       ? { timeoutMs: searchTimeoutRaw }
+      : {};
+  // One retrieval operation (plan + first pass + extra-terms + continuation
+  // pages) shares this deadline — aligned with the per-call search timeout.
+  const searchBudgetMs =
+    Number.isFinite(searchTimeoutRaw) && searchTimeoutRaw > 0 ? searchTimeoutRaw : 300_000;
+  const cardTimeoutRaw = Number(process.env["PROCUREMENT_CARD_TIMEOUT_MS"]);
+  const cardTimeout =
+    Number.isFinite(cardTimeoutRaw) && cardTimeoutRaw > 0
+      ? { timeoutMs: cardTimeoutRaw }
+      : {};
+  const ingestTimeoutRaw = Number(process.env["PROCUREMENT_INGEST_TIMEOUT_MS"]);
+  const ingestTimeout =
+    Number.isFinite(ingestTimeoutRaw) && ingestTimeoutRaw > 0
+      ? { timeoutMs: ingestTimeoutRaw }
       : {};
   // searchHits is created before the app, so the workspace lookup is indirect.
   const appRef: { current?: SpecialistApi } = {};
@@ -190,6 +219,7 @@ async function main(): Promise<void> {
           caller: mcpInteractive.caller,
           sourceId: SourceId.parse("goszakupki_by"),
           logger,
+          ...cardTimeout,
         });
   const monitorWatch =
     mcp === undefined
@@ -198,6 +228,7 @@ async function main(): Promise<void> {
           caller: mcp.caller,
           sourceId: SourceId.parse("goszakupki_by"),
           logger,
+          ...cardTimeout,
         });
   const classifier = createSearchClassifierFromEnv(process.env);
   const searchIntent = createSearchIntentFromEnv(process.env);
@@ -208,6 +239,7 @@ async function main(): Promise<void> {
           caller: mcp.caller,
           ...(classifier === undefined ? {} : { classifier }),
           logger,
+          ...cardTimeout,
         });
   const commercialReader = createCommercialReaderFromEnv(process.env);
   const profileSuggest = createProfileSuggestFromEnv(process.env);
@@ -379,10 +411,12 @@ async function main(): Promise<void> {
             blobStore,
             logger,
             progress: ingestProgress,
+            ...ingestTimeout,
             ...(commercialReader === undefined ? {} : { commercialReader }),
           }),
         }),
     ...(mode === "live" ? { liveProcurementsOnly: true } : {}),
+    searchBudgetMs,
     serviceHealth: {
       sha: resolveBuildSha(repoRoot),
       mode,
@@ -392,35 +426,14 @@ async function main(): Promise<void> {
         interactive: mcpInteractive !== undefined,
       },
       sources: enabledSourceIds.map(String),
-      // The child's registry is the truth: health must surface a source
-      // whose flag reached the API but never the spawned MCP process.
-      ...(mcpInteractive === undefined
+      // The first configured source is required at boot — it is also the one
+      // whose failure must fail readiness; extra sources degrade only.
+      requiredSources: enabledSourceIds.slice(0, 1).map(String),
+      // Cached lifecycle+probe snapshot — the endpoint stays synchronous and
+      // never enqueues probe calls itself.
+      ...(sourceHealth === undefined
         ? {}
-        : {
-            sourcesProbe: async () => {
-              // Each source lives in its own child: probe every registry and
-              // merge — a child that never started simply reports nothing,
-              // and configured-but-unregistered marks the lane degraded.
-              const listed = await Promise.all(
-                [...mcpInteractive.callersBySource.values()].map(async (caller) => {
-                  const probe = new ProcurementMcpClient({
-                    caller,
-                    policyGate: new ToolPolicyGate({
-                      agentAllowedTools: ["procurement.sources"],
-                    }),
-                    timeoutMs: 10_000,
-                    logger,
-                  });
-                  try {
-                    return (await probe.sources(RequestId.parse(randomUUID()))).sources.map(String);
-                  } catch {
-                    return [] as string[];
-                  }
-                }),
-              );
-              return [...new Set(listed.flat())];
-            },
-          }),
+        : { sourcesSnapshot: () => sourceHealth.snapshot() }),
       models: {
         searchIntent: searchIntent !== undefined,
         classifier: classifier !== undefined,
@@ -523,6 +536,7 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     if (timer !== undefined) clearInterval(timer);
     if (telegramTimer !== undefined) clearTimeout(telegramTimer);
+    sourceHealth?.stop();
     if (redisRepeat !== undefined) await redisRepeat.close();
     await app.close();
     if (mcp !== undefined) await mcp.close();

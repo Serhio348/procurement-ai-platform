@@ -88,6 +88,11 @@ export async function connectProcurementMcp(options: {
    * process per source so a slow lane cannot starve siblings on one pipe.
    */
   onlySources?: readonly string[];
+  /**
+   * Fires when the stdio transport closes — the child exited or the pipe
+   * broke. Health uses it to tell "process dead" apart from "probe slow".
+   */
+  onProcessClosed?: () => void;
 }): Promise<ProcurementMcpProcess> {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const mcpMain = fileURLToPath(
@@ -125,6 +130,9 @@ export async function connectProcurementMcp(options: {
   } catch (error) {
     await transport.close().catch(() => undefined);
     throw error;
+  }
+  if (options.onProcessClosed !== undefined) {
+    client.onclose = options.onProcessClosed;
   }
   options.logger.info("Procurement MCP connected", {
     mode: options.mode,

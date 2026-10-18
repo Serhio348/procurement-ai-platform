@@ -110,7 +110,10 @@ export function createProcurementDocumentIngest(
     // The download itself has no clock: a large archive finishes when the link
     // does. This only releases a dead call so the shared procurement queue
     // cannot stay blocked.
-    timeoutMs: options.timeoutMs ?? 12 * 60 * 60 * 1000,
+    // One file's download budget, queue wait included: enough for a large
+    // archive behind a registry scan on the same pipe — not for an
+    // operation that should have died hours ago (was 12 h).
+    timeoutMs: options.timeoutMs ?? 10 * 60 * 1000,
     logger: options.logger ?? silentLogger,
   });
   const logger = options.logger ?? silentLogger;

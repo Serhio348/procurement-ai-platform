@@ -318,4 +318,45 @@ describe("ButbHttpClient resilience", () => {
     await expect(c.download("https://evil.example/x")).rejects.toThrow(/cross-origin/);
     expect(calls).toHaveLength(0);
   });
+
+  it("aborts before any request and does not count toward the circuit", async () => {
+    const { run: fetch, calls } = scriptedFetch(() => htmlResponse(registryHtml("VS1")));
+    const c = client(fetch, { circuitFailureThreshold: 1 });
+    const controller = new AbortController();
+    controller.abort();
+    const signal = controller.signal;
+
+    // Repeatedly aborted calls must neither reach fetch nor trip the circuit
+    // (threshold 1: a single counted failure would open it).
+    await expect(c.registryPage(1, signal)).rejects.toMatchObject({
+      name: "SourceAbortedError",
+    });
+    await expect(c.registryPage(1, signal)).rejects.toMatchObject({
+      name: "SourceAbortedError",
+    });
+    expect(calls).toHaveLength(0);
+
+    const page = await c.registryPage(1);
+    expect(page.body).toContain("VS1");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("lets the circuit record a real failure after aborted calls", async () => {
+    let fail = false;
+    const { run: fetch, calls } = scriptedFetch(() => {
+      if (fail) throw new Error("socket reset");
+      return htmlResponse(registryHtml("VS1"));
+    });
+    const c = client(fetch, { circuitFailureThreshold: 1 });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(c.registryPage(1, controller.signal)).rejects.toMatchObject({
+      name: "SourceAbortedError",
+    });
+    fail = true;
+    await expect(c.registryPage(1)).rejects.toMatchObject({ name: "SourceAccessError" });
+    await expect(c.registryPage(1)).rejects.toThrow("circuit");
+    expect(calls).toHaveLength(1);
+  });
 });

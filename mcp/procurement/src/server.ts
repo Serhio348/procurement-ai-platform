@@ -21,6 +21,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ZodError } from "zod";
 import {
   ProcurementSourceRegistry,
+  SourceAbortedError,
   SourceAccessError,
   SourceRecordNotFoundError,
   SourceUnavailableError,
@@ -51,7 +52,7 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
     async (input, extra) =>
       executeTool("procurement.search", logger, correlationId(extra), async () => {
         const request = ProcurementSearchRequest.parse(input);
-        const output = await registry.get(request.sourceId).search(request);
+        const output = await registry.get(request.sourceId).search(request, { signal: extra.signal });
         return ProcurementSearchResponse.parse(output);
       }),
   );
@@ -67,7 +68,9 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
     async (input, extra) =>
       executeTool("procurement.get", logger, correlationId(extra), async () => {
         const request = ProcurementGetRequest.parse(input);
-        const output = await registry.get(request.sourceId).get(request.sourceProcurementId);
+        const output = await registry
+          .get(request.sourceId)
+          .get(request.sourceProcurementId, { signal: extra.signal });
         return ProcurementGetResponse.parse(output);
       }),
   );
@@ -83,7 +86,9 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
     async (input, extra) =>
       executeTool("procurement.get_status", logger, correlationId(extra), async () => {
         const request = ProcurementGetRequest.parse(input);
-        const output = await registry.get(request.sourceId).getStatus(request.sourceProcurementId);
+        const output = await registry
+          .get(request.sourceId)
+          .getStatus(request.sourceProcurementId, { signal: extra.signal });
         return ProcurementGetStatusResponse.parse(output);
       }),
   );
@@ -99,7 +104,9 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
     async (input, extra) =>
       executeTool("procurement.get_lots", logger, correlationId(extra), async () => {
         const request = ProcurementGetRequest.parse(input);
-        const output = await registry.get(request.sourceId).getLots(request.sourceProcurementId);
+        const output = await registry
+          .get(request.sourceId)
+          .getLots(request.sourceProcurementId, { signal: extra.signal });
         return ProcurementGetLotsResponse.parse(output);
       }),
   );
@@ -117,7 +124,7 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
         const request = ProcurementGetRequest.parse(input);
         const output = await registry
           .get(request.sourceId)
-          .getDocuments(request.sourceProcurementId);
+          .getDocuments(request.sourceProcurementId, { signal: extra.signal });
         return ProcurementGetDocumentsResponse.parse(output);
       }),
   );
@@ -133,7 +140,9 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
     async (input, extra) =>
       executeTool("procurement.get_history", logger, correlationId(extra), async () => {
         const request = ProcurementGetRequest.parse(input);
-        const output = await registry.get(request.sourceId).getHistory(request.sourceProcurementId);
+        const output = await registry
+          .get(request.sourceId)
+          .getHistory(request.sourceProcurementId, { signal: extra.signal });
         return ProcurementGetHistoryResponse.parse(output);
       }),
   );
@@ -155,7 +164,9 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
     async (input, extra) =>
       executeTool("procurement.download", logger, correlationId(extra), async () => {
         const request = ProcurementDownloadRequest.parse(input);
-        const file = await registry.get(request.sourceId).download(request.downloadUrl);
+        const file = await registry
+          .get(request.sourceId)
+          .download(request.downloadUrl, { signal: extra.signal });
         return storeDownloadedFile(file);
       }),
   );
@@ -173,7 +184,7 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
         const request = ProcurementGetChangesRequest.parse(input);
         const output = await registry
           .get(request.sourceId)
-          .getChanges(request.sourceProcurementId, request.since);
+          .getChanges(request.sourceProcurementId, request.since, { signal: extra.signal });
         return ProcurementGetChangesResponse.parse(output);
       }),
   );
@@ -250,8 +261,11 @@ function publicErrorMessage(error: unknown): string {
 
 function classifyError(
   error: unknown,
-): "not_found" | "source_unavailable" | "invalid_request" | "internal" {
+): "not_found" | "source_unavailable" | "invalid_request" | "internal" | "aborted" {
   if (error instanceof SourceRecordNotFoundError) return "not_found";
+  // A caller cancellation is neither an outage nor a bug — keep it out of
+  // the transport-failure buckets.
+  if (error instanceof SourceAbortedError) return "aborted";
   if (error instanceof SourceUnavailableError || error instanceof SourceAccessError) {
     return "source_unavailable";
   }

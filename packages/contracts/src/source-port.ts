@@ -127,18 +127,43 @@ export interface ProcurementFileBytes {
 }
 
 /**
+ * Per-call context. `signal` carries the MCP client cancellation — adapters
+ * check it between page iterations and pass it into site fetches so a
+ * timed-out call stops mutating session state instead of running to the end.
+ */
+export interface ProcurementCallContext {
+  signal?: AbortSignal;
+}
+
+/**
  * Neutral source adapter. Implementations must not import database packages
  * or `DomainProfile`. Filtering by profile keywords happens in application code
  * after `search` returns.
  */
 export interface ProcurementSourcePort {
   readonly sourceId: SourceId;
-  search(query: SearchQuery): Promise<ProcurementSearchResponse>;
-  get(id: SourceProcurementId): Promise<ProcedureCard>;
-  getStatus(id: SourceProcurementId): Promise<ProcurementGetStatusResponse>;
-  getLots(id: SourceProcurementId): Promise<ProcurementGetLotsResponse>;
-  getDocuments(id: SourceProcurementId): Promise<ProcurementGetDocumentsResponse>;
-  getHistory(id: SourceProcurementId): Promise<ProcurementGetHistoryResponse>;
-  getChanges(id: SourceProcurementId, since?: IsoDateTime): Promise<ProcurementGetChangesResponse>;
-  download(downloadUrl: string): Promise<ProcurementFileBytes>;
+  search(query: SearchQuery, ctx?: ProcurementCallContext): Promise<ProcurementSearchResponse>;
+  get(id: SourceProcurementId, ctx?: ProcurementCallContext): Promise<ProcedureCard>;
+  getStatus(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetStatusResponse>;
+  getLots(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetLotsResponse>;
+  getDocuments(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetDocumentsResponse>;
+  getHistory(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetHistoryResponse>;
+  getChanges(
+    id: SourceProcurementId,
+    since?: IsoDateTime,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetChangesResponse>;
+  download(downloadUrl: string, ctx?: ProcurementCallContext): Promise<ProcurementFileBytes>;
 }

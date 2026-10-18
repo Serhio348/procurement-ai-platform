@@ -9,6 +9,7 @@ import {
   InboxFixtureItem,
   SpecialistProcurementCard,
   electricalEquipmentSeedV1,
+  type SearchQuery,
 } from "@procurement/contracts";
 import {
   LISTING_PENDING_REASON,
@@ -1931,6 +1932,104 @@ describe("specialist API", () => {
     expect(search.mock.calls[0]?.[0].keywords).toEqual(["НКУ"]);
     expect(search.mock.calls[1]?.[0].keywords).toEqual(["шкаф управления"]);
     expect(titles).toEqual(["Поставка НКУ для насосов", "Поставка шкафа управления насосами"]);
+
+    await app.close();
+  });
+
+  it("shares one operation deadline across listing and extra-term stages", async () => {
+    const calls: Array<{ keywords: readonly string[]; timeoutMs: number | undefined }> = [];
+    const searchDetailed = vi.fn(
+      async (
+        query: Omit<SearchQuery, "sourceId">,
+        options?: { timeoutMs?: number },
+      ) => {
+        calls.push({ keywords: query.keywords, timeoutMs: options?.timeoutMs });
+        // The extra stage starts only after this resolves — its share of
+        // the deadline must be strictly smaller than the first stage's.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { hits: [] as SearchHit[] };
+      },
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchBudgetMs: 10_000,
+      searchHits: { search: async () => [], searchDetailed },
+      searchIntent: {
+        plan: async () =>
+          SearchIntentPlan.parse({
+            objects: ["НКУ", "шкаф управления"],
+            intent: "equipment_purchase",
+          }),
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${await activeProfileId(app)}`,
+      payload: { name: "НКУ", keywords: ["НКУ"] },
+    });
+
+    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
+
+    expect(calls.map((call) => call.keywords)).toEqual([["НКУ"], ["шкаф управления"]]);
+    expect(calls[0]?.timeoutMs).toBeLessThanOrEqual(10_000);
+    // The second stage draws the remainder of the same deadline — a fresh
+    // 10 s budget would leave the whole request over the ingress envelope.
+    expect(calls[1]?.timeoutMs).toBeLessThan(calls[0]?.timeoutMs ?? 0);
+    expect(calls[1]?.timeoutMs).toBeGreaterThan(0);
+
+    await app.close();
+  });
+
+  it("keeps the first page's hits and cursors when the extra-term stage fails", async () => {
+    const searchDetailed = vi.fn(async (query: Omit<SearchQuery, "sourceId">) => {
+      if (query.keywords.includes("НКУ")) {
+        return {
+          hits: [
+            SearchHit.parse({
+              sourceId: "goszakupki_by",
+              sourceProcurementId: "auction/kept-1",
+              url: "https://goszakupki.by/auction/view/kept-1",
+              title: "Поставка НКУ",
+            }),
+          ],
+          hasMore: true,
+          cursors: { goszakupki_by: "cur-1" },
+        };
+      }
+      // A fully failed extra pass under allowEmpty: nothing read, lane named.
+      // Its empty cursor map must not wipe the first page's resume position.
+      return { hits: [] as SearchHit[], failedSources: ["goszakupki_by"], cursors: {} };
+    });
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+      searchIntent: {
+        plan: async () =>
+          SearchIntentPlan.parse({
+            objects: ["НКУ", "шкаф управления"],
+            intent: "equipment_purchase",
+          }),
+      },
+    });
+    await app.inject({
+      method: "PUT",
+      url: `/api/profiles/${await activeProfileId(app)}`,
+      payload: { name: "НКУ", keywords: ["НКУ"] },
+    });
+
+    const searched = await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
+    const body = JSON.parse(searched.body) as {
+      items: Array<{ title: string }>;
+      hasMore: boolean;
+      scanCursors?: Record<string, string>;
+    };
+
+    expect(searched.statusCode).toBe(200);
+    expect(body.items.map((item) => item.title)).toEqual(["Поставка НКУ"]);
+    // The failed stage read nothing — the first page's token stays so the
+    // next page resumes the listing lane, not the model-terms lane.
+    expect(body.scanCursors).toEqual({ goszakupki_by: "cur-1" });
+    expect(body.hasMore).toBe(true);
 
     await app.close();
   });
@@ -5528,6 +5627,137 @@ describe("service health (R42)", () => {
     expect(body.sha).toBe("9ef20ec");
     expect(body.degraded).toEqual([]);
     expect(body.discovery?.watchingCount).toBe(0);
+
+    await app.close();
+  });
+
+  it("keeps readiness when an optional source lane dies but the required one serves", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      postgres: true,
+      serviceHealth: {
+        mode: "live",
+        objectStore: "minio",
+        source: { background: true, interactive: true },
+        sources: ["goszakupki_by", "butb"],
+        requiredSources: ["goszakupki_by"],
+        sourcesSnapshot: () => ({
+          lanes: {
+            background: {
+              goszakupki_by: { status: "ok", alive: true, registered: ["goszakupki_by"] },
+              butb: { status: "dead", alive: false, lastError: "pipe closed" },
+            },
+            interactive: {
+              goszakupki_by: { status: "ok", alive: true, registered: ["goszakupki_by"] },
+              butb: { status: "dead", alive: false },
+            },
+          },
+          sources: ["goszakupki_by"],
+          servingSources: ["goszakupki_by"],
+        }),
+        models: { searchIntent: true, classifier: true, commercialReader: true },
+        mail: true,
+        postgresConfigured: true,
+        postgresPing: async () => true,
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const body = JSON.parse(response.body) as {
+      ready: boolean;
+      degraded: string[];
+      components: {
+        sources?: string[];
+        lanes?: Record<string, Record<string, { status: string }>>;
+      };
+    };
+    expect(response.statusCode).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.components.lanes?.["background"]?.["butb"]?.status).toBe("dead");
+    expect(body.components.sources).toEqual(["goszakupki_by"]);
+    expect(body.degraded).toContain("Источник butb: процесс остановлен (background)");
+    expect(body.degraded).toContain("Источник butb: процесс остановлен (interactive)");
+
+    await app.close();
+  });
+
+  it("fails readiness when the required source lane cannot serve", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      postgres: true,
+      serviceHealth: {
+        mode: "live",
+        objectStore: "minio",
+        source: { background: true, interactive: true },
+        sources: ["goszakupki_by"],
+        requiredSources: ["goszakupki_by"],
+        sourcesSnapshot: () => ({
+          lanes: {
+            background: {
+              goszakupki_by: { status: "probe_failed", alive: true, lastError: "timeout" },
+            },
+            interactive: {
+              goszakupki_by: { status: "ok", alive: true, registered: ["goszakupki_by"] },
+            },
+          },
+          sources: ["goszakupki_by"],
+          servingSources: [],
+        }),
+        models: { searchIntent: true, classifier: true, commercialReader: true },
+        mail: true,
+        postgresConfigured: true,
+        postgresPing: async () => true,
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const body = JSON.parse(response.body) as { ready: boolean; degraded: string[] };
+    expect(response.statusCode).toBe(503);
+    expect(body.ready).toBe(false);
+    // A busy pipe reports its probe state — never "не зарегистрирован".
+    expect(body.degraded).toContain("Источник goszakupki_by: опрос MCP не завершился (background)");
+    expect(body.degraded.some((item) => item.includes("не зарегистрирован"))).toBe(false);
+
+    await app.close();
+  });
+
+  it("reports a real missing registration only when a lane actually answered", async () => {
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      postgres: true,
+      serviceHealth: {
+        mode: "live",
+        objectStore: "minio",
+        source: { background: true, interactive: true },
+        sources: ["goszakupki_by", "butb"],
+        requiredSources: ["goszakupki_by"],
+        sourcesSnapshot: () => ({
+          lanes: {
+            background: {
+              goszakupki_by: { status: "ok", alive: true, registered: ["goszakupki_by"] },
+              // The child answered — its registry honestly lacks "butb".
+              butb: { status: "ok", alive: true, registered: [] },
+            },
+            interactive: {
+              goszakupki_by: { status: "ok", alive: true, registered: ["goszakupki_by"] },
+              butb: { status: "ok", alive: true, registered: [] },
+            },
+          },
+          sources: ["goszakupki_by"],
+          // butb answers "ok" but its registry lacks the source — not serving.
+          servingSources: ["goszakupki_by"],
+        }),
+        models: { searchIntent: true, classifier: true, commercialReader: true },
+        mail: true,
+        postgresConfigured: true,
+        postgresPing: async () => true,
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const body = JSON.parse(response.body) as { ready: boolean; degraded: string[] };
+    expect(body.degraded).toContain("Источник butb: не зарегистрирован в MCP (background)");
+    expect(body.degraded).toContain("Источник butb: не зарегистрирован в MCP (interactive)");
 
     await app.close();
   });

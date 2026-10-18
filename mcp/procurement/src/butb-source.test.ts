@@ -635,6 +635,72 @@ describe("ButbSource documents", () => {
   });
 });
 
+describe("ButbSource cancellation", () => {
+  it("an already-aborted call never reaches the registry", async () => {
+    const client = fakeClient(new Map([[1, registryHtml]]));
+    const source = new ButbSource({ client });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      source.search(
+        query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z" }),
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ name: "SourceAbortedError" });
+    expect(client.calls.pages).toEqual([]);
+  });
+
+  it("stops a running scan at the next page boundary instead of scanning on", async () => {
+    const controller = new AbortController();
+    const pages: number[] = [];
+    const client: ButbPageClient = {
+      async registryPage(p) {
+        pages.push(p);
+        if (pages.length === 1) controller.abort();
+        return page(registryHtml);
+      },
+      async openCard() {
+        throw new Error("unreachable");
+      },
+      async download() {
+        throw new Error("unreachable");
+      },
+      withSession: (fn) => fn(),
+    };
+    const source = new ButbSource({ client });
+
+    // No early watermark — without cancellation this would page until the
+    // scan bound; the abort must stop it after the first page.
+    await expect(
+      source.search(
+        query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z" }),
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ name: "SourceAbortedError" });
+    expect(pages).toEqual([1]);
+  });
+
+  it("a cancelled card lookup releases the session for the next operation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const client = fakeClient(new Map([[1, registryHtml]]));
+    const source = new ButbSource({ client });
+
+    await expect(
+      source.get(SourceProcurementId.parse(`butb/${firstRow.registryNumber}`), {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "SourceAbortedError" });
+
+    // The lock was released: an uncancelled read proceeds normally.
+    const live = await source.get(
+      SourceProcurementId.parse(`butb/${firstRow.registryNumber}`),
+    );
+    expect(live.sourceProcurementId).toBe(`butb/${firstRow.registryNumber}`);
+  });
+});
+
 /** A synthetic registry row with the given date/reg number. */
 function syntheticRow(rowIndex: number, date: string, regNo = "AU20261010396700"): string {
   return `<tr id="fra:reestrAu_row_${rowIndex}"><td><span>${regNo}</span></td>` +

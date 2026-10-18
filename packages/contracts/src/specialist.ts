@@ -721,6 +721,35 @@ export const SpecialistServiceHealth = z.object({
     sources: z.array(z.string().min(1)).optional(),
     /** Sources the API intends to use — divergence from `sources` = misconfig. */
     sourcesConfigured: z.array(z.string().min(1)).optional(),
+    /**
+     * Observed state per lane×source: lifecycle (started/alive) kept apart
+     * from the registry probe so a busy queue never reads as "source
+     * missing". `ok` proves the MCP process answers and registers the
+     * source — never external-site reachability or scan completeness.
+     */
+    lanes: z
+      .record(
+        z.string(),
+        z.record(
+          z.string(),
+          z.object({
+            status: z.enum([
+              "ok",
+              "not_started",
+              "dead",
+              "probe_failed",
+              "stale",
+              "pending",
+            ]),
+            alive: z.boolean(),
+            lastError: z.string().min(1).optional(),
+            lastProbeAt: z.string().min(1).optional(),
+            lastOkAt: z.string().min(1).optional(),
+            registered: z.array(z.string().min(1)).optional(),
+          }),
+        ),
+      )
+      .optional(),
     objectStore: z.string().min(1),
     models: z.object({
       searchIntent: z.boolean(),

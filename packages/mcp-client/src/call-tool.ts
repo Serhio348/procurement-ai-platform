@@ -14,6 +14,7 @@ export interface McpCallResult {
     | "source_unavailable"
     | "invalid_request"
     | "internal"
+    | "aborted"
     | undefined;
 }
 
@@ -21,7 +22,12 @@ export interface McpToolCaller {
   callTool(
     toolName: McpToolName,
     argumentsValue: Record<string, unknown>,
-    options: { requestId: RequestId; timeoutMs: number; priority?: "high" | "normal" },
+    options: {
+      requestId: RequestId;
+      timeoutMs: number;
+      priority?: "high" | "normal";
+      signal?: AbortSignal;
+    },
   ): Promise<McpCallResult>;
 }
 
@@ -38,6 +44,8 @@ export interface McpToolCaller {
 export function serializeMcpToolCaller(inner: McpToolCaller): McpToolCaller {
   interface QueuedCall {
     priority: number;
+    /** Set by the queue timer — an expired entry never reaches the source. */
+    expired: boolean;
     run(): Promise<void>;
   }
   const queue: QueuedCall[] = [];
@@ -56,9 +64,27 @@ export function serializeMcpToolCaller(inner: McpToolCaller): McpToolCaller {
     callTool(toolName, argumentsValue, options) {
       const deadline = Date.now() + options.timeoutMs;
       const result = new Promise<McpCallResult>((resolve, reject) => {
+        const cancelled = (): McpToolCallError =>
+          new McpToolCallError(
+            "aborted",
+            toolName,
+            `MCP tool ${toolName} was cancelled before it reached the source`,
+          );
+        if (options.signal?.aborted === true) {
+          reject(cancelled());
+          return;
+        }
+        // The budget covers queue wait: a call stuck behind a long operation
+        // must reject at its deadline, not whenever the pipe finally frees.
+        // Once expired, the entry is skipped at dequeue — it never contacts
+        // the source, so a stale call cannot consume a throttle slot either.
         const entry: QueuedCall = {
           priority: options.priority === "high" ? 0 : 1,
+          expired: false,
           run: async () => {
+            if (entry.expired) return;
+            clearTimeout(timer);
+            options.signal?.removeEventListener("abort", onAbort);
             const remaining = deadline - Date.now();
             if (remaining <= 0) {
               reject(
@@ -82,6 +108,24 @@ export function serializeMcpToolCaller(inner: McpToolCaller): McpToolCaller {
             }
           },
         };
+        const timer = setTimeout(() => {
+          entry.expired = true;
+          reject(
+            new McpToolCallError(
+              "timeout",
+              toolName,
+              `MCP tool ${toolName} timed out waiting in the queue`,
+            ),
+          );
+        }, options.timeoutMs);
+        timer.unref();
+        // A caller abort while waiting frees the entry early — the skipped
+        // entry never touches the source, same as a timeout expiry.
+        const onAbort = () => {
+          entry.expired = true;
+          reject(cancelled());
+        };
+        options.signal?.addEventListener("abort", onAbort, { once: true });
         const later = queue.findIndex((item) => item.priority > entry.priority);
         if (later === -1) queue.push(entry);
         else queue.splice(later, 0, entry);
@@ -98,7 +142,7 @@ export class SdkMcpToolCaller implements McpToolCaller {
   async callTool(
     toolName: McpToolName,
     argumentsValue: Record<string, unknown>,
-    options: { requestId: RequestId; timeoutMs: number },
+    options: { requestId: RequestId; timeoutMs: number; signal?: AbortSignal },
   ): Promise<McpCallResult> {
     const result = await this.client.callTool(
       {
@@ -107,7 +151,10 @@ export class SdkMcpToolCaller implements McpToolCaller {
         _meta: { requestId: options.requestId },
       },
       undefined,
-      { timeout: options.timeoutMs },
+      {
+        timeout: options.timeoutMs,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      },
     );
     if ("toolResult" in result) {
       return { structuredContent: result.toolResult };
@@ -127,6 +174,7 @@ export class SdkMcpToolCaller implements McpToolCaller {
 export type McpToolCallErrorKind =
   | "remote_error"
   | "timeout"
+  | "aborted"
   | "invalid_output"
   | "not_found"
   | "source_unavailable"
@@ -156,6 +204,8 @@ export interface ValidatedToolCallOptions<Input extends Record<string, unknown>,
   timeoutMs: number;
   /** "high" jumps the shared queue ahead of bulk background work (R43). */
   priority?: "high" | "normal";
+  /** Cancellation: an aborted call is rejected before it reaches the source. */
+  signal?: AbortSignal;
   logger?: Logger;
 }
 
@@ -179,6 +229,7 @@ export async function callValidatedTool<Input extends Record<string, unknown>, O
         requestId: options.requestId,
         timeoutMs: options.timeoutMs,
         ...(options.priority === undefined ? {} : { priority: options.priority }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
       },
     );
 
@@ -214,7 +265,8 @@ function parseRemoteErrorKind(value: unknown): McpCallResult["errorKind"] {
     value === "not_found" ||
     value === "source_unavailable" ||
     value === "invalid_request" ||
-    value === "internal"
+    value === "internal" ||
+    value === "aborted"
   ) {
     return value;
   }
@@ -223,6 +275,9 @@ function parseRemoteErrorKind(value: unknown): McpCallResult["errorKind"] {
 
 function mapToolError(toolName: McpToolName, error: unknown): McpToolCallError {
   if (error instanceof McpToolCallError) return error;
+  if (error instanceof Error && error.name === "AbortError") {
+    return new McpToolCallError("aborted", toolName, `MCP tool ${toolName} was cancelled`, error);
+  }
   if (
     error instanceof Error &&
     (error.name.toLowerCase().includes("timeout") || error.message.toLowerCase().includes("timed out"))

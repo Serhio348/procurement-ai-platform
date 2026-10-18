@@ -72,9 +72,9 @@ export function createProcurementSearchHits(
       agentAllowedTools: ["procurement.search"],
     }),
     // Scan budget plus queue headroom on the source's own pipe: a bounded
-    // registry scan runs ~90 s, and the call may still sit behind card
-    // lookups of the same source before it even starts.
-    timeoutMs: options.timeoutMs ?? 240_000,
+    // registry scan runs up to ~180 s, and the call may still sit behind
+    // card lookups of the same source before it even starts.
+    timeoutMs: options.timeoutMs ?? 300_000,
     logger,
   });
 

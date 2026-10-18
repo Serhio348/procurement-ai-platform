@@ -98,11 +98,11 @@ export class ButbSource implements ProcurementSourcePort {
 
   constructor(options: ButbSourceOptions) {
     this.#client = options.client;
-    this.#maxSearchPages = options.maxSearchPages ?? 30;
-    // 90 s leaves headroom under the 120 s procurement.search tool timeout
-    // at the default 12 rpm pacing (~5 s per page postback).
-    this.#maxSearchMs = options.maxSearchMs ?? 90_000;
-    this.#maxGetPages = options.maxGetPages ?? 40;
+    this.#maxSearchPages = options.maxSearchPages ?? 60;
+    // 180 s leaves headroom under the 300 s procurement.search tool budget
+    // at the default 12 rpm pacing (~5 s per page postback → ~40 pages).
+    this.#maxSearchMs = options.maxSearchMs ?? 180_000;
+    this.#maxGetPages = options.maxGetPages ?? 60;
     this.#cardCacheTtlMs = options.cardCacheTtlMs ?? 60_000;
     this.#baseUrl = options.baseUrl ?? "https://zakupki.butb.by";
     this.#now = options.now ?? (() => new Date());

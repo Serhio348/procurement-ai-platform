@@ -24,8 +24,10 @@ export default defineConfig({
         // E2E_API_URL lets playwright run the stack on dedicated ports so a
         // dev server already on 3001/5173 is never reused by mistake (R41).
         target: process.env["E2E_API_URL"] ?? "http://127.0.0.1:3001",
-        timeout: 180_000,
-        proxyTimeout: 180_000,
+        // Keep in step with nginx: a manual search may hold the request for
+        // the whole source-scan budget (~300 s) before answering.
+        timeout: 330_000,
+        proxyTimeout: 330_000,
       },
     },
   },

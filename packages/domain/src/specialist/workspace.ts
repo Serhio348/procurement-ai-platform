@@ -125,6 +125,28 @@ export class SpecialistWorkspace {
     return this.profileById(id);
   }
 
+  /**
+   * Stores the per-source resume tokens a truncated pass reported — they
+   * survive a restart in the persisted workspace, so the next pass resumes
+   * below the recorded position instead of re-reading the registry head.
+   * An empty map or undefined clears them (window fully read).
+   */
+  setDiscoveryScanCursors(
+    id: string,
+    cursors: Record<string, string> | undefined,
+  ): SpecialistWorkingProfileValue {
+    const cleared = cursors === undefined || Object.keys(cursors).length === 0;
+    this.#profiles = this.#profiles.map((item) =>
+      item.id === id
+        ? SpecialistWorkingProfile.parse({
+            ...item,
+            discoveryScanCursors: cleared ? undefined : { ...cursors },
+          })
+        : item,
+    );
+    return this.profileById(id);
+  }
+
   rememberIrrelevant(profileId: string, sourceProcurementId: string, decidedAt: string): void {
     if (this.isReviewedIrrelevant(profileId, sourceProcurementId)) return;
     this.#reviewedIrrelevant.push(
@@ -373,7 +395,14 @@ export class SpecialistWorkspace {
     // longer describe this profile (R12).
     const searchChanged = searchProfileSignature(next) !== searchProfileSignature(current);
     const stamped = searchChanged
-      ? SpecialistWorkingProfile.parse({ ...next, lastDiscoveryAt: undefined })
+      ? SpecialistWorkingProfile.parse({
+          ...next,
+          lastDiscoveryAt: undefined,
+          // The saved scan positions were read under the old retrieval
+          // fingerprint — rows skipped by a stale cursor could match the
+          // new terms. The re-read starts fresh like the watermark (R12).
+          discoveryScanCursors: undefined,
+        })
       : next;
     this.#profiles = this.#profiles.map((item) => (item.id === id ? stamped : item));
     if (searchChanged) {

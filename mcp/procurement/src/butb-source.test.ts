@@ -181,6 +181,130 @@ describe("ButbSource.search", () => {
     );
     expect(answer.hasMore).toBe(false);
   });
+
+  it("hands back a resume cursor on truncation and a fresh instance reaches the tail", async () => {
+    // The regression this guards: a scan bounded to two pages used to emit
+    // no position at all — the next pass re-read the same head forever and
+    // the rows below the budget were never seen. The cursor must survive in
+    // the token alone: the resuming call runs on a NEW source instance.
+    const pages = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000002")],
+      [3, syntheticPage(40, "17.10.2026", "AU20261017000003")],
+      [4, syntheticPage(60, "15.10.2026", "AU20261015000005")],
+    ]);
+    const client = fakeClient(pages);
+    const shallow = new ButbSource({ client, maxSearchPages: 2 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 500 }),
+    );
+    expect(first.hasMore).toBe(true);
+    expect(first.scanCursor).toBeDefined();
+    expect(first.hits.map((hit) => hit.sourceProcurementId)).not.toContain(
+      "butb/AU20261015000005",
+    );
+
+    const resumed = new ButbSource({ client });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 500,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    const ids = second.hits.map((hit) => hit.sourceProcurementId);
+    expect(ids).toContain("butb/AU20261015000005");
+    expect(second.hasMore).toBe(false);
+    expect(second.scanCursor).toBeUndefined();
+  });
+
+  it("picks up posts newer than the cursor before continuing the tail", async () => {
+    const pages = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000002")],
+      [3, syntheticPage(40, "17.10.2026", "AU20261017000003")],
+    ]);
+    const client = fakeClient(pages);
+    const shallow = new ButbSource({ client, maxSearchPages: 2 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 500 }),
+    );
+    expect(first.scanCursor).toBeDefined();
+
+    // Between passes a new procedure was posted at the head — the cursor
+    // row shifted a page deeper. Resuming straight at the tail would miss
+    // the new post; the head phase must collect it first.
+    pages.set(1, syntheticPage(0, "22.10.2026", "AU20261022000009"));
+    pages.set(2, syntheticPage(20, "20.10.2026", "AU20261020000001"));
+    pages.set(3, syntheticPage(40, "18.10.2026", "AU20261018000002"));
+    pages.set(4, syntheticPage(60, "17.10.2026", "AU20261017000003"));
+    const resumed = new ButbSource({ client });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 500,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    const ids = second.hits.map((hit) => hit.sourceProcurementId);
+    expect(ids).toContain("butb/AU20261022000009");
+    expect(ids).toContain("butb/AU20261017000003");
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("falls back to the cursor date band when the cursor row left the registry", async () => {
+    const pages = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000002")],
+      [3, syntheticPage(40, "15.10.2026", "AU20261015000005")],
+    ]);
+    const client = fakeClient(pages);
+    const shallow = new ButbSource({ client, maxSearchPages: 2 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 500 }),
+    );
+    expect(first.scanCursor).toBeDefined();
+
+    // The cursor row was withdrawn — no page carries its registry number.
+    // The first row older than its date band still marks the tail.
+    pages.delete(2);
+    const shifted = new Map<number, string>([
+      [1, pages.get(1)!],
+      [2, syntheticPage(20, "17.10.2026", "AU20261017000003")],
+      [3, pages.get(3)!],
+    ]);
+    const resumed = new ButbSource({ client: fakeClient(shifted) });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 500,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    const ids = second.hits.map((hit) => hit.sourceProcurementId);
+    expect(ids).toContain("butb/AU20261017000003");
+    expect(ids).toContain("butb/AU20261015000005");
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("ignores an unparseable cursor instead of trusting it", async () => {
+    const client = fakeClient(new Map([[1, registryHtml], [2, "<table></table>"]]));
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 10,
+        scanCursor: "%%%not-a-cursor%%%",
+      }),
+    );
+    expect(answer.hits.length).toBeGreaterThan(0);
+    expect(answer.hasMore).toBe(false);
+    expect(answer.scanCursor).toBeUndefined();
+  });
 });
 
 describe("ButbSource.get", () => {

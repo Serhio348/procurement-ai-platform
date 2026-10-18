@@ -242,6 +242,14 @@ export const SearchQuery = z.object({
   kinds: z.array(ProcedureKind).default([]),
   limit: z.number().int().positive().max(500).default(50),
   offset: z.number().int().nonnegative().default(0),
+  /**
+   * Opaque per-source resume token from a truncated response's `scanCursor`.
+   * The adapter continues the scan below the recorded position instead of
+   * re-reading the registry head every call — without it a window deeper
+   * than one scan budget is never reached. Sources that do not support
+   * resume ignore the field.
+   */
+  scanCursor: z.string().optional(),
 });
 export type SearchQuery = z.infer<typeof SearchQuery>;
 

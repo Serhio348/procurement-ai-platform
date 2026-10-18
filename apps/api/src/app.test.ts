@@ -2588,6 +2588,122 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("resumes a truncated window from the persisted cursor until the tail is read", async () => {
+    // The pass bound used to re-read the same head forever: a procurement
+    // below the scan budget was unreachable. Now the truncated lane hands
+    // back a resume token, the pass persists it on the profile, and the
+    // next pass — even after a restart — continues below it.
+    const journal = createMemoryAdminJournal();
+    const tailHit = SearchHit.parse({
+      sourceId: "butb",
+      sourceProcurementId: "butb/AU20261015000005",
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html?id=5",
+      title: "Поставка КТПБ-630",
+    });
+    const headHit = SearchHit.parse({
+      sourceId: "goszakupki_by",
+      sourceProcurementId: "auction/ok-1",
+      url: "https://goszakupki.by/auction/view/ok-1",
+      title: "Поставка КТПБ-250",
+    });
+    const cursorsSeen: Array<Record<string, string> | undefined> = [];
+    // The cursor evolves across reads the way the registry position does:
+    // each truncated page hands back a deeper token, and only the caller
+    // that resumes from the deepest one sees the tail row.
+    const NEXT: Record<string, string> = { "tok-a": "tok-b", "tok-b": "tok-final" };
+    const searchDetailed = vi.fn(
+      async (_query: { offset: number }, options?: { cursors?: Record<string, string> }) => {
+        cursorsSeen.push(options?.cursors);
+        const current = options?.cursors?.["butb"];
+        if (current === "tok-final") {
+          return { hits: [tailHit] as SearchHit[], hasMore: false, failedSources: [] as string[], cursors: {} };
+        }
+        return {
+          hits: [headHit] as SearchHit[],
+          hasMore: true,
+          failedSources: [] as string[],
+          cursors: { butb: current === undefined ? "tok-a" : (NEXT[current] ?? "tok-final") },
+        };
+      },
+    );
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+      journal,
+    });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
+
+    const first = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(first.statusCode).toBe(200);
+    const afterFirst = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      lastDiscoveryAt?: string;
+      discoveryScanCursors?: Record<string, string>;
+    };
+    expect(afterFirst.lastDiscoveryAt).toBeUndefined();
+    expect(afterFirst.discoveryScanCursors).toEqual({ butb: "tok-final" });
+
+    const second = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(second.statusCode).toBe(200);
+    const body = second.json() as { addedCount: number };
+    // The tail row only became reachable once the window resumed — it is
+    // processed like any fresh hit now.
+    expect(body.addedCount).toBeGreaterThan(0);
+    const afterSecond = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      lastDiscoveryAt?: string;
+      discoveryScanCursors?: Record<string, string>;
+    };
+    expect(afterSecond.lastDiscoveryAt).toBeDefined();
+    expect(afterSecond.discoveryScanCursors).toBeUndefined();
+    expect(cursorsSeen).toContainEqual({ butb: "tok-final" });
+
+    await app.close();
+  });
+
+  it("keeps the first page when a continuation page fails — partial, not lost", async () => {
+    const journal = createMemoryAdminJournal();
+    const searchDetailed = vi.fn(async (query: { offset: number }) => {
+      if (query.offset === 0) {
+        return {
+          hits: [
+            SearchHit.parse({
+              sourceId: "goszakupki_by",
+              sourceProcurementId: "auction/ok-1",
+              url: "https://goszakupki.by/auction/view/ok-1",
+              title: "Поставка КТПБ-250",
+            }),
+          ] as SearchHit[],
+          hasMore: true,
+          failedSources: [] as string[],
+          cursors: {},
+        };
+      }
+      throw new Error("source lane died mid-paging");
+    });
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+      journal,
+    });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
+
+    const ran = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    expect(ran.statusCode).toBe(200);
+    const body = ran.json() as { addedCount: number };
+    // The first page's hit survives the failed continuation — it is added
+    // to the cabinet, while the pass stays marked incomplete.
+    expect(body.addedCount).toBe(1);
+    const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      lastDiscoveryAt?: string;
+    };
+    expect(profile.lastDiscoveryAt).toBeUndefined();
+    const log = await journal.list();
+    expect(log.some((item) => item.level === "error" && item.message.includes("неполный"))).toBe(true);
+
+    await app.close();
+  });
+
   it("does not ask the card or the model twice about the same hit", async () => {
     const hits = [
       SearchHit.parse({

@@ -29,6 +29,13 @@ export const ProcurementSearchResponse = z.object({
    * safety page cap stopped the scan early.
    */
   hasMore: z.boolean().optional(),
+  /**
+   * Resume token for the unread tail, present only together with `hasMore`.
+   * The caller persists it and hands it back as `scanCursor` on the next
+   * call — the source continues below the recorded position. Absent once
+   * the window is fully read.
+   */
+  scanCursor: z.string().optional(),
 });
 export type ProcurementSearchResponse = z.infer<typeof ProcurementSearchResponse>;
 

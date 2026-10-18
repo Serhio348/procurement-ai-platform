@@ -123,6 +123,21 @@ export class ButbSource implements ProcurementSourcePort {
     const watermark = dateFloor(query.publishedFrom);
     const deadline = this.#now().getTime() + this.#maxSearchMs;
     let hasMore = false;
+    // Resume position left by a previous truncated scan — the caller persists
+    // the token across restarts, so this call continues below the recorded
+    // row instead of re-reading the whole registry head. While `tail` stays
+    // false the loop is in the head phase: it collects posts newer than the
+    // pass that wrote the token (they only ever sit at the top) and looks
+    // for the cursor row or the first row older than its date band —
+    // everything below that point is the unread tail either way.
+    const resume = parseButbScanCursor(query.scanCursor);
+    if (query.scanCursor !== undefined && resume === undefined) {
+      this.#logger.warn("butb scan cursor could not be parsed — fresh scan", {
+        component: "butb-source",
+      });
+    }
+    let tail = resume === undefined;
+    let deepestRead: ButbRegistryRow | undefined;
     while (page <= this.#maxSearchPages) {
       if (this.#now().getTime() >= deadline) {
         // The scan ran out of wall clock, not out of registry — the tail
@@ -141,13 +156,27 @@ export class ButbSource implements ProcurementSourcePort {
       if (rows.length === 0) break;
       scannedRows += rows.length;
       for (const row of rows) this.#rememberPosition(row);
+      deepestRead = rows[rows.length - 1] ?? deepestRead;
       let pageBeforeWatermark = false;
+      let belowCursor = false;
       for (const row of rows) {
         const rowDate = rowDateOf(row);
         if (watermark !== undefined && rowDate !== undefined && rowDate < watermark) {
           // Rows are published-desc: deeper rows cannot get newer again.
           pageBeforeWatermark = true;
           continue;
+        }
+        if (!tail && resume !== undefined) {
+          if (row.registryNumber === resume.n) belowCursor = true;
+          else if (
+            resume.d !== undefined &&
+            rowDate !== undefined &&
+            rowDate < resume.d
+          ) {
+            // The cursor row left the registry — the date band is the
+            // honest boundary: every row below it is unscanned.
+            belowCursor = true;
+          }
         }
         if (!this.#rowMatches(row, query)) continue;
         const matched = terms.filter((term) => matchesTerm(row.title, term));
@@ -161,13 +190,36 @@ export class ButbSource implements ProcurementSourcePort {
         else for (const term of matched) if (!entry.terms.includes(term)) entry.terms.push(term);
       }
       if (pageBeforeWatermark) break;
-      if (candidates.size >= budget || page === this.#maxSearchPages) {
+      if (!tail) {
+        // Rows below the cursor row on this page were already collected
+        // above; the rest of the registry is the tail — keep scanning.
+        if (belowCursor) tail = true;
+      } else if (candidates.size >= budget) {
         // Stopped while rows remained — a page cap or a full window is the
         // source's own "more may follow" signal, same as goszakupki's.
         hasMore = true;
         break;
       }
+      if (page === this.#maxSearchPages) {
+        hasMore = true;
+        break;
+      }
       page += 1;
+    }
+
+    // A truncated scan hands back where it stopped: the deepest row this
+    // call actually read — or the incoming token when the head phase never
+    // passed it, because a shallower token would rewind the window.
+    let scanCursor: string | undefined;
+    if (hasMore) {
+      if (tail && deepestRead !== undefined) {
+        scanCursor = encodeButbScanCursor(deepestRead);
+      } else {
+        scanCursor = query.scanCursor;
+        if (scanCursor === undefined && deepestRead !== undefined) {
+          scanCursor = encodeButbScanCursor(deepestRead);
+        }
+      }
     }
 
     const merged = [...candidates.values()]
@@ -187,8 +239,14 @@ export class ButbSource implements ProcurementSourcePort {
       candidates: merged.length,
       returned: hits.length,
       hasMore,
+      resumed: resume !== undefined,
+      tail,
     });
-    return ProcurementSearchResponse.parse({ hits, hasMore });
+    return ProcurementSearchResponse.parse({
+      hits,
+      hasMore,
+      ...(scanCursor === undefined ? {} : { scanCursor }),
+    });
   }
 
   #rowMatches(row: ButbRegistryRow, query: SearchQuery): boolean {
@@ -538,6 +596,45 @@ function dateOfFirstRow(rows: readonly ButbRegistryRow[]): string | undefined {
 
 function dateFloor(instant: IsoDateTime | undefined): string | undefined {
   return instant?.slice(0, 10);
+}
+
+/**
+ * Resume token a truncated scan hands back: the deepest registry row it
+ * actually read, opaque to the caller but durable across restarts. `n`
+ * (registry number) finds the row wherever new posts pushed it; `d` is the
+ * fallback boundary when the row left the registry; `i` records the index
+ * it was seen at. The index is deliberately never trusted for a position
+ * comparison — inserts shift every absolute index, so only the row's
+ * identity and its date band can bound the resume.
+ */
+interface ButbScanCursor {
+  v: 1;
+  n?: string;
+  i?: number;
+  d?: string;
+}
+
+const BUTB_SCAN_CURSOR_VERSION = 1;
+
+function encodeButbScanCursor(row: ButbRegistryRow): string {
+  const cursor: ButbScanCursor = { v: BUTB_SCAN_CURSOR_VERSION, n: row.registryNumber, i: row.rowIndex };
+  const date = rowDateOf(row);
+  if (date !== undefined) cursor.d = date;
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function parseButbScanCursor(token: string | undefined): ButbScanCursor | undefined {
+  if (token === undefined || token.length === 0) return undefined;
+  try {
+    const decoded: unknown = JSON.parse(Buffer.from(token, "base64url").toString("utf8"));
+    if (typeof decoded !== "object" || decoded === null) return undefined;
+    const cursor = decoded as ButbScanCursor;
+    if (cursor.v !== BUTB_SCAN_CURSOR_VERSION) return undefined;
+    if (typeof cursor.n !== "string" || cursor.n.length === 0) return undefined;
+    return cursor;
+  } catch {
+    return undefined;
+  }
 }
 
 function compareInstant(

@@ -56,11 +56,14 @@ export function createProcurementSearchHits(
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
   searchDetailed: (
     query: Omit<SearchQuery, "sourceId">,
+    options?: { cursors?: Readonly<Record<string, string>> },
   ) => Promise<{
     hits: readonly SearchHit[];
     hasMore?: boolean;
     /** Sources whose call failed — their window is unread, not empty. */
     failedSources?: readonly string[];
+    /** Per-source resume tokens for lanes still truncated mid-window. */
+    cursors: Record<string, string>;
   }>;
 } {
   const logger = options.logger ?? silentLogger;
@@ -78,7 +81,10 @@ export function createProcurementSearchHits(
     logger,
   });
 
-  const call = async (query: Omit<SearchQuery, "sourceId">) => {
+  const call = async (
+    query: Omit<SearchQuery, "sourceId">,
+    callOptions?: { cursors?: Readonly<Record<string, string>> },
+  ) => {
     if (query.keywords.length === 0) {
       throw new McpToolCallError(
         "invalid_request",
@@ -90,8 +96,13 @@ export function createProcurementSearchHits(
     const lanes = await Promise.all(
       sourceIds.map(async (sourceId) => {
         try {
+          const scanCursor = callOptions?.cursors?.[sourceId];
           const page = await client.search(
-            ProcurementSearchRequest.parse({ sourceId, ...query }),
+            ProcurementSearchRequest.parse({
+              sourceId,
+              ...query,
+              ...(scanCursor === undefined ? {} : { scanCursor }),
+            }),
             RequestId.parse(randomUUID()),
           );
           return { sourceId, page, error: undefined };
@@ -112,6 +123,13 @@ export function createProcurementSearchHits(
       hits: mergeHits(lanes.flatMap((lane) => lane.page?.hits ?? [])),
       hasMore: lanes.some((lane) => lane.page?.hasMore === true),
       failedSources: failures.map((lane) => lane.sourceId as string),
+      // A lane that finished its window stops reporting a token — the key
+      // simply disappears, clearing the resume position.
+      cursors: Object.fromEntries(
+        lanes.flatMap((lane) =>
+          lane.page?.scanCursor === undefined ? [] : [[lane.sourceId, lane.page.scanCursor]],
+        ),
+      ),
     };
   };
 
@@ -121,16 +139,19 @@ export function createProcurementSearchHits(
     },
     async searchDetailed(
       query: Omit<SearchQuery, "sourceId">,
+      callOptions?: { cursors?: Readonly<Record<string, string>> },
     ): Promise<{
       hits: readonly SearchHit[];
       hasMore?: boolean;
       failedSources?: readonly string[];
+      cursors: Record<string, string>;
     }> {
-      const response = await call(query);
+      const response = await call(query, callOptions);
       return {
         hits: response.hits,
         hasMore: response.hasMore,
         failedSources: response.failedSources,
+        cursors: response.cursors,
       };
     },
   };

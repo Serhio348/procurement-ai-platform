@@ -512,6 +512,15 @@ export const SpecialistWorkingProfile = z.object({
    * search phrases change.
    */
   lastDiscoveryAt: IsoDateTime.optional(),
+  /**
+   * Per-source resume tokens of a truncated discovery window
+   * (sourceId → scanCursor). A pass that could not read to the watermark
+   * stores the deepest scanned position; the next pass continues from it
+   * instead of re-reading the registry head, so the window still reaches
+   * its tail. Cleared when a pass completes or the retrieval fingerprint
+   * changes. Server-managed — never part of a write payload.
+   */
+  discoveryScanCursors: z.record(z.string(), z.string()).optional(),
 });
 export type SpecialistWorkingProfile = z.infer<typeof SpecialistWorkingProfile>;
 
@@ -519,6 +528,7 @@ export const SpecialistProfileWrite = SpecialistWorkingProfile.omit({
   id: true,
   watchNewProcurements: true,
   lastDiscoveryAt: true,
+  discoveryScanCursors: true,
 });
 export type SpecialistProfileWrite = z.infer<typeof SpecialistProfileWrite>;
 

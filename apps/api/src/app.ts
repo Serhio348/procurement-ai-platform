@@ -186,10 +186,13 @@ export interface SpecialistSearchHitsPort {
    */
   searchDetailed?: (
     query: Omit<SearchQuery, "sourceId">,
+    options?: { cursors?: Readonly<Record<string, string>> },
   ) => Promise<{
     hits: readonly SearchHit[];
     hasMore?: boolean;
     failedSources?: readonly string[];
+    /** Per-source resume tokens for lanes still truncated mid-window. */
+    cursors?: Record<string, string>;
   }>;
 }
 
@@ -995,15 +998,24 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     limit: number,
     offset: number,
     publishedFrom?: string,
+    scanCursors?: Readonly<Record<string, string>>,
   ): Promise<{
     plan: SearchIntentPlan;
     hits: SearchHit[];
     hasMore: boolean;
     failedSources: readonly string[];
+    /** Resume tokens for lanes still truncated mid-window. */
+    scanCursors: Record<string, string>;
     /** Same profile/terms/plan at a deeper offset — paging costs no new plan. */
     nextPage: (
       nextOffset: number,
-    ) => Promise<{ hits: SearchHit[]; hasMore: boolean; failedSources: readonly string[] }>;
+      nextCursors?: Readonly<Record<string, string>>,
+    ) => Promise<{
+      hits: SearchHit[];
+      hasMore: boolean;
+      failedSources: readonly string[];
+      scanCursors: Record<string, string>;
+    }>;
   }> {
     const inferred = inferSearchIntentPlan({
       name: profileDisplayName(profile),
@@ -1013,19 +1025,26 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     const listingTerms = platformSearchTerms(inferred, profile.keywords);
     const searchDetailed = async (
       query: Omit<SearchQuery, "sourceId">,
-    ): Promise<{ hits: readonly SearchHit[]; hasMore: boolean; failedSources: readonly string[] }> => {
+      callOptions?: { cursors?: Readonly<Record<string, string>> },
+    ): Promise<{
+      hits: readonly SearchHit[];
+      hasMore: boolean;
+      failedSources: readonly string[];
+      cursors: Record<string, string>;
+    }> => {
       if (searchHits.searchDetailed !== undefined) {
-        const page = await searchHits.searchDetailed(query);
+        const page = await searchHits.searchDetailed(query, callOptions);
         // undefined means the source did not report truncation — a full
         // window is the honest "more may follow" signal.
         return {
           hits: page.hits,
           hasMore: page.hasMore ?? page.hits.length >= query.limit,
           failedSources: page.failedSources ?? [],
+          cursors: page.cursors ?? {},
         };
       }
       const hits = await searchHits.search(query);
-      return { hits, hasMore: hits.length >= query.limit, failedSources: [] };
+      return { hits, hasMore: hits.length >= query.limit, failedSources: [], cursors: {} };
     };
     const siteQuery = buildSearchQuery(profile, limit, offset, publishedFrom, listingTerms);
     logger.info("Specialist profile search query", {
@@ -1039,20 +1058,37 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     });
     const [plan, firstPage] = await Promise.all([
       resolveSearchPlan(profile),
-      searchDetailed(siteQuery),
+      searchDetailed(siteQuery, { cursors: scanCursors ?? {} }),
     ]);
     const extraTerms = extraPlatformSearchTerms(listingTerms, plan, profile.keywords);
     const fetchExtraPage = async (
       pageOffset: number,
-    ): Promise<{ hits: readonly SearchHit[]; hasMore: boolean; failedSources: readonly string[] }> => {
+      pageCursors?: Readonly<Record<string, string>>,
+    ): Promise<{
+      hits: readonly SearchHit[];
+      hasMore: boolean;
+      failedSources: readonly string[];
+      cursors: Record<string, string>;
+    }> => {
       return extraTerms.length === 0
-        ? { hits: [] as readonly SearchHit[], hasMore: false, failedSources: [] as readonly string[] }
+        ? {
+            hits: [] as readonly SearchHit[],
+            hasMore: false,
+            failedSources: [] as readonly string[],
+            cursors: {},
+          }
         : await searchDetailed(
             buildSearchQuery(profile, limit, pageOffset, publishedFrom, extraTerms),
+            { cursors: pageCursors ?? {} },
           );
     };
-    const extraPage = await fetchExtraPage(offset);
+    const extraPage = await fetchExtraPage(offset, scanCursors);
     const hits = mergeSearchHits(firstPage.hits, extraPage.hits);
+    // The extra-terms pass reads the same registry window after the first —
+    // its per-source token is the freshest answer about how far the scan
+    // got, so it wins over the first page's.
+    const pageCursors =
+      extraTerms.length === 0 ? { ...firstPage.cursors } : { ...extraPage.cursors };
     logger.info("Specialist profile search retrieval", {
       profileName: profileDisplayName(profile),
       originalTerms: [...profile.keywords],
@@ -1068,15 +1104,19 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       hits,
       hasMore: firstPage.hasMore || extraPage.hasMore,
       failedSources: [...firstPage.failedSources, ...extraPage.failedSources],
-      nextPage: async (nextOffset: number) => {
+      scanCursors: pageCursors,
+      nextPage: async (nextOffset: number, nextCursors?: Readonly<Record<string, string>>) => {
         const nextFirst = await searchDetailed(
           buildSearchQuery(profile, limit, nextOffset, publishedFrom, listingTerms),
+          { cursors: nextCursors ?? {} },
         );
-        const nextExtra = await fetchExtraPage(nextOffset);
+        const nextExtra = await fetchExtraPage(nextOffset, nextCursors);
         return {
           hits: mergeSearchHits(nextFirst.hits, nextExtra.hits),
           hasMore: nextFirst.hasMore || nextExtra.hasMore,
           failedSources: [...nextFirst.failedSources, ...nextExtra.failedSources],
+          scanCursors:
+            extraTerms.length === 0 ? { ...nextFirst.cursors } : { ...nextExtra.cursors },
         };
       },
     };
@@ -1845,29 +1885,47 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         let hits: readonly SearchHit[];
         let plan: SearchIntentPlan;
         let degradedReason: string | undefined;
+        // Resume tokens a truncated pass persisted — the next scan continues
+        // below them instead of re-reading the registry head every pass.
+        let scanCursors: Record<string, string> = { ...(profile.discoveryScanCursors ?? {}) };
         const startedAt = clock();
         try {
           await discoveryController.beforeRequest(new Date());
           const publishedFrom = discoveryPublishedFrom(profile);
-          const fetched = await fetchProfileHits(profile, limit, 0, publishedFrom);
+          const fetched = await fetchProfileHits(profile, limit, 0, publishedFrom, scanCursors);
           plan = fetched.plan;
           const failedSources = new Set<string>(fetched.failedSources);
           let collected = fetched.hits;
           let hasMore = fetched.hasMore;
           let lastPageSize = fetched.hits.length;
+          scanCursors = { ...fetched.scanCursors };
+          let pageError: unknown;
           // A window is fully read only when the source stops reporting more:
           // page deeper while it claims unread rows. Empty page or the bound
           // ends paging — deeper rows then stay unread and gate the watermark.
-          for (
-            let offset = limit;
-            hasMore && lastPageSize > 0 && offset < limit * DISCOVERY_MAX_PAGES;
-            offset += limit
-          ) {
-            const page = await fetched.nextPage(offset);
-            for (const source of page.failedSources) failedSources.add(source);
-            collected = mergeSearchHits(collected, page.hits);
-            lastPageSize = page.hits.length;
-            hasMore = page.hasMore;
+          try {
+            for (
+              let offset = limit;
+              hasMore && lastPageSize > 0 && offset < limit * DISCOVERY_MAX_PAGES;
+              offset += limit
+            ) {
+              const page = await fetched.nextPage(offset, scanCursors);
+              for (const source of page.failedSources) failedSources.add(source);
+              collected = mergeSearchHits(collected, page.hits);
+              lastPageSize = page.hits.length;
+              hasMore = page.hasMore;
+              scanCursors = { ...page.scanCursors };
+            }
+          } catch (error) {
+            // A failing continuation page must not throw away what the
+            // earlier pages already delivered: the hits stay collected and
+            // the pass is marked incomplete — the window is partially read,
+            // not unread.
+            pageError = error;
+            logger.warn("Specialist discovery continuation failed — window kept as partial", {
+              profileName: profileDisplayName(profile),
+              err: error instanceof Error ? error.message : String(error),
+            });
           }
           hits = collected;
           const reasons: string[] = [];
@@ -1876,6 +1934,9 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           }
           if (hasMore) {
             reasons.push("выдача усечена — прочитаны не все страницы");
+          }
+          if (pageError !== undefined) {
+            reasons.push("следующая страница выдачи не ответила");
           }
           degradedReason = reasons.length === 0 ? undefined : reasons.join("; ");
         } catch (error) {
@@ -1925,11 +1986,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         // rows inside, so the interval stays open for the next pass.
         if (degradedReason === undefined) {
           workspace().markDiscovered(profile.id, startedAt);
+          workspace().setDiscoveryScanCursors(profile.id, undefined);
         } else {
+          // Persist how far the scan got: the next pass resumes below the
+          // recorded positions instead of re-reading the registry head —
+          // a window deeper than one scan budget still reaches its tail.
+          workspace().setDiscoveryScanCursors(profile.id, scanCursors);
           degraded.push({ profile, reason: degradedReason });
           logger.warn("Specialist discovery pass incomplete — watermark held", {
             profileName: profileDisplayName(profile),
             reason: degradedReason,
+            resumedFrom: profile.discoveryScanCursors ?? {},
+            scanCursors,
           });
         }
         logger.info("Specialist discovery recorded", {

@@ -212,6 +212,80 @@ describe("ButbHttpClient session", () => {
     expect(last?.method).toBe("POST");
     expect(last?.body).toContain("reestrAu_page=2");
   });
+
+  it("downloads a document under the session rebuilt after the card view", async () => {
+    // The card's document URL is captured under one JSESSIONID; the next
+    // registry read drops that session (the card view degrades the table)
+    // and bootstraps a new one. The file GET must still go out — with the
+    // *new* session's cookie — because document URLs carry no view tokens.
+    let bootstraps = 0;
+    const { run: fetch, calls } = scriptedFetch((request) => {
+      if (request.method === "GET" && request.url === REGISTRY) {
+        bootstraps += 1;
+        return htmlResponse(
+          registryHtml(`VS${bootstraps}`),
+          `JSESSIONID=s${bootstraps}; Path=/auctions`,
+        );
+      }
+      if (request.method === "POST" && request.body?.includes("_t344")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "/auctions/viewinvitation.html" },
+        });
+      }
+      if (request.method === "GET" && request.url === CARD) {
+        return htmlResponse("<html>card body</html>");
+      }
+      if (request.method === "POST" && request.body?.includes("pageChange")) {
+        return htmlResponse(pageChangeXml("VS9"));
+      }
+      if (request.method === "GET" && request.url.startsWith(`${BASE}/auctions/download`)) {
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+        });
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.url}`);
+    });
+    const c = client(fetch);
+
+    await c.registryPage(1); // session s1
+    await c.openCard("fra:reestrAu:0:_t344"); // card view under s1
+    await c.registryPage(1); // card view → session dropped, s2 bootstrapped
+    const file = await c.download("/auctions/download?id=6119854&name=x.pdf");
+
+    expect(bootstraps).toBe(2);
+    expect(Buffer.from(file.bytes).toString("latin1")).toBe("%PDF");
+    expect(file.contentType).toBe("application/pdf");
+    const fileGet = calls.find((call) => call.url.includes("/auctions/download"));
+    expect(fileGet?.cookie).toContain("JSESSIONID=s2");
+    expect(fileGet?.cookie).not.toContain("JSESSIONID=s1");
+  });
+
+  it("bootstraps a session for a download even with no prior page read", async () => {
+    // A monitoring/watch download may arrive on a client that has not read
+    // any page this run — the client must open a session itself first.
+    const { run: fetch, calls } = scriptedFetch((request) => {
+      if (request.method === "GET" && request.url === REGISTRY) {
+        return htmlResponse(registryHtml("VS1"), "JSESSIONID=fresh; Path=/auctions");
+      }
+      if (request.method === "GET" && request.url.startsWith(`${BASE}/auctions/download`)) {
+        return new Response(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]), {
+          status: 200,
+          headers: { "content-type": "application/vnd.ms-excel" },
+        });
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.url}`);
+    });
+    const c = client(fetch);
+
+    const file = await c.download("/auctions/download?id=1&name=a.xls");
+
+    expect(file.bytes.length).toBe(4);
+    const fileGet = calls.find((call) => call.url.includes("/auctions/download"));
+    expect(fileGet?.cookie).toContain("JSESSIONID=fresh");
+    expect(calls[0]?.url).toBe(REGISTRY);
+  });
 });
 
 describe("ButbHttpClient resilience", () => {

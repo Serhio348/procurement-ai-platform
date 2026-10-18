@@ -9,6 +9,7 @@ import { migrateDatabase } from "./migrate.js";
 import { createRepositories } from "./repositories.js";
 import {
   documentVersions,
+  documents,
   domainProfiles,
   procurements,
   seedRuns,
@@ -483,6 +484,143 @@ integration("PostgreSQL migrations and invariants", () => {
       .from(procurements)
       .where(eq(procurements.sourceRecordId, "butb/AU-stale"));
     expect(rows.filter((row) => row.id === healthy[0]?.id)).toHaveLength(1);
+  });
+
+  it("repairs a stale link on the saveCabinet path and keeps hashed documents reachable", async () => {
+    // saveCabinet has its own unchanged-card pre-filter in front of
+    // saveWorkspaceCase — a stale canonical link must break it too, and the
+    // card's hashed documents must move under the resolved canonical row.
+    const store = createSpecialistStore(db);
+    const user = "00000000-0000-4000-8000-000000000986";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values (${user}, 'cab-butb@test.local', 'C', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceId = await store.ensurePersonalWorkspace(user, "C");
+    const profileId = "00000000-0000-4000-8000-000000000987";
+    const legacyId = "00000000-0000-4000-8000-000000000988";
+    await db.execute(sql`
+      insert into procurements (id, source_id, source_record_id, canonical_url, title, kind, status, stage)
+      values (
+        ${legacyId}, 'goszakupki_by', 'butb/AU-cab',
+        'https://zakupki.butb.by/auctions/viewinvitation.html', 'Кресла',
+        'other', 'accepting_bids', 'documents_downloaded'
+      )
+      on conflict do nothing
+    `);
+    const hash = "e".repeat(64);
+    const state = {
+      profiles: [
+        {
+          id: profileId,
+          name: "C",
+          purpose: "",
+          description: "",
+          keywords: ["кресла"],
+          excludeKeywords: [],
+          statuses: ["accepting_bids" as const],
+          excludeSingleSource: false,
+          filters: {},
+          watchNewProcurements: false,
+        },
+      ],
+      activeProfileId: profileId,
+      decisions: [],
+      dismissedInboxIds: [],
+      reviewedIrrelevant: [],
+      archivedSourceIds: [],
+      searchIdsByProfile: {},
+      searchRuns: {},
+    };
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000989",
+      title: "Кресла",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      sourceProcurementId: "butb/AU-cab",
+      live: true,
+      triage: "participate",
+      canonicalProcurementId: legacyId,
+      documents: [
+        {
+          name: "tz.docx",
+          sourceUrl: "https://zakupki.butb.by/auctions/download?id=42&name=tz.docx",
+          hash,
+          sizeBytes: 100,
+          status: "hashed",
+          note: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
+      ],
+    });
+
+    await store.saveCabinet(state, [card], [], workspaceId);
+    const butbRow = (
+      await db
+        .select({ id: procurements.id })
+        .from(procurements)
+        .where(
+          sql`${procurements.sourceId} = 'butb' and ${procurements.sourceRecordId} = 'butb/AU-cab'`,
+        )
+    )[0];
+    expect(butbRow).toBeDefined();
+    expect(await store.hasDocumentHash(workspaceId, hash)).toBe(true);
+
+    // Force the full stale state: the workspace link, the stored card id
+    // AND the already-written document rows all point at the wrong-lane
+    // canonical row — exactly what a pre-fix persist left behind.
+    const staleCard = SpecialistProcurementCard.parse({
+      ...card,
+      canonicalProcurementId: legacyId,
+    });
+    await db
+      .update(workspaceProcurements)
+      .set({ procurementId: legacyId, card: staleCard })
+      .where(
+        and(
+          eq(workspaceProcurements.workspaceId, workspaceId),
+          eq(workspaceProcurements.sourceProcurementId, "butb/AU-cab"),
+        ),
+      );
+    await db
+      .update(documents)
+      .set({ procurementId: legacyId })
+      .where(eq(documents.procurementId, butbRow!.id));
+
+    // Identical card through the cabinet path: the skip compares equal card
+    // JSON — only the link check lets the repair through.
+    await store.saveCabinet(state, [staleCard], [], workspaceId);
+
+    const relinked = await db
+      .select({ procurementId: workspaceProcurements.procurementId })
+      .from(workspaceProcurements)
+      .where(
+        and(
+          eq(workspaceProcurements.workspaceId, workspaceId),
+          eq(workspaceProcurements.sourceProcurementId, "butb/AU-cab"),
+        ),
+      );
+    expect(relinked[0]?.procurementId).toBe(butbRow!.id);
+    // The hashed document is re-linked under the resolved canonical row…
+    const relinkedDocs = await db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.procurementId, butbRow!.id),
+          eq(documents.sourceUrl, "https://zakupki.butb.by/auctions/download?id=42&name=tz.docx"),
+        ),
+      );
+    expect(relinkedDocs).toHaveLength(1);
+    const versions = await db
+      .select({ hash: documentVersions.hash })
+      .from(documentVersions)
+      .where(eq(documentVersions.documentId, relinkedDocs[0]!.id));
+    expect(versions.map((row) => row.hash)).toContain(hash);
+    // …and remains reachable through the cabinet's hash lookup.
+    expect(await store.hasDocumentHash(workspaceId, hash)).toBe(true);
+    expect((await store.loadCases(workspaceId))[0]?.canonicalProcurementId).toBe(butbRow!.id);
   });
 
   it("keeps decision memory per cabinet and past the deleted card", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blobStorageKey,
+  canonicalIdToReuse,
   canonicalJson,
   caseListTimeShouldBump,
   comparableCardJson,
@@ -170,6 +171,50 @@ describe("canonicalJson", () => {
       canonicalJson({ a: { c: "x", d: [2] }, b: 1 }),
     );
     expect(canonicalJson(["а", "б"])).not.toBe(canonicalJson(["б", "а"]));
+  });
+});
+
+describe("canonicalIdToReuse", () => {
+  const pinned = "00000000-0000-4000-8000-0000000000ff";
+
+  it("pins the id while the row behind it carries the same source identity", () => {
+    expect(
+      canonicalIdToReuse(
+        pinned,
+        { sourceId: "butb", sourceRecordId: "butb/AU-1" },
+        "butb",
+        "butb/AU-1",
+      ),
+    ).toBe(pinned);
+  });
+
+  it("pins the id when the row vanished — inserting with it keeps identity", () => {
+    expect(canonicalIdToReuse(pinned, undefined, "butb", "butb/AU-1")).toBe(pinned);
+  });
+
+  it("drops a pin onto a row stored under the legacy goszakupki lane", () => {
+    // A butb/* record persisted before namespaced ids were recognised lives
+    // under (goszakupki_by, butb/…); pinning its id collides with the
+    // primary key outside the (sourceId, sourceRecordId) conflict target.
+    expect(
+      canonicalIdToReuse(
+        pinned,
+        { sourceId: "goszakupki_by", sourceRecordId: "butb/AU-1" },
+        "butb",
+        "butb/AU-1",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("drops a pin onto a row that belongs to a different record", () => {
+    expect(
+      canonicalIdToReuse(
+        pinned,
+        { sourceId: "butb", sourceRecordId: "butb/AU-2" },
+        "butb",
+        "butb/AU-1",
+      ),
+    ).toBeUndefined();
   });
 });
 

@@ -561,6 +561,80 @@ describe("ButbSource.get", () => {
   });
 });
 
+describe("ButbSource documents", () => {
+  const cardId = () => SourceProcurementId.parse(`butb/${firstRow.registryNumber}`);
+
+  it("lists the card's download links as absolute urls", async () => {
+    const client = fakeClient(new Map([[1, registryHtml]]));
+    const source = new ButbSource({ client });
+
+    const answer = await source.getDocuments(cardId());
+
+    expect(answer.documents.length).toBeGreaterThan(0);
+    for (const document of answer.documents) {
+      expect(document.downloadUrl ?? document.sourceUrl).toMatch(
+        /^https:\/\/zakupki\.butb\.by\/auctions\/download\?/,
+      );
+    }
+    // The listing rode the same locate+open session sequence as a card read.
+    expect(client.calls.pages).toEqual([1]);
+    expect(client.calls.links).toHaveLength(1);
+  });
+
+  it("downloads a butb-hosted file through the session client with path and query", async () => {
+    const client = fakeClient(new Map());
+    const paths: string[] = [];
+    const source = new ButbSource({
+      client: {
+        ...client,
+        download: async (path) => {
+          paths.push(path);
+          return {
+            status: 200,
+            url: "https://zakupki.butb.by/auctions/download",
+            bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+            contentType: "application/pdf",
+          };
+        },
+      },
+    });
+
+    const file = await source.download(
+      "https://zakupki.butb.by/auctions/download?id=6116020&name=tz.pdf",
+    );
+
+    expect(paths).toEqual(["/auctions/download?id=6116020&name=tz.pdf"]);
+    expect(file.contentType).toBe("application/pdf");
+    expect(file.bytes.byteLength).toBe(4);
+    // A download is a plain session GET — the card must not be re-opened.
+    expect(client.calls.pages).toEqual([]);
+    expect(client.calls.links).toEqual([]);
+  });
+
+  it("sends a document hosted outside butb to the public downloader", async () => {
+    const client = fakeClient(new Map());
+    const fetched: string[] = [];
+    const source = new ButbSource({
+      client,
+      publicFetch: async (url) => {
+        fetched.push(String(url));
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+        });
+      },
+    });
+
+    const file = await source.download("https://files.example.by/docs/tz.pdf");
+
+    expect(file.bytes.byteLength).toBe(4);
+    expect(fetched).toEqual(["https://files.example.by/docs/tz.pdf"]);
+    // The session lane was not touched for a foreign host.
+    expect(client.calls.pages).toEqual([]);
+    expect(client.calls.links).toEqual([]);
+  });
+});
+
 /** A synthetic registry row with the given date/reg number. */
 function syntheticRow(rowIndex: number, date: string, regNo = "AU20261010396700"): string {
   return `<tr id="fra:reestrAu_row_${rowIndex}"><td><span>${regNo}</span></td>` +

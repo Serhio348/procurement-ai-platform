@@ -100,6 +100,148 @@ describe("createProcurementDocumentIngest", () => {
     expect(blobStore.put).toHaveBeenCalledWith(hash, expect.any(Uint8Array));
   });
 
+  it("routes a butb-namespaced card to the butb lane and reuses hashed files on repeat", async () => {
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-butb-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, hash, bytes);
+    const documentUrl = "https://zakupki.butb.by/auctions/download?id=6116020&name=tz.pdf";
+    const callTool = vi.fn<McpToolCaller["callTool"]>().mockImplementation(async (toolName) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "ТЗ.pdf",
+                sourceUrl: documentUrl,
+                downloadUrl: documentUrl,
+                mimeType: "application/pdf",
+                discoveredAt: "2026-10-15T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        return {
+          structuredContent: {
+            hash,
+            storageKey: `blobs/${hash}`,
+            sizeBytes: bytes.byteLength,
+            contentType: "application/pdf",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({ caller: { callTool }, blobDirectory });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000402",
+      title: "Инструменты",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      sourceProcurementId: "butb/AU-402",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    expect(callTool.mock.calls[0]?.[0]).toBe("procurement.get_documents");
+    expect(callTool.mock.calls[0]?.[1]).toMatchObject({
+      sourceId: SourceId.parse("butb"),
+      sourceProcurementId: "butb/AU-402",
+    });
+    expect(callTool.mock.calls[1]?.[0]).toBe("procurement.download");
+    expect(callTool.mock.calls[1]?.[1]).toMatchObject({
+      sourceId: SourceId.parse("butb"),
+      downloadUrl: documentUrl,
+    });
+    expect(next.documents[0]?.status).toBe("hashed");
+    expect(next.documents[0]?.hash).toBe(hash);
+
+    // Repeat ingest: the same listed URL resolves through the hashed-doc
+    // map — nothing is fetched from the platform a second time.
+    const again = await port.ingest(next, WS);
+    const downloads = callTool.mock.calls.filter((call) => call[0] === "procurement.download");
+    expect(downloads).toHaveLength(1);
+    expect(again.documents).toEqual(next.documents);
+  });
+
+  it("routes a goszakupki-hosted link inside a butb document to the goszakupki lane", async () => {
+    const goszakupkiFile = "https://goszakupki.by/Files/GetFile.aspx?id=777&download=1";
+    const linkDocx = zipEntries({
+      "word/document.xml":
+        '<?xml version="1.0"?><w:document><w:p><w:r><w:t>текст</w:t></w:r></w:p></w:document>',
+      "word/_rels/document.xml.rels":
+        `<Relationships><Relationship Type="http://x/hyperlink" Target="${goszakupkiFile}"/></Relationships>`,
+    });
+    const docxHash = createHash("sha256").update(linkDocx).digest("hex");
+    const linkedBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const linkedHash = createHash("sha256").update(linkedBytes).digest("hex");
+    const blobDirectory = await mkdtemp(path.join(os.tmpdir(), "ingest-cross-"));
+    tmpDirs.push(blobDirectory);
+    await putBlob(blobDirectory, docxHash, linkDocx);
+    await putBlob(blobDirectory, linkedHash, linkedBytes);
+    const butbDocUrl = "https://zakupki.butb.by/auctions/download?id=1&name=link.docx";
+    const callTool = vi.fn<McpToolCaller["callTool"]>(async (toolName, args) => {
+      if (toolName === "procurement.get_documents") {
+        return {
+          structuredContent: {
+            documents: [
+              {
+                name: "link.docx",
+                sourceUrl: butbDocUrl,
+                downloadUrl: butbDocUrl,
+                mimeType: "application/octet-stream",
+                discoveredAt: "2026-10-15T08:00:00.000Z",
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "procurement.download") {
+        const url = (args as { downloadUrl?: string }).downloadUrl ?? "";
+        const isLinked = url === goszakupkiFile;
+        return {
+          structuredContent: {
+            hash: isLinked ? linkedHash : docxHash,
+            storageKey: `blobs/${isLinked ? linkedHash : docxHash}`,
+            sizeBytes: 1,
+            contentType: isLinked ? "application/pdf" : "application/octet-stream",
+          },
+        };
+      }
+      throw new Error(`unexpected tool ${toolName}`);
+    });
+    const port = createProcurementDocumentIngest({ caller: { callTool }, blobDirectory });
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000403",
+      title: "Инструменты",
+      status: "unknown",
+      statusLabel: "приём заявок",
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      sourceProcurementId: "butb/AU-403",
+      live: true,
+    });
+
+    const next = await port.ingest(card, WS);
+
+    const linked = next.documents.find((item) => item.sourceUrl.includes("#link/"));
+    expect(linked?.status).toBe("hashed");
+    expect(linked?.hash).toBe(linkedHash);
+    const linkedCall = callTool.mock.calls.find(
+      (call) =>
+        call[0] === "procurement.download" &&
+        (call[1] as { downloadUrl?: string }).downloadUrl === goszakupkiFile,
+    );
+    // The file lives on goszakupki — its lane must fetch it, even though the
+    // card itself belongs to BUTB.
+    expect(linkedCall?.[1]).toMatchObject({ sourceId: SourceId.parse("goszakupki_by") });
+    expect(callTool.mock.calls[0]?.[1]).toMatchObject({ sourceId: SourceId.parse("butb") });
+  });
+
   it("unpacks a downloaded zip and reads the Word file inside", async () => {
     const inner = zipEntries({
       "word/document.xml":

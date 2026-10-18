@@ -339,6 +339,69 @@ integration("PostgreSQL migrations and invariants", () => {
     expect(await store.hasDocumentHash(workspaceB, "c".repeat(64))).toBe(false);
   });
 
+  it("resaves a butb case whose canonical row predates the source prefix", async () => {
+    // Before namespaced ids were recognised, a `butb/…` card was persisted
+    // under the goszakupki lane. Re-saving that card used to pin the stale
+    // canonical id and crash on the primary key — outside the declared
+    // (source_id, source_record_id) conflict target.
+    const store = createSpecialistStore(db);
+    const user = "00000000-0000-4000-8000-000000000931";
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values (${user}, 'legacy-butb@test.local', 'L', 'x', 'specialist', 'active')
+      on conflict (email) do nothing
+    `);
+    const workspaceId = await store.ensurePersonalWorkspace(user, "L");
+    const legacyId = "00000000-0000-4000-8000-000000000932";
+    await db.execute(sql`
+      insert into procurements (id, source_id, source_record_id, canonical_url, title, kind, status, stage)
+      values (
+        ${legacyId}, 'goszakupki_by', 'butb/AU-legacy',
+        'https://zakupki.butb.by/auctions/viewinvitation.html', 'Насосы',
+        'other', 'accepting_bids', 'discovered'
+      )
+      on conflict do nothing
+    `);
+    const card = SpecialistProcurementCard.parse({
+      id: "00000000-0000-4000-8000-000000000933",
+      title: "Насосы",
+      status: "accepting_bids",
+      statusLabel: "приём",
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      sourceProcurementId: "butb/AU-legacy",
+      live: true,
+      triage: "participate",
+      canonicalProcurementId: legacyId,
+    });
+
+    await store.saveCases([card], workspaceId);
+
+    const canonical = await db
+      .select({ id: procurements.id, sourceId: procurements.sourceId })
+      .from(procurements)
+      .where(eq(procurements.sourceRecordId, "butb/AU-legacy"));
+    const butbRow = canonical.find((row) => row.sourceId === "butb");
+    expect(butbRow).toBeDefined();
+    // The stale lane row stays — merging it is a separate reviewed backfill,
+    // not a hidden side effect of a cabinet write.
+    expect(canonical.some((row) => row.id === legacyId)).toBe(true);
+    const loaded = await store.loadCases(workspaceId);
+    expect(loaded[0]?.canonicalProcurementId).toBe(butbRow?.id);
+    const again = SpecialistProcurementCard.parse({
+      ...card,
+      triage: "monitor",
+      canonicalProcurementId: butbRow!.id,
+    });
+    await store.saveCases([again], workspaceId);
+    const twice = await db
+      .select({ id: procurements.id })
+      .from(procurements)
+      .where(
+        sql`${procurements.sourceId} = 'butb' and ${procurements.sourceRecordId} = 'butb/AU-legacy'`,
+      );
+    expect(twice).toHaveLength(1);
+  });
+
   it("keeps decision memory per cabinet and past the deleted card", async () => {
     const store = createSpecialistStore(db);
     const memory = createPostgresDecisionMemoryStore(db);

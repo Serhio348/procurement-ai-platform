@@ -126,3 +126,25 @@ export function sourceIdFromProcurementId(id: string): SourceId | undefined {
   if (id.startsWith("butb/")) return SourceId.parse("butb");
   return undefined;
 }
+
+/**
+ * Source owning a document download by URL host. A card's file may live on
+ * a different platform than the card itself — a BUTB attachment can name a
+ * `goszakupki.by` file endpoint, and that file must be fetched through the
+ * goszakupki lane, not refused by the card's own lane. Hosts belonging to
+ * no known platform return undefined: the caller keeps its card-lane
+ * fallback, whose public downloader handles foreign hosts.
+ */
+export function sourceIdFromDocumentUrl(url: string): SourceId | undefined {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLocaleLowerCase("en-US");
+  } catch {
+    return undefined;
+  }
+  if (host === "butb.by" || host.endsWith(".butb.by")) return SourceId.parse("butb");
+  if (host === "goszakupki.by" || host.endsWith(".goszakupki.by")) {
+    return SourceId.parse("goszakupki_by");
+  }
+  return undefined;
+}

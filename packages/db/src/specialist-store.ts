@@ -1757,6 +1757,29 @@ async function saveWorkspaceCase(
   }
 }
 
+/**
+ * Pinning `id` on the canonical upsert reuses the row the card already
+ * points at — but only while that row still carries the same
+ * (sourceId, sourceRecordId). Cards persisted before namespaced ids were
+ * recognised stored `butb/…` under the goszakupki lane; pinning such an id
+ * would collide with the primary key outside the declared conflict target
+ * and abort the whole cabinet write. A mismatched pin is dropped instead:
+ * the unique-key upsert resolves the right row or inserts a fresh
+ * canonical one, and `upsertDocumentHashes` re-links the card's hashed
+ * documents under the resolved id.
+ */
+export function canonicalIdToReuse(
+  pinnedId: string,
+  existing: { sourceId: string; sourceRecordId: string } | undefined,
+  sourceId: string,
+  sourceRecordId: string,
+): string | undefined {
+  if (existing === undefined) return pinnedId;
+  return existing.sourceId === sourceId && existing.sourceRecordId === sourceRecordId
+    ? pinnedId
+    : undefined;
+}
+
 async function upsertCanonicalProcurement(
   tx: StoreTx,
   card: SpecialistProcurementCardValue,
@@ -1767,10 +1790,27 @@ async function upsertCanonicalProcurement(
     (card.live ? "goszakupki_by" : "fixture");
   const hashed = card.documents.some((item) => item.hash !== undefined);
   const status = card.status;
+  let pinnedId: string | undefined;
+  if (card.canonicalProcurementId !== undefined) {
+    const pinned = await tx
+      .select({
+        sourceId: procurements.sourceId,
+        sourceRecordId: procurements.sourceRecordId,
+      })
+      .from(procurements)
+      .where(eq(procurements.id, card.canonicalProcurementId))
+      .limit(1);
+    pinnedId = canonicalIdToReuse(
+      card.canonicalProcurementId,
+      pinned[0],
+      sourceId,
+      card.sourceProcurementId,
+    );
+  }
   const rows = await tx
     .insert(procurements)
     .values({
-      ...(card.canonicalProcurementId === undefined ? {} : { id: card.canonicalProcurementId }),
+      ...(pinnedId === undefined ? {} : { id: pinnedId }),
       sourceId,
       sourceRecordId: card.sourceProcurementId,
       canonicalUrl: card.url,

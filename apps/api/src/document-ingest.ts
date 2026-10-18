@@ -5,6 +5,7 @@ import {
   RequestId,
   SourceId,
   SourceProcurementId,
+  sourceIdFromDocumentUrl,
   sourceIdFromProcurementId,
   SpecialistCaseDocument,
   Sha256,
@@ -362,8 +363,14 @@ async function ingestOne(input: {
   };
   try {
     input.progress?.fileDownloading(input.procurementId, input.sourceUrl);
+    // The file's host decides the lane: a card may list or link a document
+    // stored on another platform (BUTB docs reference goszakupki file
+    // endpoints) — sending it to the card's own lane gets refused there.
     const downloaded = await input.client.download(
-      { sourceId: input.sourceId, downloadUrl: input.fetchUrl },
+      {
+        sourceId: sourceIdFromDocumentUrl(input.fetchUrl) ?? input.sourceId,
+        downloadUrl: input.fetchUrl,
+      },
       input.requestId,
     );
     const bytes = await getBlob(input.blobDirectory, downloaded.hash);
@@ -696,7 +703,10 @@ async function fetchLinkedDocument(input: {
   };
   try {
     const downloaded = await ctx.links.client.download(
-      { sourceId: ctx.links.sourceId, downloadUrl: input.link },
+      {
+        sourceId: sourceIdFromDocumentUrl(input.link) ?? ctx.links.sourceId,
+        downloadUrl: input.link,
+      },
       ctx.links.requestId,
     );
     const bytes = await getBlob(ctx.blobDirectory, downloaded.hash);

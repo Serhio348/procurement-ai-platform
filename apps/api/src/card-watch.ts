@@ -3,6 +3,8 @@ import {
   RequestId,
   SourceId,
   SourceProcurementId,
+  sourceIdFromDocumentUrl,
+  sourceIdFromProcurementId,
   type ProcedureCard,
   type SourceId as SourceIdValue,
 } from "@procurement/contracts";
@@ -34,22 +36,13 @@ export interface ProcurementCardWatchOptions {
  * adapter, every other prefix keeps the wired default. This is what lets one
  * watch pass monitor cards from several platforms without splitting the lane.
  */
-function sourceIdFromProcurementId(id: string, fallback: SourceIdValue): SourceIdValue {
-  if (id.startsWith("butb/")) return SourceId.parse("butb");
-  return fallback;
+function sourceIdForCard(id: string, fallback: SourceIdValue): SourceIdValue {
+  return sourceIdFromProcurementId(id) ?? fallback;
 }
 
-/** Downloads route to BUTB only for documents hosted on its domain. */
-function sourceIdFromDocumentUrl(url: string, fallback: SourceIdValue): SourceIdValue {
-  try {
-    const hostname = new URL(url).hostname;
-    if (hostname === "butb.by" || hostname.endsWith(".butb.by")) {
-      return SourceId.parse("butb");
-    }
-  } catch {
-    // Non-URL strings keep the default source — download() validates anyway.
-  }
-  return fallback;
+/** Downloads route to the platform hosting the file, not the card's lane. */
+function sourceIdForDocument(url: string, fallback: SourceIdValue): SourceIdValue {
+  return sourceIdFromDocumentUrl(url) ?? fallback;
 }
 
 /**
@@ -79,7 +72,7 @@ export function createProcurementCardWatch(
       try {
         return await client.get(
           {
-            sourceId: sourceIdFromProcurementId(sourceProcurementId, sourceId),
+            sourceId: sourceIdForCard(sourceProcurementId, sourceId),
             sourceProcurementId: SourceProcurementId.parse(sourceProcurementId),
           },
           RequestId.parse(randomUUID()),
@@ -95,7 +88,7 @@ export function createProcurementCardWatch(
     async probeDocument(sourceUrl) {
       try {
         const downloaded = await client.download(
-          { sourceId: sourceIdFromDocumentUrl(sourceUrl, sourceId), downloadUrl: sourceUrl },
+          { sourceId: sourceIdForDocument(sourceUrl, sourceId), downloadUrl: sourceUrl },
           RequestId.parse(randomUUID()),
         );
         return downloaded.hash;

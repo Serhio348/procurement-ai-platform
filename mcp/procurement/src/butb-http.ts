@@ -1,7 +1,18 @@
 import { Agent, fetch as undiciFetch } from "undici";
 import { readFileSync } from "node:fs";
 import * as tls from "node:tls";
-import { butbPartialUpdate, parseButbViewState, type ButbViewState } from "./butb-parser.js";
+import type { ProcedureStatus } from "@procurement/contracts";
+import {
+  butbPartialUpdate,
+  butbSearchApplied,
+  butbSearchToggleId,
+  butbStatus,
+  butbTableUsable,
+  parseButbSearchForm,
+  parseButbViewState,
+  type ButbSearchForm,
+  type ButbViewState,
+} from "./butb-parser.js";
 import { SourceAccessError, SourceAbortedError, throwIfAborted } from "./source-registry.js";
 
 export interface ButbPage {
@@ -17,11 +28,42 @@ export interface ButbDownload {
   contentType?: string;
 }
 
+/** Criteria the registry's own search form accepts. */
+export interface ButbSearchCriteria {
+  /** «Предмет закупки» — submitted verbatim, one value per submit. */
+  subject: string;
+  /** Normalized statuses — mapped onto the «Состояние» checkboxes by label. */
+  statuses?: ProcedureStatus[];
+  /** «Регистрационный номер» field. */
+  registryNumber?: string;
+  /** «Наименование заказчика (организатора)» field. */
+  buyerName?: string;
+  /** «УНП заказчика (организатора)» field. */
+  buyerUnp?: string;
+}
+
 /** Structural port so tests can fake the session without HTTP. */
 export interface ButbPageClient {
   registryPage(page: number, signal?: AbortSignal): Promise<ButbPage>;
   openCard(cardLinkId: string, signal?: AbortSignal): Promise<ButbPage>;
   download(path: string, signal?: AbortSignal): Promise<ButbDownload>;
+  /**
+   * Page `page` of the registry filtered by the site's own search form.
+   * The criteria are applied on first use and re-applied whenever they
+   * change or the session loses them (a session rebuild drops both the
+   * filter and the restored columns). Implementations that cannot drive
+   * the search form omit the method — callers fall back to a local scan.
+   */
+  filteredPage?(
+    criteria: ButbSearchCriteria,
+    page: number,
+    signal?: AbortSignal,
+  ): Promise<ButbPage>;
+  /**
+   * Drops an applied search filter and the session that carries it, so the
+   * next registry read starts from a clean unfiltered view.
+   */
+  clearSearch?(): void;
   /**
    * Runs `fn` holding the session lock. A card link id is valid only while
    * the session's table shows its row, so «scan pages → openCard» must run
@@ -44,11 +86,16 @@ export interface ButbPageClient {
  *     302-redirects to `/auctions/viewinvitation.html` — the card exists
  *     only inside the session.
  *
- * The search panel is intentionally unused: expanding it permanently
- * degrades the session's table to a single «Вид закупки» column, so the
- * source filters rows locally instead. Returning to the registry after a
- * card page degrades the table the same way — once a card was opened the
- * session is finished and a fresh one must be bootstrapped.
+ * The registry's own «Предмет закупки» search is usable despite a quirk:
+ * expanding the panel — and every «Искать» submit — resets the session's
+ * column selection, degrading the table to a single «Вид закупки» column.
+ * A full postback on the column menu's «Сохранить» with all columns ticked
+ * restores the table while the criteria stay applied, so the sequence is
+ * expand → submit → restore. The criteria live in the session: after a
+ * session rebuild `filteredPage` re-runs the whole sequence before paging.
+ * Returning to the registry after a card page degrades the table the same
+ * way — once a card was opened the session is finished and a fresh one
+ * must be bootstrapped.
  */
 export interface ButbHttpClientOptions {
   baseUrl?: string;
@@ -103,6 +150,17 @@ export class ButbHttpClient implements ButbPageClient {
   #view: "registry" | "card" = "registry";
   /** Page the session's registry table actually shows (detected, not asked). */
   #currentPage: number | undefined;
+  /**
+   * Search-form session state. Expanding the panel (and every «Искать»
+   * submit) degrades the table until the columns are re-saved — these
+   * flags track which part of the expand → submit → restore sequence the
+   * CURRENT session already ran, so a rebuilt session re-runs all of it.
+   */
+  #searchToggleId: string | undefined;
+  #searchExpanded = false;
+  #searchForm: ButbSearchForm | undefined;
+  /** JSON of the criteria the session's table is currently filtered by. */
+  #appliedCriteriaJson: string | undefined;
   /** Whole-operation lock; #queue only paces individual requests. */
   #operationQueue: Promise<void> = Promise.resolve();
   /** >0 while inside withSession — inner calls skip the lock. */
@@ -139,12 +197,54 @@ export class ButbHttpClient implements ButbPageClient {
   async registryPage(page: number, signal?: AbortSignal): Promise<ButbPage> {
     if (page < 1) throw new Error("registryPage pages are 1-based");
     return this.#serialized(() => this.#guarded(async () => {
-      if (this.#view === "card") this.#resetSession();
+      // A session that ever ran the search panel holds a degraded table —
+      // expand and every submit reset the column selection. Plain registry
+      // reads need a clean session.
+      if (this.#view === "card" || this.#searchExpanded) this.#resetSession();
       const boot = await this.#ensureSession(signal);
       if (boot !== undefined && this.#currentPage === page) return boot;
       const body = await this.#pageChange(page, signal);
       return { status: 200, url: this.#registryUrl(), body };
     }, signal));
+  }
+
+  /**
+   * Page `page` of the registry filtered through the site's own search
+   * form. First call applies the criteria (expand → submit → restore
+   * columns); later calls with the same criteria just pageChange over the
+   * filtered model. New criteria re-submit the form — the session keeps
+   * the panel open, so expansion is not repeated. If the session died
+   * between calls, the whole sequence re-runs before the page read.
+   */
+  async filteredPage(
+    criteria: ButbSearchCriteria,
+    page: number,
+    signal?: AbortSignal,
+  ): Promise<ButbPage> {
+    if (page < 1) throw new Error("filteredPage pages are 1-based");
+    return this.#serialized(() => this.#guarded(async () => {
+      if (this.#view === "card") this.#resetSession();
+      const wanted = JSON.stringify(criteria);
+      await this.#ensureSession(signal);
+      if (this.#appliedCriteriaJson !== wanted) {
+        const body = await this.#applySearch(criteria, wanted, signal);
+        if (page === 1) return { status: 200, url: this.#registryUrl(), body };
+      }
+      const body = await this.#pageChange(page, signal);
+      return { status: 200, url: this.#registryUrl(), body };
+    }, signal));
+  }
+
+  /**
+   * Drops the session whenever it carries search-panel state. The filtered
+   * table and restored columns live only inside it, so there is nothing
+   * cheaper to salvage — and a leftover filter would silently corrupt the
+   * next plain registry read (e.g. a card locate).
+   */
+  clearSearch(): void {
+    if (this.#searchExpanded || this.#appliedCriteriaJson !== undefined) {
+      this.#resetSession();
+    }
   }
 
   /**
@@ -285,6 +385,8 @@ export class ButbHttpClient implements ButbPageClient {
   /** Adopts JSF state and records which registry page was actually rendered. */
   #adoptRegistry(body: string): void {
     this.#adoptState(body);
+    const toggle = butbSearchToggleId(body);
+    if (toggle !== undefined) this.#searchToggleId = toggle;
     this.#view = "registry";
     this.#currentPage = detectRegistryPage(body) ?? this.#currentPage ?? 1;
   }
@@ -299,6 +401,10 @@ export class ButbHttpClient implements ButbPageClient {
     this.#cookies.clear();
     this.#currentPage = undefined;
     this.#view = "registry";
+    this.#searchToggleId = undefined;
+    this.#searchExpanded = false;
+    this.#searchForm = undefined;
+    this.#appliedCriteriaJson = undefined;
   }
 
   #invalidateSession(): void {
@@ -384,9 +490,117 @@ export class ButbHttpClient implements ButbPageClient {
     return card;
   }
 
+  /**
+   * expand → submit → restore. The table degrades twice in the sequence —
+   * at panel expansion and at every «Искать» submit — so the column save
+   * runs after every submit. Any unexpected markup is reported as a dead
+   * view: `#guarded` rebuilds the session and replays the whole sequence
+   * once, which is the only recovery the server-side view allows.
+   */
+  async #applySearch(
+    criteria: ButbSearchCriteria,
+    wantedJson: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    let form = this.#searchForm;
+    if (!this.#searchExpanded || form === undefined) {
+      const toggle = this.#searchToggleId;
+      if (toggle === undefined) {
+        throw new SourceAccessError("butb", "registry page carries no search panel toggle");
+      }
+      const expanded = await this.#post(
+        this.#requireState(),
+        { "fra:j_idcl": toggle, [toggle]: toggle },
+        { ajax: false },
+        signal,
+      );
+      const parsed = parseButbSearchForm(expanded.body);
+      if (parsed === undefined) {
+        throw new SourceAccessError("butb", "search panel markup not recognized");
+      }
+      this.#adoptState(expanded.body);
+      form = parsed;
+      this.#searchForm = parsed;
+      this.#searchExpanded = true;
+    }
+    const submitted = await this.#post(
+      this.#requireState(),
+      this.#searchFields(form, criteria),
+      { ajax: false },
+      signal,
+    );
+    if (!butbSearchApplied(submitted.body)) throw new ButbViewExpiredError();
+    this.#adoptState(submitted.body);
+
+    const restored = await this.#post(
+      this.#requireState(),
+      this.#columnFields(form),
+      { ajax: false },
+      signal,
+    );
+    if (!butbTableUsable(restored.body)) throw new ButbViewExpiredError();
+    this.#adoptState(restored.body);
+    this.#view = "registry";
+    this.#currentPage = detectRegistryPage(restored.body) ?? 1;
+    this.#appliedCriteriaJson = wantedJson;
+    return restored.body;
+  }
+
+  /**
+   * Submit fields for «Искать». Every discovered text field is sent —
+   * empty when the criteria does not use it — because an unset field would
+   * keep the value a previous submit left in the session. Statuses map by
+   * checkbox label through the same butbStatus the row parser uses, so the
+   * native filter and the local row filter agree on what counts.
+   */
+  #searchFields(
+    form: ButbSearchForm,
+    criteria: ButbSearchCriteria,
+  ): Record<string, string | string[]> {
+    const fields: Record<string, string | string[]> = {
+      "fra:j_idcl": form.submitId,
+      [form.submitId]: form.submitValue,
+      [form.subjectField]: criteria.subject,
+    };
+    if (form.regNumberField !== undefined) {
+      fields[form.regNumberField] = criteria.registryNumber ?? "";
+    }
+    if (form.buyerNameField !== undefined) {
+      fields[form.buyerNameField] = criteria.buyerName ?? "";
+    }
+    if (form.buyerUnpField !== undefined) {
+      fields[form.buyerUnpField] = criteria.buyerUnp ?? "";
+    }
+    if (
+      form.statusField !== undefined &&
+      criteria.statuses !== undefined &&
+      criteria.statuses.length > 0
+    ) {
+      const wanted = new Set(criteria.statuses);
+      const values = [
+        ...new Set(
+          form.statusValues
+            .filter((entry) => wanted.has(butbStatus(entry.label)))
+            .map((entry) => entry.value),
+        ),
+      ];
+      if (values.length > 0) fields[form.statusField] = values;
+    }
+    return fields;
+  }
+
+  /** The column menu's «Сохранить» postback — every column checkbox ticked. */
+  #columnFields(form: ButbSearchForm): Record<string, string | string[]> {
+    const fields: Record<string, string | string[]> = {
+      "fra:j_idcl": form.columnSaveId,
+    };
+    for (const name of form.columnCheckboxes) fields[name] = "on";
+    return fields;
+  }
+
   async #post(
     state: ButbViewState,
-    fields: Record<string, string>,
+    fields: Record<string, string | string[]>,
     options: { ajax: boolean },
     signal?: AbortSignal,
   ): Promise<{ status: number; url: string; body: string; redirectedToCard: boolean }> {
@@ -397,7 +611,11 @@ export class ButbHttpClient implements ButbPageClient {
     params.set("javax.faces.ViewState", state.viewState);
     if (state.iceWindow !== undefined) params.set("ice.window", state.iceWindow);
     if (state.iceView !== undefined) params.set("ice.view", state.iceView);
-    for (const [key, value] of Object.entries(fields)) params.set(key, value);
+    for (const [key, value] of Object.entries(fields)) {
+      // Checkbox groups post one same-name pair per ticked value.
+      if (Array.isArray(value)) for (const item of value) params.append(key, item);
+      else params.set(key, value);
+    }
 
     const url = new URL(action, this.#baseUrl);
     const cookie = this.#cookieHeader();

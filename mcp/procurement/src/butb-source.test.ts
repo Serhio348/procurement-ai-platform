@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SearchQuery, SourceProcurementId } from "@procurement/contracts";
 import { ButbSource } from "./butb-source.js";
-import { ButbViewExpiredError, type ButbPage, type ButbPageClient } from "./butb-http.js";
+import {
+  ButbViewExpiredError,
+  type ButbPage,
+  type ButbPageClient,
+  type ButbSearchCriteria,
+} from "./butb-http.js";
 import { parseButbRegistryRows } from "./butb-parser.js";
 
 const registryHtml = readFileSync(
@@ -410,6 +415,335 @@ describe("ButbSource.search", () => {
     expect(answer.hits.length).toBeGreaterThan(0);
     expect(answer.hasMore).toBe(false);
     expect(answer.scanCursor).toBeUndefined();
+  });
+});
+
+describe("ButbSource native subject search", () => {
+  /** Fake client that answers the site's own filtered model per term. */
+  function nativeClient(
+    filtered: Map<string, Map<number, string>>,
+    plain?: Map<number, string>,
+  ) {
+    const calls = {
+      filtered: [] as { subject: string; page: number; criteria: ButbSearchCriteria }[],
+      pages: [] as number[],
+      cleared: 0,
+      links: [] as string[],
+    };
+    const client: ButbPageClient & { calls: typeof calls } = {
+      calls,
+      async registryPage(p) {
+        calls.pages.push(p);
+        return page(plain?.get(p) ?? "<table></table>");
+      },
+      async filteredPage(criteria, p) {
+        calls.filtered.push({ subject: criteria.subject, page: p, criteria });
+        const body = filtered.get(criteria.subject)?.get(p);
+        return page(body ?? "<table></table>");
+      },
+      clearSearch() {
+        calls.cleared += 1;
+      },
+      async openCard(linkId) {
+        calls.links.push(linkId);
+        return { status: 200, url: "https://zakupki.butb.by/auctions/viewinvitation.html", body: cardHtml };
+      },
+      async download() {
+        return { status: 200, url: "", bytes: new Uint8Array([1]) };
+      },
+      withSession: (fn) => fn(),
+    };
+    return client;
+  }
+
+  /** A filtered page that reports its own filtered total to the paginator. */
+  function filteredBody(rows: string, totalRecords: number): string {
+    return (
+      `<table><tbody>${rows}</tbody></table>` +
+      `<script>var w = {"paginator":new YAHOO.widget.Paginator(` +
+      `{"rowsPerPage":20,"totalRecords":${totalRecords}})};</script>`
+    );
+  }
+
+  /**
+   * A full non-final filtered page — the parser refuses partial reads, so
+   * every page before the last must carry the full 20 rows, each with its
+   * own registry number (candidates dedupe on it).
+   */
+  function fullRows(base: number, firstRegNo: string, date = "20.10.2026"): string {
+    return Array.from({ length: 20 }, (_v, i) =>
+      syntheticRow(
+        base + i,
+        date,
+        i === 0 ? firstRegNo : `AU20261010${String(39000 + base + i)}`,
+      ),
+    ).join("");
+  }
+
+  it("searches each term natively and merges the candidate sets", async () => {
+    const filtered = new Map<string, Map<number, string>>([
+      [
+        "подстанция",
+        new Map([[1, filteredBody(
+          syntheticRow(0, "20.10.2026", "AU20261020000001") +
+            syntheticRow(1, "20.10.2026", "AU20261020000002"),
+          2,
+        )]]),
+      ],
+      [
+        "нку",
+        new Map([[1, filteredBody(
+          syntheticRow(0, "20.10.2026", "AU20261020000002") +
+            syntheticRow(1, "19.10.2026", "AU20261019000003"),
+          2,
+        )]]),
+      ],
+    ]);
+    const client = nativeClient(filtered);
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({
+        keywords: ["подстанция", "нку"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+      }),
+    );
+
+    // One filtered read per term — the advertised total closes each model.
+    expect(client.calls.filtered.map((call) => [call.subject, call.page])).toEqual([
+      ["подстанция", 1],
+      ["нку", 1],
+    ]);
+    // The plain registry is never scanned on the native path.
+    expect(client.calls.pages).toEqual([]);
+    const ids = answer.hits.map((hit) => hit.sourceProcurementId);
+    expect(ids).toHaveLength(3);
+    const dup = answer.hits.find((hit) => hit.sourceProcurementId === "butb/AU20261020000002")!;
+    expect(dup.matchedSearchTerms).toEqual(["подстанция", "нку"]);
+    expect(answer.hasMore).toBe(false);
+    // The session's search state is released after every native pass.
+    expect(client.calls.cleared).toBe(1);
+  });
+
+  it("finds rows whose title never mentions the term — the subject is the point", async () => {
+    // AU…001's title is generic («Инструментарий»): a title scan can never
+    // see it, yet the site's subject search returns it for «подстанция».
+    // This is the user's AU20261007394983 case end-to-end.
+    const filtered = new Map<string, Map<number, string>>([
+      ["подстанция", new Map([[1, filteredBody(syntheticRow(0, "20.10.2026", "AU20261020000001"), 1)]])],
+    ]);
+    const client = nativeClient(filtered);
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({ keywords: ["подстанция"], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    expect(answer.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "butb/AU20261020000001",
+    ]);
+    expect(answer.hits[0]!.matchedSearchTerms).toEqual(["подстанция"]);
+  });
+
+  it("passes statuses, buyer and registry number to the native form", async () => {
+    const seen: ButbSearchCriteria[] = [];
+    const filtered = new Map<string, Map<number, string>>([
+      ["инструментарий", new Map([[1, filteredBody(syntheticRow(0, "20.10.2026"), 1)]])],
+    ]);
+    const client = nativeClient(filtered);
+    const source = new ButbSource({ client });
+    await source.search(
+      query({
+        keywords: ["инструментарий"],
+        statuses: ["accepting_bids"],
+        buyerText: "заказ",
+        buyerUnp: "123456789",
+        procurementNumber: "AU2026",
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+      }),
+    );
+    for (const call of client.calls.filtered) seen.push(call.criteria);
+    expect(seen).toEqual([
+      {
+        subject: "инструментарий",
+        statuses: ["accepting_bids"],
+        registryNumber: "AU2026",
+        buyerName: "заказ",
+        buyerUnp: "123456789",
+      },
+    ]);
+  });
+
+  it("hands back a cursor on truncation and a fresh instance reaches the tail", async () => {
+    const filtered = new Map<string, Map<number, string>>([
+      [
+        "инструментарий",
+        new Map([
+          [1, filteredBody(fullRows(0, "AU20261020000001"), 21)],
+          [2, filteredBody(syntheticRow(20, "19.10.2026", "AU20261019000002"), 21)],
+        ]),
+      ],
+    ]);
+    const shallow = new ButbSource({ client: nativeClient(filtered), maxSearchPages: 1 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    expect(first.hits).toHaveLength(20);
+    expect(first.hits.map((hit) => hit.sourceProcurementId)).toContain(
+      "butb/AU20261020000001",
+    );
+    expect(first.hasMore).toBe(true);
+    expect(first.scanCursor).toBeDefined();
+
+    // Resume on a NEW source: the window is re-read and the already-served
+    // candidates are skipped by the cursor's returned-count.
+    const resumed = new ButbSource({ client: nativeClient(filtered) });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    expect(second.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "butb/AU20261019000002",
+    ]);
+    expect(second.hasMore).toBe(false);
+    expect(second.scanCursor).toBeUndefined();
+  });
+
+  it("paginates the filtered model until the advertised total is read", async () => {
+    const filtered = new Map<string, Map<number, string>>([
+      [
+        "инструментарий",
+        new Map([
+          [1, filteredBody(fullRows(0, "AU20261020000001"), 21)],
+          [2, filteredBody(syntheticRow(20, "19.10.2026", "AU20261019000002"), 21)],
+        ]),
+      ],
+    ]);
+    const client = nativeClient(filtered);
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    expect(client.calls.filtered.map((call) => call.page)).toEqual([1, 2]);
+    expect(answer.hasMore).toBe(false);
+    expect(answer.hits).toHaveLength(21);
+  });
+
+  it("falls back to the registry scan when the search form broke", async () => {
+    const plain = new Map<number, string>([
+      [1, registryHtml],
+      [2, "<table></table>"],
+    ]);
+    const calls = { cleared: 0 };
+    const client: ButbPageClient & { calls: typeof calls; pages: number[] } = {
+      calls,
+      pages: [] as number[],
+      async registryPage(p) {
+        (this as { pages: number[] }).pages.push(p);
+        return page(plain.get(p) ?? "<table></table>");
+      },
+      async filteredPage() {
+        throw new Error("search panel markup not recognized");
+      },
+      clearSearch() {
+        calls.cleared += 1;
+      },
+      async openCard() {
+        return { status: 200, url: "", body: cardHtml };
+      },
+      async download() {
+        return { status: 200, url: "", bytes: new Uint8Array([1]) };
+      },
+      withSession: (fn) => fn(),
+    };
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({
+        keywords: [firstRow.title.split(" ")[0]!],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 10,
+      }),
+    );
+    // The form threw — the title scan still answered honestly.
+    expect(client.pages.length).toBeGreaterThan(0);
+    expect(answer.hits.length).toBeGreaterThan(0);
+    expect(calls.cleared).toBe(1);
+  });
+
+  it("treats a scan-path cursor as unusable for a native window", async () => {
+    // Get a real scan cursor by truncating the title scan.
+    const plain = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, syntheticPage(20, "18.10.2026", "AU20261018000002")],
+    ]);
+    const scanOnly = fakeClient(plain);
+    const truncated = new ButbSource({ client: scanOnly, maxSearchPages: 1 });
+    const first = await truncated.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 400 }),
+    );
+    expect(first.scanCursor).toBeDefined();
+
+    // Feed it to a native search: no returned-count in it, so the whole
+    // filtered window is re-read — resuming by it would lose candidates.
+    const filtered = new Map<string, Map<number, string>>([
+      ["инструментарий", new Map([[1, filteredBody(syntheticRow(0, "20.10.2026", "AU20261020000009"), 1)]])],
+    ]);
+    const native = new ButbSource({ client: nativeClient(filtered) });
+    const second = await native.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 400,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    expect(second.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "butb/AU20261020000009",
+    ]);
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("treats a native cursor as unusable for a registry scan", async () => {
+    // The form worked yesterday and died today: the window's cursor must
+    // not anchor the fallback scan — it has no row position to anchor on.
+    const filtered = new Map<string, Map<number, string>>([
+      [
+        "инструментарий",
+        new Map([
+          [1, filteredBody(fullRows(0, "AU20261020000001"), 21)],
+        ]),
+      ],
+    ]);
+    const shallow = new ButbSource({ client: nativeClient(filtered), maxSearchPages: 1 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    expect(first.scanCursor).toBeDefined();
+
+    // Now the client lost its form — the same cursor must not freeze the
+    // scan in its head phase: a fresh scan reads the head instead.
+    const plain = new Map<number, string>([
+      [1, syntheticPage(0, "20.10.2026", "AU20261020000001")],
+      [2, "<table></table>"],
+    ]);
+    const scanOnly = fakeClient(plain);
+    const resumed = new ButbSource({ client: scanOnly });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    expect(scanOnly.calls.pages).toEqual([1, 2]);
+    expect(second.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "butb/AU20261020000001",
+    ]);
+    expect(second.hasMore).toBe(false);
   });
 });
 

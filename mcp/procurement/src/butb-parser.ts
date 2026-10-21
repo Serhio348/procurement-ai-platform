@@ -28,9 +28,13 @@ const TIME_ZONE = "Europe/Minsk";
  *    `<update id="fra:reestrAu"><![CDATA[…]]>` carries the same table.
  *  - The row name link posts back `{linkId: linkId}` and the site 302s to
  *    `/auctions/viewinvitation.html`; the opened card lives in the session.
- *  - Expanding the registry's search panel degrades the table to a single
- *    «Вид закупки» column for the rest of the session — so the adapter
- *    scans the registry and filters locally instead of using that form.
+ *  - Expanding the registry's search panel — and every «Искать» submit —
+ *    resets the session's column selection, degrading the table to a single
+ *    «Вид закупки» column. A full postback on the column menu's «Сохранить»
+ *    with every column checkbox ticked restores the table WITHOUT losing
+ *    the applied criteria: the filtered model keeps its rows, total and
+ *    pagination, and the restored table gains one extra «Регион
+ *    заказчика/организатора» column (12 cells per row).
  */
 
 export interface ButbRegistryRow {
@@ -47,6 +51,8 @@ export interface ButbRegistryRow {
   publishedAt?: PlatformInstant;
   amount?: PlatformAmount;
   buyerName?: string;
+  /** «Регион заказчика/организатора» — only the restored filtered table carries this column. */
+  buyerRegion?: string;
   financing?: string;
   bidsDeadline?: PlatformInstant;
   auctionAt?: PlatformInstant;
@@ -112,6 +118,142 @@ export function butbTotalRecords(html: string): number | undefined {
 }
 
 /**
+ * The «Раскрыть/Закрыть форму поиска» link posts its component id through
+ * `fra:j_idcl` — extract that id from the link's onclick. Present on every
+ * registry render (the label toggles but the component stays the same).
+ */
+export function butbSearchToggleId(html: string): string | undefined {
+  const link = html.match(
+    /<a[^>]*onclick="([^"]*)"[^>]*>[^<]*(?:Раскрыть|Закрыть) форму поиска/,
+  );
+  if (link?.[1] === undefined) return undefined;
+  return link[1].match(/form\['fra:j_idcl'\]\.value='([^']+)'/)?.[1];
+}
+
+/** Component ids of the registry's search form, discovered by field labels. */
+export interface ButbSearchForm {
+  /** Input name of «Предмет закупки». */
+  subjectField: string;
+  /** Input name of «Регистрационный номер», when discovered. */
+  regNumberField?: string;
+  /** Input name of «Наименование заказчика (организатора)». */
+  buyerNameField?: string;
+  /** Input name of «УНП заказчика (организатора)». */
+  buyerUnpField?: string;
+  /** Component id of the «Искать» submit. */
+  submitId: string;
+  /** Its rendered value («Искать») — posted back as name=value. */
+  submitValue: string;
+  /** Checkbox group name of «Состояние», when discovered. */
+  statusField?: string;
+  /** Raw checkbox label → posted value («подача предложений / документов» → "2"). */
+  statusValues: { label: string; value: string }[];
+  /** Checkbox names of the «Столбцы» column menu — ticking all restores the table. */
+  columnCheckboxes: string[];
+  /** Component id of the column menu's «Сохранить» action. */
+  columnSaveId: string;
+}
+
+/**
+ * Reads the expanded registry search form. JSF generates opaque component
+ * ids (`fra:j_idt216`) that renumber across site deployments, so fields are
+ * discovered by their labels instead of being hardcoded. Returns undefined
+ * when the required pieces are missing — the caller treats that as an
+ * unusable form, not as a reason to guess ids.
+ */
+export function parseButbSearchForm(html: string): ButbSearchForm | undefined {
+  const $ = cheerio.load(html);
+  // The whole content sits inside one giant td, so «the cell's text» is
+  // useless — the label is the <span> immediately before the input.
+  const fieldByLabel = (needle: string): string | undefined => {
+    let found: string | undefined;
+    $("input.iceInpTxt[name^='fra:']").each((_i, element) => {
+      if (found !== undefined) return;
+      const name = $(element).attr("name");
+      if (name === undefined) return;
+      const label = normalizeLabel($(element).prev().text());
+      if (label.includes(needle)) found = name;
+    });
+    return found;
+  };
+
+  const subjectField = fieldByLabel("предмет закупки");
+  const regNumberField = fieldByLabel("регистрационный номер");
+  const buyerNameField = fieldByLabel("наименование заказчика");
+  const buyerUnpField = fieldByLabel("унп заказчика");
+  const submit = $("input[type='submit']").filter(
+    (_i, element) => ($(element).attr("value") ?? "").trim() === "Искать",
+  );
+  const submitId = submit.first().attr("name");
+  const submitValue = submit.first().attr("value") ?? "Искать";
+
+  // Column checkboxes are the only inputs whose name carries a nested row
+  // index (`fra:_t326:3:_t329`); the «Сохранить» link assigns its own id in
+  // the onclick (`self.id = 'fra:_t331'`) right before the ICEfaces submit.
+  const columnCheckboxes = [
+    ...new Set(
+      [...html.matchAll(/name="(fra:_t\d+:\d+:_t\d+)"/g)].map((match) => match[1]!),
+    ),
+  ];
+  const columnSaveId = html.match(
+    /<a[^>]*onclick="[^"]*self\.id = '(fra:[^']+)'[^"]*"[^>]*>[\s\S]*?Сохранить/,
+  )?.[1];
+
+  if (
+    subjectField === undefined ||
+    submitId === undefined ||
+    columnSaveId === undefined ||
+    columnCheckboxes.length === 0
+  ) {
+    return undefined;
+  }
+
+  // Checkbox labels live in <label for="inputId"> — reliable, unlike the
+  // sibling text the whole-page td would concatenate into one blob. The
+  // «Состояние» group is identified by containing «подача предложений»,
+  // not by its generated name.
+  const groupByName = new Map<string, { label: string; value: string }[]>();
+  $("input[type='checkbox'][name][id][value]").each((_i, element) => {
+    const name = $(element).attr("name")!;
+    const value = $(element).attr("value")!;
+    const label = normalizeLabel($(`label[for='${$(element).attr("id")}']`).text());
+    if (label.length === 0) return;
+    const entries = groupByName.get(name) ?? [];
+    entries.push({ label, value });
+    groupByName.set(name, entries);
+  });
+  const statusGroup = [...groupByName.entries()].find(([_name, entries]) =>
+    entries.some((entry) => entry.label.includes("подача предложений")),
+  );
+
+  return {
+    subjectField,
+    ...(regNumberField === undefined ? {} : { regNumberField }),
+    ...(buyerNameField === undefined ? {} : { buyerNameField }),
+    ...(buyerUnpField === undefined ? {} : { buyerUnpField }),
+    submitId,
+    submitValue,
+    ...(statusGroup === undefined ? {} : { statusField: statusGroup[0] }),
+    statusValues: statusGroup?.[1] ?? [],
+    columnCheckboxes,
+    columnSaveId,
+  };
+}
+
+/** The applied-criteria banner appears only after a successful «Искать». */
+export function butbSearchApplied(html: string): boolean {
+  return /Критерии поиска/.test(html);
+}
+
+/**
+ * A usable registry table renders ten-plus column headers; the degraded
+ * post-search state keeps exactly one («Вид закупки»).
+ */
+export function butbTableUsable(html: string): boolean {
+  return (html.match(/ui-header-text/g) ?? []).length >= 10;
+}
+
+/**
  * Registry rows of `fra:reestrAu`. Works on the full page render and on the
  * HTML embedded in a pageChange `<update>` block alike — the table markup is
  * identical. Rows whose name link is missing are skipped: without its JSF id
@@ -148,6 +290,11 @@ function registryRow(
   if (registryNumber === undefined || !REGISTRY_NUMBER.test(registryNumber)) {
     return undefined;
   }
+  // The restored filtered table carries one more column than the plain
+  // registry: «Регион заказчика/организатора» at index 6 shifts every later
+  // cell by one. A 12-cell row is the filtered shape, 11 the plain one.
+  const shift = cells.length >= 12 ? 1 : 0;
+  const buyerRegion = shift === 1 ? emptyToUndefined(cells[6]) : undefined;
   // The second number line is «icetrade / ГИАС» — «- / 4828385» or «- / -».
   const secondary = numberCell
     .replace(registryNumber, "")
@@ -156,11 +303,11 @@ function registryRow(
   const publishedAt = parseInstant(cells[3]);
   const amount = parseAmount(cells[4]);
   const buyerName = emptyToUndefined(cells[5]);
-  const financing = emptyToUndefined(cells[6]);
-  const bidsDeadline = parseInstant(cells[7]);
-  const auctionAt = parseInstant(cells[8]);
-  const sourceStatus = emptyToUndefined(cells[9]);
-  const completedAt = parseInstant(cells[10]);
+  const financing = emptyToUndefined(cells[6 + shift]);
+  const bidsDeadline = parseInstant(cells[7 + shift]);
+  const auctionAt = parseInstant(cells[8 + shift]);
+  const sourceStatus = emptyToUndefined(cells[9 + shift]);
+  const completedAt = parseInstant(cells[10 + shift]);
   return {
     rowIndex: Number(linkMatch[1]),
     cardLinkId: linkId,
@@ -171,6 +318,7 @@ function registryRow(
     ...(publishedAt === undefined ? {} : { publishedAt }),
     ...(amount === undefined ? {} : { amount }),
     ...(buyerName === undefined ? {} : { buyerName }),
+    ...(buyerRegion === undefined ? {} : { buyerRegion }),
     ...(financing === undefined ? {} : { financing }),
     ...(bidsDeadline === undefined ? {} : { bidsDeadline }),
     ...(auctionAt === undefined ? {} : { auctionAt }),

@@ -14,7 +14,12 @@ import {
   type SourceProcurementId,
 } from "@procurement/contracts";
 import { silentLogger, type Logger } from "@procurement/observability";
-import { ButbViewExpiredError, type ButbPage, type ButbPageClient } from "./butb-http.js";
+import {
+  ButbViewExpiredError,
+  type ButbPage,
+  type ButbPageClient,
+  type ButbSearchCriteria,
+} from "./butb-http.js";
 import {
   butbRegistryHit,
   butbRegistryPublishDate,
@@ -32,6 +37,7 @@ import {
   type PublicDocumentationFetch,
 } from "./public-download.js";
 import {
+  SourceAbortedError,
   SourceAccessError,
   SourceRecordNotFoundError,
   throwIfAborted,
@@ -67,13 +73,22 @@ const PAGE_SIZE = 20;
 const POSITION_CACHE_LIMIT = 10_000;
 
 /**
- * BUTB adapter. The site has no usable server-side subject search for an
- * anonymous reader — expanding the registry's search panel degrades the
- * session's table to a single «Вид закупки» column (verified live). Instead
+ * BUTB adapter. The site's own «Предмет закупки» search is the primary
+ * retrieval path: each profile term is submitted to the registry's search
+ * form, the degraded table columns are restored by re-saving the column
+ * selection, and the filtered model is paged like the plain registry —
+ * this reaches procedures whose subject lives only inside the card, where
+ * a registry-title substring filter can never see them (verified live:
+ * the title scan matched 0 real rows over ~600 records, all hits were
+ * «КРУ»/«НКУ»/«ТП» inside unrelated words).
+ *
+ * Fallback: when the client cannot drive the search form (a transport
+ * without `filteredPage`, or the form's markup changed beyond discovery),
  * the adapter walks the registry pages newest-first — the table is sorted
  * by publish date — and applies the profile terms as a local title filter.
- * The watermark (`publishedFrom`) bounds the scan exactly like the goszakupki
- * source's own page bound: reading stops as soon as a page falls behind it.
+ * The watermark (`publishedFrom`) bounds the scan exactly like the
+ * goszakupki source's own page bound: reading stops as soon as a page
+ * falls behind it.
  */
 export class ButbSource implements ProcurementSourcePort {
   readonly sourceId = SourceId.parse("butb");
@@ -120,6 +135,30 @@ export class ButbSource implements ProcurementSourcePort {
     ctx?: ProcurementCallContext,
   ): Promise<ProcurementSearchResponse> {
     const terms = query.keywords.map((term) => term.trim()).filter((term) => term.length > 0);
+    // The site's subject search only takes one string — with no terms at
+    // all there is nothing to submit, so termless queries keep the scan.
+    if (terms.length > 0 && typeof this.#client.filteredPage === "function") {
+      try {
+        return await this.#nativeSearch(query, ctx);
+      } catch (error) {
+        if (error instanceof SourceAbortedError) throw error;
+        // The form contract broke — the registry scan still answers the
+        // query (narrower, but honest) instead of failing the whole search.
+        this.#logger.warn("butb subject search failed — registry scan fallback", {
+          component: "butb-source",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        // Whatever state the search left in the session — expanded panel,
+        // active criteria, degraded columns — must not leak into the
+        // fallback scan or the next card locate.
+        try {
+          this.#client.clearSearch?.();
+        } catch {
+          // Session cleanup is best-effort; the next operation rebuilds anyway.
+        }
+      }
+    }
     const excluded = query.excludeKeywords
       .map((term) => normalize(term))
       .filter((term) => term.length > 0);
@@ -140,9 +179,14 @@ export class ButbSource implements ProcurementSourcePort {
     const parsed = parseButbScanCursor(query.scanCursor);
     // A token written under other terms or filters marks a window this
     // query never scanned — resuming it would skip rows unread for these
-    // terms, so a fingerprint mismatch falls back to a fresh scan.
+    // terms, so a fingerprint mismatch falls back to a fresh scan. The same
+    // applies to a native-search token (`m: "n"`): it carries a returned-
+    // count, not a row anchor, so the head phase could never pass it — it
+    // would scan the whole registry and hand the same token back forever.
     const resume =
-      parsed !== undefined && parsed.t === butbSearchFingerprint(query) ? parsed : undefined;
+      parsed !== undefined && parsed.t === butbSearchFingerprint(query) && parsed.m !== "n"
+        ? parsed
+        : undefined;
     if (query.scanCursor !== undefined && resume === undefined) {
       this.#logger.warn("butb scan cursor could not be parsed — fresh scan", {
         component: "butb-source",
@@ -275,6 +319,159 @@ export class ButbSource implements ProcurementSourcePort {
       hasMore,
       resumed: resume !== undefined,
       tail,
+    });
+    return ProcurementSearchResponse.parse({
+      hits,
+      hasMore,
+      ...(scanCursor === undefined ? {} : { scanCursor }),
+    });
+  }
+
+  /**
+   * Per-term retrieval through the registry's own «Предмет закупки» form.
+   * The subject field takes a single string, so each keyword gets its own
+   * filtered model — submit, restore columns, page until the filtered
+   * total is reached. Statuses, registry number and buyer fields ride the
+   * same submit natively; every other query filter stays local, applied to
+   * the parsed rows exactly like the scan path.
+   *
+   * A truncated pass cannot anchor on a row: the merged window is sorted
+   * across terms, so its unreturned tail belongs to any of them. The
+   * cursor therefore records how many leading candidates were already
+   * returned (`ret`) and the next call re-reads the whole window —
+   * re-served rows are deduped by the caller, exactly like the scan
+   * path's stop-page re-read. Filtered sets are small and terms are two
+   * postbacks each, so the re-read stays inside the call budget.
+   */
+  async #nativeSearch(
+    query: SearchQuery,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementSearchResponse> {
+    const terms = query.keywords.map((term) => term.trim()).filter((term) => term.length > 0);
+    const excluded = query.excludeKeywords
+      .map((term) => normalize(term))
+      .filter((term) => term.length > 0);
+    const parsed = parseButbScanCursor(query.scanCursor);
+    const resume =
+      parsed !== undefined &&
+      parsed.t === butbSearchFingerprint(query) &&
+      parsed.m === "n" &&
+      parsed.ret !== undefined
+        ? parsed.ret
+        : undefined;
+    if (query.scanCursor !== undefined && resume === undefined) {
+      this.#logger.warn("butb native scan cursor could not be parsed — fresh search", {
+        component: "butb-source",
+      });
+    }
+    // The cursor itself is the position — the caller's offset counts a
+    // previous window and must not skip candidates inside this one.
+    const effectiveOffset = resume ?? query.offset;
+    const budget = effectiveOffset + query.limit;
+    const watermark = dateFloor(query.publishedFrom);
+    const deadline = this.#now().getTime() + this.#maxSearchMs;
+    const base: Omit<ButbSearchCriteria, "subject"> = {
+      ...(query.statuses.length === 0 ? {} : { statuses: query.statuses }),
+      ...(query.procurementNumber.length === 0
+        ? {}
+        : { registryNumber: query.procurementNumber.trim() }),
+      ...(query.buyerText.length === 0 ? {} : { buyerName: query.buyerText.trim() }),
+      ...(query.buyerUnp.length === 0 ? {} : { buyerUnp: query.buyerUnp.trim() }),
+    };
+
+    const candidates = new Map<string, { row: ButbRegistryRow; terms: string[] }>();
+    let hasMore = false;
+    let scannedRows = 0;
+    let termsDone = 0;
+
+    for (const term of terms) {
+      throwIfAborted(this.sourceId, ctx?.signal);
+      if (this.#now().getTime() >= deadline) {
+        hasMore = true;
+        break;
+      }
+      let termDone = false;
+      for (let page = 1; page <= this.#maxSearchPages && !termDone; page += 1) {
+        throwIfAborted(this.sourceId, ctx?.signal);
+        if (this.#now().getTime() >= deadline) {
+          hasMore = true;
+          break;
+        }
+        const rendered = await this.#client.filteredPage!(
+          { ...base, subject: term },
+          page,
+          ctx?.signal,
+        );
+        if (rendered.status < 200 || rendered.status >= 300) {
+          throw new SourceAccessError(
+            this.sourceId,
+            `filtered page ${page} returned HTTP ${rendered.status}`,
+          );
+        }
+        const rows = registryPageRows(page, rendered.body);
+        if (rows.length === 0) {
+          // An empty filtered page is the term's tail — the set is read.
+          termDone = true;
+          break;
+        }
+        scannedRows += rows.length;
+        for (const row of rows) {
+          this.#rememberPosition(row);
+          const rowDate = rowDateOf(row);
+          if (watermark !== undefined && rowDate !== undefined && rowDate < watermark) {
+            continue;
+          }
+          if (!this.#rowMatches(row, query)) continue;
+          if (
+            excluded.length > 0 &&
+            excluded.some((excludedTerm) => normalize(row.title).includes(excludedTerm))
+          ) {
+            continue;
+          }
+          const entry = candidates.get(row.registryNumber);
+          if (entry === undefined) candidates.set(row.registryNumber, { row, terms: [term] });
+          else if (!entry.terms.includes(term)) entry.terms.push(term);
+        }
+        const total = butbTotalRecords(rendered.body);
+        // The filtered model keeps the paginator's count: reaching the last
+        // advertised page means the term's whole window was read. Without
+        // the count the only honest stop is an empty page or the page cap.
+        if (total !== undefined && page >= Math.max(1, Math.ceil(total / PAGE_SIZE))) {
+          termDone = true;
+        }
+      }
+      // An empty page or the advertised end both close the term; running
+      // out of pages does not.
+      if (!termDone && !hasMore) {
+        hasMore = true;
+      }
+      if (termDone) termsDone += 1;
+      if (hasMore) break;
+    }
+
+    const merged = [...candidates.values()]
+      .map(({ row, terms: matched }) => ({ row, terms: matched }))
+      .sort((left, right) => compareInstant(right.row.publishedAt, left.row.publishedAt));
+    if (merged.length > budget) hasMore = true;
+
+    const hits = merged
+      .slice(effectiveOffset, effectiveOffset + query.limit)
+      .map(({ row, terms: matched }) => {
+        const hit = butbRegistryHit(row, this.#baseUrl);
+        return matched.length === 0 ? hit : { ...hit, matchedSearchTerms: matched };
+      });
+    const scanCursor = hasMore
+      ? encodeButbNativeCursor(effectiveOffset + hits.length, query)
+      : undefined;
+    this.#logger.info("butb subject search", {
+      component: "butb-source",
+      terms,
+      termsDone,
+      scannedRows,
+      candidates: merged.length,
+      returned: hits.length,
+      hasMore,
+      resumed: resume !== undefined,
     });
     return ProcurementSearchResponse.parse({
       hits,
@@ -672,6 +869,15 @@ interface ButbScanCursor {
   v: 1;
   /** Query fingerprint — a token written for other terms/filters cannot bound this window. */
   t: string;
+  /** Retrieval mode the token belongs to — a native-search token never bounds a registry scan. */
+  m?: "n";
+  /**
+   * Native search only: candidates already returned in this window. The
+   * resumed call re-reads the whole window and skips this many leading
+   * rows — the merged set is sorted across terms, so a per-row anchor
+   * cannot delimit its tail.
+   */
+  ret?: number;
   n?: string;
   i?: number;
   d?: string;
@@ -719,6 +925,16 @@ function encodeButbScanCursor(row: ButbRegistryRow, query: SearchQuery): string 
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
+function encodeButbNativeCursor(returned: number, query: SearchQuery): string {
+  const cursor: ButbScanCursor = {
+    v: BUTB_SCAN_CURSOR_VERSION,
+    t: butbSearchFingerprint(query),
+    m: "n",
+    ret: returned,
+  };
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
 function parseButbScanCursor(token: string | undefined): ButbScanCursor | undefined {
   if (token === undefined || token.length === 0) return undefined;
   try {
@@ -727,6 +943,9 @@ function parseButbScanCursor(token: string | undefined): ButbScanCursor | undefi
     const cursor = decoded as ButbScanCursor;
     if (cursor.v !== BUTB_SCAN_CURSOR_VERSION) return undefined;
     if (typeof cursor.t !== "string" || cursor.t.length === 0) return undefined;
+    if (cursor.m === "n") {
+      return typeof cursor.ret === "number" && cursor.ret >= 0 ? cursor : undefined;
+    }
     if (typeof cursor.n !== "string" || cursor.n.length === 0) return undefined;
     return cursor;
   } catch {

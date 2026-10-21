@@ -360,3 +360,235 @@ describe("ButbHttpClient resilience", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("ButbHttpClient registry search", () => {
+  /** Registry page that exposes the «Раскрыть форму поиска» toggle link. */
+  const searchableRegistryHtml = (viewState: string) =>
+    `<html><body><form action="/auctions/reestrauctions.html" id="fra">` +
+    `<input type="hidden" name="javax.faces.ViewState" value="${viewState}"/>` +
+    `<input type="hidden" name="ice.window" value="w-1"/>` +
+    `<input type="hidden" name="ice.view" value="v-1"/>` +
+    `<a id="fra:j_idt210" onclick="var form=document.getElementById('fra');` +
+    `form['fra:j_idcl'].value='fra:j_idt210';return false;">` +
+    `Раскрыть форму поиска</a>` +
+    `<table><tr id="fra:reestrAu_row_0"><td>AU20261015396707</td>` +
+    `<td><a id="fra:reestrAu:0:_t344" onclick="mojarra.jsfcljs()">Lot</a></td>` +
+    `</tr></table></form></body></html>`;
+
+  /** The post-expand page: search fields + a degraded one-column table. */
+  const expandedHtml = (viewState: string) =>
+    `<html><body><form action="/auctions/reestrauctions.html" id="fra">` +
+    `<input type="hidden" name="javax.faces.ViewState" value="${viewState}"/>` +
+    `<input type="hidden" name="ice.window" value="w-1"/>` +
+    `<input type="hidden" name="ice.view" value="v-1"/>` +
+    `<a onclick="var form=document.getElementById('fra');` +
+    `form['fra:j_idcl'].value='fra:j_idt210';return false;">` +
+    `Закрыть форму поиска</a>` +
+    `<span>Предмет закупки</span><input class="iceInpTxt" name="fra:j_idt216" type="text"/>` +
+    `<span>Регистрационный номер</span><input class="iceInpTxt" name="fra:j_idt241" type="text"/>` +
+    `<span>Наименование заказчика (организатора)</span>` +
+    `<input class="iceInpTxt" name="fra:j_idt259" type="text"/>` +
+    `<input id="fra:selectStatus:_0" name="fra:selectStatus" type="checkbox" value="2"/>` +
+    `<label for="fra:selectStatus:_0">подача предложений / документов</label>` +
+    `<input id="fra:selectStatus:_1" name="fra:selectStatus" type="checkbox" value="4"/>` +
+    `<label for="fra:selectStatus:_1">на рассмотрении предложений</label>` +
+    `<input name="fra:_t326:0:_t329" type="checkbox"/>` +
+    `<input name="fra:_t326:1:_t329" type="checkbox"/>` +
+    `<a onclick="self.id = 'fra:_t331'; ice.s(event,self);">Сохранить</a>` +
+    `<input type="submit" name="fra:_t317" value="Искать"/>` +
+    `</form></body></html>`;
+
+  /**
+   * A filtered+restored page: criteria banner plus the 12-column table —
+   * `butbTableUsable` keys on the ui-header-text header cells.
+   */
+  const filteredHtml = (viewState: string) =>
+    `<html><body><form action="/auctions/reestrauctions.html" id="fra">` +
+    `<input type="hidden" name="javax.faces.ViewState" value="${viewState}"/>` +
+    `<span>Критерии поиска: Предмет закупки: 'Подстанция'.</span>` +
+    `<table><thead><tr>` +
+    Array.from({ length: 11 }, (_v, i) => `<th><span class="ui-header-text">h${i}</span></th>`).join("") +
+    `</tr></thead><tbody><tr id="fra:reestrAu_row_0">` +
+    `<td><span>AU20261007394983</span></td>` +
+    `<td><a id="fra:reestrAu:0:_t339" onclick="mojarra.jsfcljs()">Подстанция</a></td>` +
+    `</tr></tbody></table></form></body></html>`;
+
+  const filteredPageXml = (viewState: string, row: string) =>
+    `<?xml version="1.0"?><partial-response>` +
+    `<update id="fra:reestrAu"><![CDATA[<table><tr id="fra:reestrAu_${row}">` +
+    `<td>AU20261001396000</td></tr></table>]]></update>` +
+    `<update id="javax.faces.ViewState"><![CDATA[${viewState}]]></update>` +
+    `</partial-response>`;
+
+  it("runs expand → submit → restore-columns and serves the filtered page", async () => {
+    const posted: string[] = [];
+    const { run: fetch, calls } = scriptedFetch((request) => {
+      if (request.method === "GET") return htmlResponse(searchableRegistryHtml("VS1"));
+      posted.push(request.body ?? "");
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(filteredHtml("VS3"));
+      if (body.includes("j_idcl=fra%3A_t331")) return htmlResponse(filteredHtml("VS4"));
+      if (body.includes("pageChange")) return htmlResponse(filteredPageXml("VS5", "row_20"));
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    const page1 = await c.filteredPage({ subject: "Подстанция" }, 1);
+    const page2 = await c.filteredPage({ subject: "Подстанция" }, 2);
+
+    expect(page1.body).toContain("Критерии поиска");
+    expect(page2.body).toContain("reestrAu_row_20");
+    const [expand, submit, restore, pageChange] = posted;
+    expect(expand).toContain("j_idcl=fra%3Aj_idt210");
+    expect(expand).toContain("fra%3Aj_idt210=fra%3Aj_idt210");
+    expect(submit).toContain("j_idcl=fra%3A_t317");
+    expect(submit).toContain("fra%3A_t317=%D0%98%D1%81%D0%BA%D0%B0%D1%82%D1%8C");
+    expect(submit).toContain(
+      "fra%3Aj_idt216=%D0%9F%D0%BE%D0%B4%D1%81%D1%82%D0%B0%D0%BD%D1%86%D0%B8%D1%8F",
+    );
+    expect(restore).toContain("j_idcl=fra%3A_t331");
+    expect(restore).toContain("fra%3A_t326%3A0%3A_t329=on");
+    expect(restore).toContain("fra%3A_t326%3A1%3A_t329=on");
+    expect(pageChange).toContain("reestrAu_page=2");
+    // One bootstrap GET — every later step is a session postback.
+    expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
+  });
+
+  it("maps normalized statuses onto the discovered checkbox values", async () => {
+    const posted: string[] = [];
+    const { run: fetch } = scriptedFetch((request) => {
+      if (request.method === "GET") return htmlResponse(searchableRegistryHtml("VS1"));
+      posted.push(request.body ?? "");
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(filteredHtml("VS3"));
+      if (body.includes("j_idcl=fra%3A_t331")) return htmlResponse(filteredHtml("VS4"));
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    await c.filteredPage(
+      { subject: "x", statuses: ["accepting_bids", "under_review"] },
+      1,
+    );
+
+    const submit = posted.find((body) => body.includes("j_idcl=fra%3A_t317"))!;
+    // Values 2 and 4 come from the checkbox labels, not a hardcoded map.
+    expect(submit).toContain("fra%3AselectStatus=2");
+    expect(submit).toContain("fra%3AselectStatus=4");
+  });
+
+  it("re-submits new criteria without re-expanding the panel", async () => {
+    const posted: string[] = [];
+    const { run: fetch } = scriptedFetch((request) => {
+      if (request.method === "GET") return htmlResponse(searchableRegistryHtml("VS1"));
+      posted.push(request.body ?? "");
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(filteredHtml("VS3"));
+      if (body.includes("j_idcl=fra%3A_t331")) return htmlResponse(filteredHtml("VS4"));
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    await c.filteredPage({ subject: "Подстанция" }, 1);
+    posted.length = 0;
+    await c.filteredPage({ subject: "НКУ" }, 1);
+
+    // submit + restore only — the panel stays expanded inside the session.
+    expect(posted).toHaveLength(2);
+    expect(posted[0]).toContain("j_idcl=fra%3A_t317");
+    expect(posted[0]).toContain("fra%3Aj_idt216=%D0%9D%D0%9A%D0%A3");
+    expect(posted[0]).not.toContain("j_idt210");
+    expect(posted[1]).toContain("j_idcl=fra%3A_t331");
+  });
+
+  it("re-applies the criteria when the session died between pages", async () => {
+    let bootstraps = 0;
+    let pageChanges = 0;
+    const { run: fetch } = scriptedFetch((request) => {
+      if (request.method === "GET") {
+        bootstraps += 1;
+        return htmlResponse(searchableRegistryHtml(`VS${bootstraps}`));
+      }
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(filteredHtml("VS3"));
+      if (body.includes("j_idcl=fra%3A_t331")) return htmlResponse(filteredHtml("VS4"));
+      if (body.includes("pageChange")) {
+        pageChanges += 1;
+        // First pageChange answers a dead-view frame — no table update.
+        return pageChanges === 1
+          ? htmlResponse(
+              `<?xml version="1.0"?><partial-response>` +
+                `<update id="javax.faces.ViewState"><![CDATA[VSDEAD]]></update>` +
+                `</partial-response>`,
+            )
+          : htmlResponse(filteredPageXml("VS9", "row_20"));
+      }
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    await c.filteredPage({ subject: "Подстанция" }, 1);
+    const page2 = await c.filteredPage({ subject: "Подстанция" }, 2);
+
+    expect(page2.body).toContain("reestrAu_row_20");
+    // Dead view → #guarded rebuilds the session: a second bootstrap GET and
+    // a full re-apply (expand+submit+restore) precede the retried pageChange.
+    expect(bootstraps).toBe(2);
+    expect(pageChanges).toBe(2);
+  });
+
+  it("rebuilds the session after clearSearch instead of trusting the filter", async () => {
+    let bootstraps = 0;
+    const { run: fetch, calls } = scriptedFetch((request) => {
+      if (request.method === "GET") {
+        bootstraps += 1;
+        return htmlResponse(searchableRegistryHtml(`VS${bootstraps}`));
+      }
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(filteredHtml("VS3"));
+      if (body.includes("j_idcl=fra%3A_t331")) return htmlResponse(filteredHtml("VS4"));
+      if (body.includes("pageChange")) return htmlResponse(pageChangeXml("VS5"));
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    await c.filteredPage({ subject: "Подстанция" }, 1);
+    c.clearSearch();
+    await c.filteredPage({ subject: "Подстанция" }, 1);
+
+    // clearSearch dropped the session, so the same criteria re-ran the
+    // whole sequence on a new bootstrap instead of trusting stale state.
+    expect(bootstraps).toBe(2);
+    const posts = calls.filter((call) => call.method === "POST");
+    expect(posts.some((call) => call.body?.includes("j_idcl=fra%3Aj_idt210"))).toBe(true);
+  });
+
+  it("drops the filtered session for the next plain registry read", async () => {
+    let bootstraps = 0;
+    const { run: fetch } = scriptedFetch((request) => {
+      if (request.method === "GET") {
+        bootstraps += 1;
+        return htmlResponse(searchableRegistryHtml(`VS${bootstraps}`));
+      }
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(filteredHtml("VS3"));
+      if (body.includes("j_idcl=fra%3A_t331")) return htmlResponse(filteredHtml("VS4"));
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    await c.filteredPage({ subject: "Подстанция" }, 1);
+    await c.registryPage(1);
+
+    // A plain registry read after a search must NOT reuse the filtered
+    // session — its table is filtered and its columns were re-saved.
+    expect(bootstraps).toBe(2);
+  });
+});
+

@@ -134,7 +134,7 @@
 - [`docs/architecture/STAGE-125.md`](docs/architecture/STAGE-125.md) — «Выгрузить в папку»: карточка и уже скачанные файлы ложатся в папку с названием карточки
 - [`docs/architecture/STAGE-126.md`](docs/architecture/STAGE-126.md) — помощник предлагает направление: фраза предмета или существительное; одиночные слова-модификаторы («государственного») не предлагаются
 - [`docs/architecture/STAGE-127.md`](docs/architecture/STAGE-127.md) — модель группирует разнословые отказы в направление и называет фразы; код валидирует каждую по памяти решений (≥2 отказов, 0 взятых, не в словах профиля) — «Принять» пишет `phrases` в исключения
-- [`docs/architecture/STAGE-128.md`](docs/architecture/STAGE-128.md) — источник БУТБ (JSF-сессии): скан реестра + локальный фильтр, `BUTB_ENABLED` + пилот `BUTB_WORKSPACE_IDS`, фан-аут с пустой страницей упавшего источника, `butb/`-префикс id
+- [`docs/architecture/STAGE-128.md`](docs/architecture/STAGE-128.md) — источник БУТБ (JSF-сессии): нативный поиск по «Предмет закупки» по каждому терму (expand→submit→restore колонок) + fallback на скан реестра с локальным фильтром, `BUTB_ENABLED` + пилот `BUTB_WORKSPACE_IDS`, фан-аут с пустой страницей упавшего источника, `butb/`-префикс id
 
 ---
 

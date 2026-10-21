@@ -6,10 +6,14 @@ import {
   butbPartialUpdate,
   butbRegistryHit,
   butbRegistryPublishDate,
+  butbSearchApplied,
+  butbSearchToggleId,
   butbStatus,
+  butbTableUsable,
   butbTotalRecords,
   parseButbCard,
   parseButbRegistryRows,
+  parseButbSearchForm,
   parseButbViewState,
 } from "./butb-parser.js";
 
@@ -174,5 +178,85 @@ describe("butbTotalRecords", () => {
   it("reads the paginator total", () => {
     expect(butbTotalRecords(registry)).toBeGreaterThan(200_000);
     expect(butbTotalRecords(page2)).toBeGreaterThan(200_000);
+  });
+});
+
+describe("registry search form (live fixture)", () => {
+  const expanded = readFileSync(
+    fileURLToPath(new URL("../test/fixtures/butb/search-expanded.html", import.meta.url)),
+    "utf8",
+  );
+  const filtered = readFileSync(
+    fileURLToPath(new URL("../test/fixtures/butb/search-filtered.html", import.meta.url)),
+    "utf8",
+  );
+  const degraded = readFileSync(
+    fileURLToPath(new URL("../test/fixtures/butb/search-degraded.html", import.meta.url)),
+    "utf8",
+  );
+
+  it("finds the search panel toggle id on the registry page", () => {
+    // The component id is generated — the contract is the label, not j_idtNNN.
+    expect(butbSearchToggleId(registry)).toMatch(/^fra:/);
+  });
+
+  it("discovers the form fields by their labels", () => {
+    const form = parseButbSearchForm(expanded);
+    expect(form).toBeDefined();
+    expect(form!.subjectField).toMatch(/^fra:/);
+    expect(form!.regNumberField).toMatch(/^fra:/);
+    expect(form!.buyerNameField).toMatch(/^fra:/);
+    expect(form!.buyerUnpField).toMatch(/^fra:/);
+    expect(form!.submitId).toMatch(/^fra:/);
+    expect(form!.submitValue).toBe("Искать");
+    expect(form!.columnSaveId).toMatch(/^fra:/);
+    // 11 optional columns + the status group.
+    expect(form!.columnCheckboxes).toHaveLength(11);
+    expect(form!.statusField).toBe("fra:selectStatus");
+    // «подача предложений / документов» → "2" is the accepting-bids value.
+    expect(form!.statusValues).toContainEqual({
+      label: "подача предложений / документов",
+      value: "2",
+    });
+    expect(
+      form!.statusValues.every((entry) => /^fra:/.test(entry.label) === false),
+    ).toBe(true);
+  });
+
+  it("reports an applied criteria banner on filtered pages only", () => {
+    expect(butbSearchApplied(filtered)).toBe(true);
+    expect(butbSearchApplied(degraded)).toBe(true);
+    expect(butbSearchApplied(registry)).toBe(false);
+    expect(butbSearchApplied(expanded)).toBe(false);
+  });
+
+  it("detects the degraded single-column table", () => {
+    expect(butbTableUsable(registry)).toBe(true);
+    expect(butbTableUsable(filtered)).toBe(true);
+    // Degraded after expand and after submit: exactly one «Вид закупки» column.
+    expect(butbTableUsable(expanded)).toBe(false);
+    expect(butbTableUsable(degraded)).toBe(false);
+  });
+
+  it("parses the restored filtered table with the extra region column", () => {
+    const rows = parseButbRegistryRows(filtered);
+    expect(rows).toHaveLength(20);
+    expect(butbTotalRecords(filtered)).toBe(413);
+    const accepting = rows.find((row) => row.sourceStatus?.includes("Подача"));
+    expect(accepting).toBeDefined();
+    expect(accepting!.registryNumber).toMatch(/^[A-Z]{2}\d{10,}$/);
+    expect(accepting!.cardLinkId).toMatch(/^fra:reestrAu:\d+:_t\d+$/);
+    expect(accepting!.buyerRegion).toBe("Брестская область");
+    // Column alignment after the inserted region cell: the status must sit
+    // in its own cell, not leak into the auction date or financing fields.
+    expect(accepting!.sourceStatus).toContain("Подача предложений");
+    expect(accepting!.bidsDeadline).toBeDefined();
+    expect(accepting!.financing).toBeDefined();
+  });
+
+  it("keeps the plain registry rows region-less", () => {
+    const rows = parseButbRegistryRows(registry);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.buyerRegion === undefined)).toBe(true);
   });
 });

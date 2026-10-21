@@ -8,6 +8,7 @@ import {
   butbSearchToggleId,
   butbStatus,
   butbTableUsable,
+  butbTotalRecords,
   parseButbSearchForm,
   parseButbViewState,
   type ButbSearchForm,
@@ -531,6 +532,17 @@ export class ButbHttpClient implements ButbPageClient {
     );
     if (!butbSearchApplied(submitted.body)) throw new ButbViewExpiredError();
     this.#adoptState(submitted.body);
+
+    // An empty filtered model has nothing to restore columns for: the
+    // paginator's total is readable even in the degraded one-column table,
+    // so a zero result skips the «Сохранить» postback entirely — one
+    // request per empty term instead of two.
+    if (butbTotalRecords(submitted.body) === 0) {
+      this.#view = "registry";
+      this.#currentPage = 1;
+      this.#appliedCriteriaJson = wantedJson;
+      return submitted.body;
+    }
 
     const restored = await this.#post(
       this.#requireState(),

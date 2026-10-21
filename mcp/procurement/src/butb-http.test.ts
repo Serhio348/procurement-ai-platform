@@ -455,6 +455,36 @@ describe("ButbHttpClient registry search", () => {
     expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
   });
 
+  it("skips the column restore when the filtered model is empty", async () => {
+    /** Submitted page with zero results: banner + degraded table + total=0. */
+    const emptyFilteredHtml = (viewState: string) =>
+      `<html><body><form action="/auctions/reestrauctions.html" id="fra">` +
+      `<input type="hidden" name="javax.faces.ViewState" value="${viewState}"/>` +
+      `<span>Критерии поиска: Предмет закупки: 'Подстанция'.</span>` +
+      `<table><thead><tr><th><span class="ui-header-text">Вид закупки</span></th>` +
+      `</tr></thead><tbody></tbody></table>` +
+      `<script>new YAHOO.widget.Paginator({"rowsPerPage":20,"totalRecords":0});</script>` +
+      `</form></body></html>`;
+    const posted: string[] = [];
+    const { run: fetch } = scriptedFetch((request) => {
+      if (request.method === "GET") return htmlResponse(searchableRegistryHtml("VS1"));
+      posted.push(request.body ?? "");
+      const body = request.body ?? "";
+      if (body.includes("j_idcl=fra%3Aj_idt210")) return htmlResponse(expandedHtml("VS2"));
+      if (body.includes("j_idcl=fra%3A_t317")) return htmlResponse(emptyFilteredHtml("VS3"));
+      throw new Error(`unexpected post: ${body.slice(0, 140)}`);
+    });
+    const c = client(fetch);
+
+    const result = await c.filteredPage({ subject: "Подстанция" }, 1);
+
+    expect(result.body).toContain("Критерии поиска");
+    // expand + submit only — restoring columns of an empty table is a
+    // wasted postback, and most profile terms legitimately match nothing.
+    expect(posted).toHaveLength(2);
+    expect(posted[1]).toContain("j_idcl=fra%3A_t317");
+  });
+
   it("maps normalized statuses onto the discovered checkbox values", async () => {
     const posted: string[] = [];
     const { run: fetch } = scriptedFetch((request) => {

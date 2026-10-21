@@ -745,6 +745,128 @@ describe("ButbSource native subject search", () => {
     ]);
     expect(second.hasMore).toBe(false);
   });
+
+  it("stops paging a term once a filtered page falls below the watermark", async () => {
+    // The filtered model is published-desc: a page entirely under
+    // publishedFrom means every deeper page is already-seen work. Before
+    // the early stop a term with a big filtered total (the live «Подстанция»
+    // = 413 rows) burned ~5 s per postback through pages it then dropped
+    // row-by-row — enough to blow the call budget on the first term alone.
+    const filtered = new Map<string, Map<number, string>>([
+      [
+        "инструментарий",
+        new Map([
+          // Page 1 is fresh; page 2 is entirely below the watermark even
+          // though the paginator still advertises a third page.
+          [1, filteredBody(fullRows(0, "AU20261020000001"), 60)],
+          [2, filteredBody(fullRows(20, "AU20261001000021", "01.10.2026"), 60)],
+          [3, filteredBody(fullRows(40, "AU20260901000041", "01.09.2026"), 60)],
+        ]),
+      ],
+    ]);
+    const client = nativeClient(filtered);
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "2026-10-15T00:00:00Z",
+        limit: 100,
+      }),
+    );
+    // The term closed at the watermark — page 3 was never read.
+    expect(client.calls.filtered.map((call) => call.page)).toEqual([1, 2]);
+    expect(answer.hits).toHaveLength(20);
+    expect(answer.hasMore).toBe(false);
+    expect(answer.scanCursor).toBeUndefined();
+  });
+
+  it("stops submitting terms once the response budget is full", async () => {
+    // limit bounds a page of results — reading every remaining term after
+    // the merged set already covers the slice is pure pipe time the caller
+    // can never see.
+    const filtered = new Map<string, Map<number, string>>([
+      ["первый", new Map([[1, filteredBody(fullRows(0, "AU20261020000001"), 20)]])],
+      ["второй", new Map([[1, filteredBody(fullRows(0, "AU20261020000021"), 20)]])],
+    ]);
+    const client = nativeClient(filtered);
+    const source = new ButbSource({ client });
+    const answer = await source.search(
+      query({
+        keywords: ["первый", "второй"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 5,
+      }),
+    );
+    // One page of term one already covers offset+limit — term two is never
+    // submitted and the window honestly reports the unread remainder.
+    expect(client.calls.filtered.map((call) => call.subject)).toEqual(["первый"]);
+    expect(answer.hits).toHaveLength(5);
+    expect(answer.hasMore).toBe(true);
+    expect(answer.scanCursor).toBeDefined();
+  });
+
+  it("resumes a truncated window from the cached term position", async () => {
+    const filtered = new Map<string, Map<number, string>>([
+      ["готово", new Map([[1, filteredBody(fullRows(0, "AU20261020000001"), 20)]])],
+      [
+        "хвост",
+        new Map([
+          [1, filteredBody(fullRows(20, "AU20261020000021"), 21)],
+          [2, filteredBody(syntheticRow(40, "19.10.2026", "AU20261019000041"), 21)],
+        ]),
+      ],
+    ]);
+    const client = nativeClient(filtered);
+    // Each filtered postback costs ~5 s on the live site — the fake clock
+    // charges the same so the 7 s search budget cuts the first call while
+    // term two still has its second page unread. The cached window keeps
+    // «готово» as done so the resume does not re-submit it — the mechanism
+    // that keeps a 20-term profile converging across call deadlines
+    // instead of re-reading the whole window every call.
+    let tick = 0;
+    const now = () => new Date(1_800_000_000_000 + tick);
+    const inner = client.filteredPage!.bind(client);
+    client.filteredPage = async (criteria, p, signal) => {
+      const result = await inner(criteria, p, signal);
+      tick += 5_000;
+      return result;
+    };
+    const source = new ButbSource({ client, maxSearchMs: 7_000, now });
+    const first = await source.search(
+      query({
+        keywords: ["готово", "хвост"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+      }),
+    );
+    expect(first.hasMore).toBe(true);
+    expect(first.scanCursor).toBeDefined();
+    expect(client.calls.filtered.map((call) => [call.subject, call.page])).toEqual([
+      ["готово", 1],
+      ["хвост", 1],
+    ]);
+
+    // Resume on the same instance: «готово» is skipped entirely, «хвост»
+    // finishes its two pages, and the returned-count slice (40) drops the
+    // candidates the first call already served.
+    tick = 0;
+    const second = await source.search(
+      query({
+        keywords: ["готово", "хвост"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    // «готово» was submitted exactly once — by the first call.
+    expect(
+      client.calls.filtered.filter((call) => call.subject === "готово"),
+    ).toHaveLength(1);
+    expect(second.hits.map((hit) => hit.sourceProcurementId)).toEqual([
+      "butb/AU20261019000041",
+    ]);
+    expect(second.hasMore).toBe(false);
+  });
 });
 
 describe("ButbSource.get", () => {

@@ -88,7 +88,7 @@ export function createSourceHealthMonitor(options: {
   now?: () => number;
 }): SourceHealthMonitor {
   const logger = options.logger ?? silentLogger;
-  const probeTimeoutMs = options.probeTimeoutMs ?? 8_000;
+  const probeTimeoutMs = options.probeTimeoutMs ?? 15_000;
   const probeIntervalMs = options.probeIntervalMs ?? 15_000;
   const staleAfterMs = options.staleAfterMs ?? 45_000;
   const now = options.now ?? Date.now;
@@ -126,6 +126,11 @@ export function createSourceHealthMonitor(options: {
         policyGate: gate,
         requestId: RequestId.parse(randomUUID()),
         timeoutMs: probeTimeoutMs,
+        // High priority jumps the pipe's queue ahead of bulk search work:
+        // a probe on a busy-but-healthy child only waits for the in-flight
+        // request instead of expiring behind every queued page read — a
+        // slow source must not flap "не отвечает" while it is just working.
+        priority: "high",
         logger,
       });
       item.probe.ok = true;

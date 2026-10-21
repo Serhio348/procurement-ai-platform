@@ -67,10 +67,22 @@ interface CacheEntry {
   parsed: ParsedButbCard;
 }
 
+/**
+ * Progress of a native per-term window: the candidates collected so far and
+ * how many leading terms were fully read. Held between calls so a resumed
+ * search does not re-submit finished terms.
+ */
+interface ButbNativeWindow {
+  readonly candidates: Map<string, { row: ButbRegistryRow; terms: string[] }>;
+  doneTerms: number;
+}
+
 /** Rows per registry page — verified live and in fixtures. */
 const PAGE_SIZE = 20;
 /** Bound on remembered row positions so the map cannot grow forever. */
 const POSITION_CACHE_LIMIT = 10_000;
+/** Bound on kept partial native windows — oldest is evicted past this. */
+const WINDOW_CACHE_LIMIT = 8;
 
 /**
  * BUTB adapter. The site's own «Предмет закупки» search is the primary
@@ -115,6 +127,14 @@ export class ButbSource implements ProcurementSourcePort {
    * monitoring read can chain get/getStatus/getDocuments on the same id.
    */
   readonly #missing = new Map<string, number>();
+  /**
+   * fingerprint → partially-read native window. A call cut by the deadline
+   * or an abort keeps its progress here: the resume continues below the
+   * terms already walked instead of re-submitting every term — re-reading
+   * the whole profile on each call never converged (each term is two
+   * postbacks, so 20 terms alone exceed the call budget).
+   */
+  readonly #windows = new Map<string, ButbNativeWindow>();
 
   constructor(options: ButbSourceOptions) {
     this.#client = options.client;
@@ -338,10 +358,11 @@ export class ButbSource implements ProcurementSourcePort {
    * A truncated pass cannot anchor on a row: the merged window is sorted
    * across terms, so its unreturned tail belongs to any of them. The
    * cursor therefore records how many leading candidates were already
-   * returned (`ret`) and the next call re-reads the whole window —
-   * re-served rows are deduped by the caller, exactly like the scan
-   * path's stop-page re-read. Filtered sets are small and terms are two
-   * postbacks each, so the re-read stays inside the call budget.
+   * returned (`ret`); re-served rows are deduped by the caller, exactly
+   * like the scan path's stop-page re-read. To keep the resume cheap the
+   * partial window is cached in `#windows`: the next call re-submits only
+   * the unread tail of the term list, not the whole profile — without it
+   * a 20-term window could never finish inside one call's postback budget.
    */
   async #nativeSearch(
     query: SearchQuery,
@@ -351,10 +372,11 @@ export class ButbSource implements ProcurementSourcePort {
     const excluded = query.excludeKeywords
       .map((term) => normalize(term))
       .filter((term) => term.length > 0);
+    const fingerprint = butbSearchFingerprint(query);
     const parsed = parseButbScanCursor(query.scanCursor);
     const resume =
       parsed !== undefined &&
-      parsed.t === butbSearchFingerprint(query) &&
+      parsed.t === fingerprint &&
       parsed.m === "n" &&
       parsed.ret !== undefined
         ? parsed.ret
@@ -379,12 +401,20 @@ export class ButbSource implements ProcurementSourcePort {
       ...(query.buyerUnp.length === 0 ? {} : { buyerUnp: query.buyerUnp.trim() }),
     };
 
-    const candidates = new Map<string, { row: ButbRegistryRow; terms: string[] }>();
+    // Resume continues where the cached window stopped; a fresh call or a
+    // dropped cache starts from term zero and re-reads the whole window —
+    // the returned-count slice below still protects the caller from
+    // duplicates it already saw.
+    const cached = resume === undefined ? undefined : this.#windows.get(fingerprint);
+    const candidates =
+      cached?.candidates ?? new Map<string, { row: ButbRegistryRow; terms: string[] }>();
+    let termsDone = cached?.doneTerms ?? 0;
     let hasMore = false;
     let scannedRows = 0;
-    let termsDone = 0;
 
-    for (const term of terms) {
+    for (let i = termsDone; i < terms.length; i += 1) {
+      const term = terms[i];
+      if (term === undefined) break;
       throwIfAborted(this.sourceId, ctx?.signal);
       if (this.#now().getTime() >= deadline) {
         hasMore = true;
@@ -415,10 +445,15 @@ export class ButbSource implements ProcurementSourcePort {
           break;
         }
         scannedRows += rows.length;
+        let pageBelowWatermark = false;
         for (const row of rows) {
           this.#rememberPosition(row);
           const rowDate = rowDateOf(row);
           if (watermark !== undefined && rowDate !== undefined && rowDate < watermark) {
+            // Filtered pages are published-desc like the plain registry:
+            // a page that fell under the watermark means every deeper page
+            // of this term is already-seen work — the term is done.
+            pageBelowWatermark = true;
             continue;
           }
           if (!this.#rowMatches(row, query)) continue;
@@ -431,6 +466,11 @@ export class ButbSource implements ProcurementSourcePort {
           const entry = candidates.get(row.registryNumber);
           if (entry === undefined) candidates.set(row.registryNumber, { row, terms: [term] });
           else if (!entry.terms.includes(term)) entry.terms.push(term);
+        }
+        if (pageBelowWatermark || candidates.size >= budget) {
+          termDone = pageBelowWatermark;
+          if (!pageBelowWatermark) hasMore = true;
+          break;
         }
         const total = butbTotalRecords(rendered.body);
         // The filtered model keeps the paginator's count: reaching the last
@@ -445,9 +485,10 @@ export class ButbSource implements ProcurementSourcePort {
       if (!termDone && !hasMore) {
         hasMore = true;
       }
-      if (termDone) termsDone += 1;
+      if (termDone) termsDone = i + 1;
       if (hasMore) break;
     }
+    this.#rememberWindow(fingerprint, { candidates, doneTerms: termsDone });
 
     const merged = [...candidates.values()]
       .map(({ row, terms: matched }) => ({ row, terms: matched }))
@@ -669,6 +710,17 @@ export class ButbSource implements ProcurementSourcePort {
   #rememberPosition(row: ButbRegistryRow): void {
     if (this.#positions.size >= POSITION_CACHE_LIMIT) this.#positions.clear();
     this.#positions.set(row.registryNumber, row.rowIndex);
+  }
+
+  #rememberWindow(fingerprint: string, window: ButbNativeWindow): void {
+    // delete+set moves the key to the end — the oldest untouched window is
+    // evicted once the cap is crossed, same LRU shape as position cache.
+    this.#windows.delete(fingerprint);
+    this.#windows.set(fingerprint, window);
+    const oldest = this.#windows.keys().next().value;
+    if (this.#windows.size > WINDOW_CACHE_LIMIT && oldest !== undefined) {
+      this.#windows.delete(oldest);
+    }
   }
 
   async #locateRow(

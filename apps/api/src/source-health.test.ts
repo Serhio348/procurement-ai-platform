@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { McpToolCaller } from "@procurement/mcp-client";
+import { McpToolCallError, type McpToolCaller } from "@procurement/mcp-client";
 import { createSourceHealthMonitor } from "./source-health.js";
 
 const okCaller = (sources: readonly string[]): McpToolCaller => ({
@@ -69,6 +69,41 @@ describe("source health monitor (R42)", () => {
     expect(cell?.lastError).toContain("timed out");
     expect(cell?.registered).toBeUndefined();
     expect(health.snapshot().servingSources).toEqual([]);
+  });
+
+  it("a queue-expired probe keeps the last verdict — busy is not broken", async () => {
+    const now = { t: 0 };
+    const health = monitor(now);
+    let fail = false;
+    const caller: McpToolCaller = {
+      callTool: vi.fn<McpToolCaller["callTool"]>().mockImplementation(async () => {
+        if (fail) {
+          throw new McpToolCallError(
+            "timeout",
+            "procurement.sources",
+            "MCP tool procurement.sources timed out waiting in the queue",
+          );
+        }
+        return { structuredContent: { sources: ["goszakupki_by"] } };
+      }),
+    };
+    health.noteStarted("background", "goszakupki_by", caller);
+    await health.probeOnce();
+    expect(health.snapshot().lanes["background"]?.["goszakupki_by"]?.status).toBe("ok");
+
+    // The pipe is busy: the probe died in the queue without reaching the
+    // child — the last real verdict stands while it is fresh.
+    fail = true;
+    await health.probeOnce();
+    const cell = health.snapshot().lanes["background"]?.["goszakupki_by"];
+    expect(cell?.status).toBe("ok");
+    expect(cell?.registered).toEqual(["goszakupki_by"]);
+    expect(cell?.lastError).toContain("waiting in the queue");
+
+    // Age it past the freshness window — sustained busyness ages the
+    // verdict into an honest stale, never a fabricated probe_failed.
+    now.t += 46_000;
+    expect(health.snapshot().lanes["background"]?.["goszakupki_by"]?.status).toBe("stale");
   });
 
   it("a busy pipe that never answers stays pending — not 'not registered'", async () => {

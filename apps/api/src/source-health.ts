@@ -136,18 +136,31 @@ export function createSourceHealthMonitor(options: {
       item.probe.ok = true;
       item.probe.registered = result.sources.map(String);
       item.lastError = undefined;
+      item.probe.lastFinishedAt = now();
     } catch (error) {
-      item.probe.ok = false;
-      item.probe.registered = undefined;
-      // "not connected" means the routing map knows the child died — treat it
-      // as a process-level fact, not a probe glitch.
-      if (error instanceof McpToolCallError && error.kind === "source_unavailable") {
-        item.alive = false;
+      const queueWait =
+        error instanceof McpToolCallError &&
+        error.kind === "timeout" &&
+        error.message.includes("waiting in the queue");
+      if (queueWait) {
+        // The probe expired in the queue — it never reached the child, so
+        // it teaches nothing about liveness: a busy pipe is not a broken
+        // one. The last real verdict stands until it ages into `stale`;
+        // lastError still records why no fresh verdict exists.
+        item.lastError = error.message;
+      } else {
+        item.probe.ok = false;
+        item.probe.registered = undefined;
+        // "not connected" means the routing map knows the child died —
+        // treat it as a process-level fact, not a probe glitch.
+        if (error instanceof McpToolCallError && error.kind === "source_unavailable") {
+          item.alive = false;
+        }
+        item.lastError = error instanceof Error ? error.message : String(error);
+        item.probe.lastFinishedAt = now();
       }
-      item.lastError = error instanceof Error ? error.message : String(error);
     } finally {
       item.probe.running = false;
-      item.probe.lastFinishedAt = now();
     }
   };
 

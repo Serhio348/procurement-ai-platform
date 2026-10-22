@@ -141,6 +141,40 @@ describe("ProcurementsApp", () => {
     );
   });
 
+  it("marks a selected undecided card is-open — mobile CSS gates on it", async () => {
+    // The mobile gate used to key on is-triage-*: a search-queue card with
+    // no decision had no such class, so its detail pane stayed hidden on a
+    // phone even though the route selected it. is-open marks any selected
+    // card, triaged or not.
+    const user = userEvent.setup();
+    const items = [
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000302",
+        title: "Неразобранная КТП",
+        status: "accepting_bids",
+        statusLabel: "приём заявок",
+        url: "https://example.test/auction/777",
+        sourceProcurementId: "auction/777",
+      }),
+    ];
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route path="/procurements" element={<ProcurementsApp items={items} />} />
+          <Route path="/procurements/:id" element={<ProcurementsApp items={items} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Неразобранная КТП/ }));
+
+    const detail = screen
+      .getByRole("heading", { level: 2, name: "Неразобранная КТП" })
+      .closest("section");
+    expect(detail?.className).toContain("is-open");
+    expect(detail?.className).not.toContain("is-triage-");
+  });
+
   it("opens a hashed PDF from the local API copy instead of goszakupki.by", async () => {
     const user = userEvent.setup();
     const hash = "a".repeat(64);

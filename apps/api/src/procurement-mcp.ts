@@ -93,6 +93,12 @@ export async function connectProcurementMcp(options: {
    * broke. Health uses it to tell "process dead" apart from "probe slow".
    */
   onProcessClosed?: () => void;
+  /**
+   * Per-child environment overrides applied last — a lane can bound the
+   * same adapter differently (an interactive source must not hold a
+   * minutes-long search budget behind card clicks).
+   */
+  envOverrides?: Record<string, string>;
 }): Promise<ProcurementMcpProcess> {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const mcpMain = fileURLToPath(
@@ -109,6 +115,9 @@ export async function connectProcurementMcp(options: {
   }
   if (options.blobDirectory !== undefined) {
     env["DOCUMENT_BLOB_DIR"] = options.blobDirectory;
+  }
+  if (options.envOverrides !== undefined) {
+    Object.assign(env, options.envOverrides);
   }
   // Node's fetch ignores tls.setDefaultCACertificates; the child must see
   // NODE_EXTRA_CA_CERTS at process start or goszakupki.by fails TLS.

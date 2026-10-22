@@ -379,7 +379,7 @@ export class ButbSource implements ProcurementSourcePort {
       parsed.t === fingerprint &&
       parsed.m === "n" &&
       parsed.ret !== undefined
-        ? parsed.ret
+        ? parsed
         : undefined;
     if (query.scanCursor !== undefined && resume === undefined) {
       this.#logger.warn("butb native scan cursor could not be parsed — fresh search", {
@@ -387,8 +387,10 @@ export class ButbSource implements ProcurementSourcePort {
       });
     }
     // The cursor itself is the position — the caller's offset counts a
-    // previous window and must not skip candidates inside this one.
-    const effectiveOffset = resume ?? query.offset;
+    // previous window and must not skip candidates inside this one. `ret`
+    // bounds the early stop below; the exact skip resolves post-merge on
+    // the anchor row, which survives rows inserted at the head.
+    const effectiveOffset = resume?.ret ?? query.offset;
     const budget = effectiveOffset + query.limit;
     const watermark = dateFloor(query.publishedFrom);
     const deadline = this.#now().getTime() + this.#maxSearchMs;
@@ -401,11 +403,15 @@ export class ButbSource implements ProcurementSourcePort {
       ...(query.buyerUnp.length === 0 ? {} : { buyerUnp: query.buyerUnp.trim() }),
     };
 
-    // Resume continues where the cached window stopped; a fresh call or a
-    // dropped cache starts from term zero and re-reads the whole window —
-    // the returned-count slice below still protects the caller from
-    // duplicates it already saw.
-    const cached = resume === undefined ? undefined : this.#windows.get(fingerprint);
+    // Resume continues where the cached window stopped. The cache is also
+    // consulted without a token — a caller that lost its position to a
+    // timed-out call must not force a full re-read when the partial window
+    // is still in process memory. A fresh call with no cache starts from
+    // term zero and re-reads the whole window; the slice below still
+    // protects the caller from duplicates it already saw. Matches posted
+    // on an already-closed term while the window aged are covered by the
+    // next pass's watermark margin.
+    const cached = this.#windows.get(fingerprint);
     const candidates =
       cached?.candidates ?? new Map<string, { row: ButbRegistryRow; terms: string[] }>();
     let termsDone = cached?.doneTerms ?? 0;
@@ -427,11 +433,34 @@ export class ButbSource implements ProcurementSourcePort {
           hasMore = true;
           break;
         }
-        const rendered = await this.#client.filteredPage!(
-          { ...base, subject: term },
-          page,
-          ctx?.signal,
+        // One filteredPage call is a whole postback chain (expand → submit →
+        // restore → read) with its own retries — without the wall-clock
+        // bound inside it a stuck chain can outrun the caller's timeout and
+        // die with the window instead of reporting honest truncation. The
+        // deadline signal aborts mid-chain exactly like the between-pages
+        // check: the term stays unfinished and hasMore goes up.
+        const pageTimeout = AbortSignal.timeout(
+          Math.max(1, deadline - this.#now().getTime()),
         );
+        const pageSignal =
+          ctx?.signal === undefined
+            ? pageTimeout
+            : AbortSignal.any([ctx.signal, pageTimeout]);
+        let rendered;
+        try {
+          rendered = await this.#client.filteredPage!(
+            { ...base, subject: term },
+            page,
+            pageSignal,
+          );
+        } catch (error) {
+          throwIfAborted(this.sourceId, ctx?.signal);
+          if (pageTimeout.aborted) {
+            hasMore = true;
+            break;
+          }
+          throw error;
+        }
         if (rendered.status < 200 || rendered.status >= 300) {
           throw new SourceAccessError(
             this.sourceId,
@@ -495,14 +524,26 @@ export class ButbSource implements ProcurementSourcePort {
       .sort((left, right) => compareInstant(right.row.publishedAt, left.row.publishedAt));
     if (merged.length > budget) hasMore = true;
 
-    const hits = merged
-      .slice(effectiveOffset, effectiveOffset + query.limit)
-      .map(({ row, terms: matched }) => {
-        const hit = butbRegistryHit(row, this.#baseUrl);
-        return matched.length === 0 ? hit : { ...hit, matchedSearchTerms: matched };
-      });
+    // The exact resume position anchors on the registry number of the last
+    // row the caller got — rows posted at the head between calls shift
+    // every absolute position, so a bare `ret` count would skip unread
+    // candidates. When the anchor row left the registry the stored count
+    // is the fallback.
+    let skip = effectiveOffset;
+    if (resume?.n !== undefined) {
+      const anchorIndex = merged.findIndex(({ row }) => row.registryNumber === resume.n);
+      if (anchorIndex >= 0) skip = anchorIndex + 1;
+    }
+    const hits = merged.slice(skip, skip + query.limit).map(({ row, terms: matched }) => {
+      const hit = butbRegistryHit(row, this.#baseUrl);
+      return matched.length === 0 ? hit : { ...hit, matchedSearchTerms: matched };
+    });
     const scanCursor = hasMore
-      ? encodeButbNativeCursor(effectiveOffset + hits.length, query)
+      ? encodeButbNativeCursor(
+          skip + hits.length,
+          query,
+          merged[skip + hits.length - 1]?.row.registryNumber ?? resume?.n,
+        )
       : undefined;
     this.#logger.info("butb subject search", {
       component: "butb-source",
@@ -924,12 +965,17 @@ interface ButbScanCursor {
   /** Retrieval mode the token belongs to — a native-search token never bounds a registry scan. */
   m?: "n";
   /**
-   * Native search only: candidates already returned in this window. The
-   * resumed call re-reads the whole window and skips this many leading
-   * rows — the merged set is sorted across terms, so a per-row anchor
-   * cannot delimit its tail.
+   * Native search only: candidates already returned in this window — the
+   * early-stop bound and the fallback position. The exact skip resolves on
+   * `n` below, because head inserts shift every absolute position.
    */
   ret?: number;
+  /**
+   * Scan mode: the registry number of the row the truncated scan stopped
+   * at. Native mode (`m: "n"`): the last returned candidate's registry
+   * number — the resume anchor that keeps its position when fresh rows
+   * land at the head of the window.
+   */
   n?: string;
   i?: number;
   d?: string;
@@ -977,12 +1023,17 @@ function encodeButbScanCursor(row: ButbRegistryRow, query: SearchQuery): string 
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-function encodeButbNativeCursor(returned: number, query: SearchQuery): string {
+function encodeButbNativeCursor(
+  returned: number,
+  query: SearchQuery,
+  anchor?: string,
+): string {
   const cursor: ButbScanCursor = {
     v: BUTB_SCAN_CURSOR_VERSION,
     t: butbSearchFingerprint(query),
     m: "n",
     ret: returned,
+    ...(anchor === undefined ? {} : { n: anchor }),
   };
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
@@ -996,7 +1047,9 @@ function parseButbScanCursor(token: string | undefined): ButbScanCursor | undefi
     if (cursor.v !== BUTB_SCAN_CURSOR_VERSION) return undefined;
     if (typeof cursor.t !== "string" || cursor.t.length === 0) return undefined;
     if (cursor.m === "n") {
-      return typeof cursor.ret === "number" && cursor.ret >= 0 ? cursor : undefined;
+      if (typeof cursor.ret !== "number" || cursor.ret < 0) return undefined;
+      if (cursor.n !== undefined && typeof cursor.n !== "string") return undefined;
+      return cursor;
     }
     if (typeof cursor.n !== "string" || cursor.n.length === 0) return undefined;
     return cursor;

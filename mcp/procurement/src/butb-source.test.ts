@@ -867,6 +867,143 @@ describe("ButbSource native subject search", () => {
     ]);
     expect(second.hasMore).toBe(false);
   });
+
+  it("resumes on the anchor row when fresh posts shifted the head", async () => {
+    // A row posted between calls lands above everything already served —
+    // every absolute position moves one down. The cursor's anchor keeps
+    // the skip exact: a bare returned-count would re-serve the shifted
+    // prefix row again.
+    const tailId = "AU20261019000041";
+    const first20 = fullRows(0, "AU20261020000001"); // 20 rows, 20.10.2026
+    const filtered = new Map<string, Map<number, string>>([
+      [
+        "инструментарий",
+        new Map([
+          [1, filteredBody(first20, 21)],
+          [2, filteredBody(syntheticRow(40, "19.10.2026", tailId), 21)],
+        ]),
+      ],
+    ]);
+    const shallow = new ButbSource({ client: nativeClient(filtered), maxSearchPages: 1 });
+    const first = await shallow.search(
+      query({ keywords: ["инструментарий"], publishedFrom: "1900-01-01T00:00:00Z", limit: 50 }),
+    );
+    expect(first.hits).toHaveLength(20);
+    expect(first.scanCursor).toBeDefined();
+
+    // Between the calls a fresh post lands at the head: page 1 now leads
+    // with the new row and pushes the last served row onto page 2.
+    const shiftedFirst19 = Array.from({ length: 19 }, (_v, i) =>
+      syntheticRow(i, "20.10.2026", i === 0 ? "AU20261020000001" : `AU20261010${39000 + i}`),
+    ).join("");
+    const anchorRow = syntheticRow(19, "20.10.2026", "AU2026101039019");
+    const shifted = new Map<string, Map<number, string>>([
+      [
+        "инструментарий",
+        new Map([
+          [
+            1,
+            filteredBody(
+              syntheticRow(0, "21.10.2026", "AU20261021000099") + shiftedFirst19,
+              22,
+            ),
+          ],
+          [
+            2,
+            filteredBody(anchorRow + syntheticRow(40, "19.10.2026", tailId), 22),
+          ],
+        ]),
+      ],
+    ]);
+    const resumed = new ButbSource({ client: nativeClient(shifted) });
+    const second = await resumed.search(
+      query({
+        keywords: ["инструментарий"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+        scanCursor: first.scanCursor,
+      }),
+    );
+    // The anchor lands exactly after the last served row — the only hit is
+    // the unread tail; the shifted row is not re-served.
+    expect(second.hits.map((hit) => hit.sourceProcurementId)).toEqual([`butb/${tailId}`]);
+    expect(second.hasMore).toBe(false);
+  });
+
+  it("reports hasMore instead of dying when a filtered call outruns the deadline", async () => {
+    // One filteredPage call is a whole postback chain — a stuck chain used
+    // to outrun the caller timeout and die with the whole window. The
+    // in-call deadline aborts the chain mid-flight and the source reports
+    // honest truncation with a resume token instead of an error.
+    const client = nativeClient(new Map());
+    client.filteredPage = (_criteria, _p, signal) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () =>
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+        );
+      });
+    const source = new ButbSource({ client, maxSearchMs: 30 });
+    const answer = await source.search(
+      query({
+        keywords: ["инструментарий", "нку"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+      }),
+    );
+    expect(answer.hasMore).toBe(true);
+    expect(answer.scanCursor).toBeDefined();
+  });
+
+  it("reuses the cached window when the caller lost its token", async () => {
+    // A timed-out call returns no token — without the process-local window
+    // the next call would re-submit every term from zero. The cached
+    // done-terms still carry the progress: only the unfinished term is
+    // re-read, served rows ride the dedup on the caller side.
+    const filtered = new Map<string, Map<number, string>>([
+      ["готово", new Map([[1, filteredBody(fullRows(0, "AU20261020000001"), 20)]])],
+      [
+        "хвост",
+        new Map([
+          [1, filteredBody(fullRows(20, "AU20261020000021"), 21)],
+          [2, filteredBody(syntheticRow(40, "19.10.2026", "AU20261019000041"), 21)],
+        ]),
+      ],
+    ]);
+    const client = nativeClient(filtered);
+    let tick = 0;
+    const now = () => new Date(1_800_000_000_000 + tick);
+    const inner = client.filteredPage!.bind(client);
+    client.filteredPage = async (criteria, p, signal) => {
+      const result = await inner(criteria, p, signal);
+      tick += 5_000;
+      return result;
+    };
+    const source = new ButbSource({ client, maxSearchMs: 7_000, now });
+    const first = await source.search(
+      query({
+        keywords: ["готово", "хвост"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+      }),
+    );
+    expect(first.hasMore).toBe(true);
+
+    // Second call carries NO token — the lost-cursor path. The cache still
+    // knows «готово» is done: it must not be re-submitted.
+    tick = 0;
+    const second = await source.search(
+      query({
+        keywords: ["готово", "хвост"],
+        publishedFrom: "1900-01-01T00:00:00Z",
+        limit: 50,
+      }),
+    );
+    expect(
+      client.calls.filtered.filter((call) => call.subject === "готово"),
+    ).toHaveLength(1);
+    expect(second.hasMore).toBe(false);
+    expect(second.hits.length).toBe(41);
+  });
 });
 
 describe("ButbSource.get", () => {

@@ -2759,6 +2759,64 @@ describe("specialist API", () => {
     await app.close();
   });
 
+  it("keeps a failed lane's resume token — a timeout must not rewind its window", async () => {
+    // A lane whose call timed out returns no token; the map built only from
+    // fresh answers used to drop that lane's position, so the next pass
+    // re-read its window from the head — a slow lane could never converge.
+    const journal = createMemoryAdminJournal();
+    let butbCalls = 0;
+    const searchDetailed = vi.fn(async (_query: { offset: number }) => {
+      butbCalls += 1;
+      if (butbCalls === 1) {
+        return {
+          hits: [
+            SearchHit.parse({
+              sourceId: "butb",
+              sourceProcurementId: "butb/AU1",
+              url: "https://zakupki.butb.by/auctions/viewinvitation.html?id=1",
+              title: "Поставка КТПБ-250",
+            }),
+          ] as SearchHit[],
+          hasMore: true,
+          failedSources: [] as string[],
+          cursors: { butb: "tok-mid" },
+        };
+      }
+      // The lane died mid-window: no hits, no token — just the failure mark.
+      return {
+        hits: [] as SearchHit[],
+        hasMore: false,
+        failedSources: ["butb"],
+        cursors: {},
+      };
+    });
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      searchHits: { search: async () => [], searchDetailed },
+      journal,
+    });
+    await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
+
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const afterFirst = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      discoveryScanCursors?: Record<string, string>;
+    };
+    expect(afterFirst.discoveryScanCursors).toEqual({ butb: "tok-mid" });
+
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+    const afterSecond = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {
+      discoveryScanCursors?: Record<string, string>;
+    };
+    // The failed lane kept its mid-window position — the next pass resumes
+    // there instead of re-reading the registry head.
+    expect(afterSecond.discoveryScanCursors).toEqual({ butb: "tok-mid" });
+    const log = await journal.list();
+    expect(log.some((item) => item.message.includes("источники не ответили"))).toBe(true);
+
+    await app.close();
+  });
+
   it("keeps the first page when a continuation page fails — partial, not lost", async () => {
     const journal = createMemoryAdminJournal();
     const searchDetailed = vi.fn(async (query: { offset: number }) => {

@@ -709,7 +709,11 @@ export function ProcurementsApp({
         <section
           ref={detailRef}
           className={
-            selected?.triage === undefined ? "detail" : `detail is-triage-${selected.triage}`
+            selected === undefined
+              ? "detail"
+              : `detail is-open${
+                  selected.triage === undefined ? "" : ` is-triage-${selected.triage}`
+                }`
           }
           aria-labelledby="case-heading"
         >

@@ -177,6 +177,14 @@ const DEADLINE_SOON_MS = 36 * 60 * 60 * 1000;
  * тогда watermark не двигается и окно перечитывается следующим проходом.
  */
 const DISCOVERY_MAX_PAGES = 3;
+/**
+ * Retrieval budget of one background pass. Unlike the button search it is
+ * not bounded by the nginx proxy timeout — a slow source may legitimately
+ * need several minutes per page call (BUTB throttles postbacks), so the
+ * window budget is sized to let a bounded call answer with a cursor rather
+ * than die mid-flight.
+ */
+const DISCOVERY_SEARCH_BUDGET_MS = 900_000;
 
 export interface SpecialistSearchHitsPort {
   search: (query: Omit<SearchQuery, "sourceId">) => Promise<readonly SearchHit[]>;
@@ -1032,6 +1040,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     offset: number,
     publishedFrom?: string,
     scanCursors?: Readonly<Record<string, string>>,
+    retrievalBudgetMs?: number,
   ): Promise<{
     plan: SearchIntentPlan;
     hits: SearchHit[];
@@ -1061,7 +1070,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     // draw from it — a sequential stage gets what is left, never a fresh
     // full budget. Sized to sit under the nginx proxy timeout for the
     // manual-search route (330 s).
-    const operationDeadline = Date.now() + (options.searchBudgetMs ?? 300_000);
+    const operationDeadline =
+      Date.now() + (retrievalBudgetMs ?? options.searchBudgetMs ?? 300_000);
     const remainingBudget = () => Math.max(1, operationDeadline - Date.now());
     const searchDetailed = async (
       query: Omit<SearchQuery, "sourceId">,
@@ -1966,13 +1976,36 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         try {
           await discoveryController.beforeRequest(new Date());
           const publishedFrom = discoveryPublishedFrom(profile);
-          const fetched = await fetchProfileHits(profile, limit, 0, publishedFrom, scanCursors);
+          const fetched = await fetchProfileHits(
+            profile,
+            limit,
+            0,
+            publishedFrom,
+            scanCursors,
+            DISCOVERY_SEARCH_BUDGET_MS,
+          );
           plan = fetched.plan;
           const failedSources = new Set<string>(fetched.failedSources);
           let collected = fetched.hits;
           let hasMore = fetched.hasMore;
           let lastPageSize = fetched.hits.length;
-          scanCursors = { ...fetched.scanCursors };
+          // A lane's resume token must survive that lane's failure: a call
+          // that timed out returns no token, and dropping the previous one
+          // would restart an already half-read window at the head every
+          // pass. A lane that answered with no token read its window to the
+          // end — its key is the one that may go.
+          const mergePageCursors = (
+            cursors: Readonly<Record<string, string>>,
+            reported: readonly string[],
+          ): Record<string, string> => {
+            const next = { ...scanCursors };
+            for (const key of Object.keys(next)) {
+              if (!(key in cursors) && !reported.includes(key)) delete next[key];
+            }
+            for (const [key, token] of Object.entries(cursors)) next[key] = token;
+            return next;
+          };
+          scanCursors = mergePageCursors(fetched.scanCursors, fetched.failedSources);
           let pageError: unknown;
           // A window is fully read only when the source stops reporting more:
           // page deeper while it claims unread rows. Empty page or the bound
@@ -1988,7 +2021,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
               collected = mergeSearchHits(collected, page.hits);
               lastPageSize = page.hits.length;
               hasMore = page.hasMore;
-              scanCursors = { ...page.scanCursors };
+              scanCursors = mergePageCursors(page.scanCursors, page.failedSources);
             }
           } catch (error) {
             // A failing continuation page must not throw away what the

@@ -85,6 +85,7 @@ async function connectSourceLane(options: {
   logger: Logger;
   blobDirectory: string;
   health?: SourceHealthMonitor | undefined;
+  envOverrides?: Record<string, string>;
 }): Promise<SourceLane | undefined> {
   const callersBySource = new Map<string, McpToolCaller>();
   const missing = new Set<string>();
@@ -99,6 +100,7 @@ async function connectSourceLane(options: {
         onlySources: [String(sourceId)],
         onProcessClosed: () =>
           options.health?.noteClosed(options.lane, String(sourceId)),
+        ...(options.envOverrides === undefined ? {} : { envOverrides: options.envOverrides }),
       });
       callersBySource.set(String(sourceId), child.caller);
       children.push(child);
@@ -165,6 +167,13 @@ async function main(): Promise<void> {
   // Interactive reads (card open, decision hydrate) get their own lane:
   // one stdio pipe per source is strictly serial, so a card click would
   // otherwise queue behind every background search/discovery/ingest call.
+  // The BUTB child on this lane gets a shorter search budget: card clicks
+  // share its pipe, so an interactive native search must return a bounded
+  // page instead of holding the lane for the background-sized window.
+  const interactiveButbSearchMs =
+    Number(process.env["BUTB_BY_INTERACTIVE_MAX_SEARCH_MS"]) > 0
+      ? String(process.env["BUTB_BY_INTERACTIVE_MAX_SEARCH_MS"])
+      : "120000";
   const mcpInteractive =
     mode === "live"
       ? await connectSourceLane({
@@ -173,6 +182,7 @@ async function main(): Promise<void> {
           logger,
           blobDirectory,
           health: sourceHealth,
+          envOverrides: { BUTB_BY_MAX_SEARCH_MS: interactiveButbSearchMs },
         })
       : undefined;
   sourceHealth?.start();

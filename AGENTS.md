@@ -437,3 +437,21 @@ cp .env.example .env
 `.env` **никогда не коммитится**. Секреты не попадают в Domain Profiles и не пишутся в логи — логгер вырезает поля вроде `token`, `api_key`, `authorization` автоматически.
 
 Для локальной инфраструктуры (PostgreSQL, Redis, MinIO) понадобится Docker. На этапе 2 появится `infra/docker-compose.yml`.
+
+---
+
+## 11. Деплой на прод
+
+Корневой `npm run build` — только `tsc --build` (API). Веб-бандл он **не собирает** — один раз из-за этого `apps/web/dist` устарел на 4 дня и мобильный фикс не доехал до прода.
+
+Правильная последовательность на сервере (`/opt/procurement-ai-platform`):
+
+```bash
+git pull --ff-only
+npm run build                      # tsc для API/MCP
+npm run build -w @procurement/web  # vite build — обязательно
+systemctl restart procurement-api.service
+curl -s http://127.0.0.1:3001/api/health   # sha + degraded
+```
+
+SSH: `ssh -i ~/.ssh/id_ed25519 root@193.47.42.49` (hostname `zakupki`, API на порту 3001, за nginx).

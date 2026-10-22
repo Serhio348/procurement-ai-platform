@@ -331,9 +331,8 @@ async function main(): Promise<void> {
               return true;
             },
             async decide(cardId, kind) {
-              if (decideBridge.fn === undefined) return "unavailable";
-              const card = await decideBridge.fn(workspaceId, cardId, kind);
-              return card === undefined ? "not_found" : "ok";
+              if (decideBridge.fn === undefined) return { status: "unavailable" as const };
+              return decideBridge.fn(workspaceId, cardId, kind);
             },
             async resolveSuggestion(suggestionId, action) {
               if (decideBridge.suggestion === undefined) return "unavailable";

@@ -133,11 +133,21 @@ describe("telegram endpoints", () => {
     const app = await buildSpecialistApi({ catalog, workspace });
     try {
       const decided = await app.decideForWorkspace(TEST_WORKSPACE_ID, card.id, "monitor");
-      expect(decided?.triage).toBe("monitor");
+      expect(decided.status).toBe("applied");
+      expect(decided.card?.triage).toBe("monitor");
       // The same invariants the console endpoint keeps: queue and inbox closed.
       expect(workspace.searchIds(profileId)).toEqual([]);
       expect(catalog.urgentInbox()).toEqual([]);
-      expect(await app.decideForWorkspace(TEST_WORKSPACE_ID, "missing", "reject")).toBeUndefined();
+      expect((await app.decideForWorkspace(TEST_WORKSPACE_ID, "missing", "reject")).status).toBe(
+        "not_found",
+      );
+      // A stale Telegram button must not flip the console's decision —
+      // the second tap reports the standing mark instead of overwriting it.
+      const repeated = await app.decideForWorkspace(TEST_WORKSPACE_ID, card.id, "monitor");
+      expect(repeated).toMatchObject({ status: "already", triage: "monitor" });
+      const conflict = await app.decideForWorkspace(TEST_WORKSPACE_ID, card.id, "reject");
+      expect(conflict).toMatchObject({ status: "conflict", triage: "monitor" });
+      expect(catalog.procurement(card.id)?.triage).toBe("monitor");
     } finally {
       await app.close();
     }

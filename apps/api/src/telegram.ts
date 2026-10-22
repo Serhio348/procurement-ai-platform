@@ -248,8 +248,18 @@ export interface TelegramNotifierOptions {
       url: string;
     }[];
     dismiss(id: string): Promise<boolean>;
-    /** Applies «Следить»/«Участвовать»/«Не нужно» inside the linked cabinet. */
-    decide?(cardId: string, kind: SpecialistTriageKindValue): Promise<"ok" | "not_found" | "unavailable">;
+    /**
+     * Applies «Следить»/«Участвовать»/«Не нужно» inside the linked cabinet.
+     * "already" — same mark stood; "conflict" — the console holds a different
+     * mark, reported to the specialist instead of silently overwritten.
+     */
+    decide?(
+      cardId: string,
+      kind: SpecialistTriageKindValue,
+    ): Promise<{
+      status: "applied" | "already" | "conflict" | "not_found" | "unavailable";
+      triage?: SpecialistTriageKindValue;
+    }>;
     /** «Принять» / «Отклонить» on an assistant rule inside the linked cabinet. */
     resolveSuggestion?(
       suggestionId: string,
@@ -327,6 +337,23 @@ export function formatInboxMessage(
 export function createTelegramNotifier(options: TelegramNotifierOptions): TelegramNotifier {
   const { bot, store, logger } = options;
   const publicUrl = options.publicUrl.replace(/\/$/, "");
+  /**
+   * Inbox notifications are fired in parallel by the events that create them;
+   * Telegram renders arrivals in network order — a race, not the event order.
+   * One chain per workspace keeps sends sequential, newest lands at the bottom.
+   */
+  const sendOrder = new Map<string, Promise<unknown>>();
+  const ordered = (key: string, task: () => Promise<void>): Promise<void> => {
+    const run = (sendOrder.get(key) ?? Promise.resolve()).then(task, task);
+    sendOrder.set(
+      key,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  };
 
   const safeSend = async (
     link: TelegramLink,
@@ -485,19 +512,21 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
       await store.setMode(userId, mode);
     },
     async notifyInbox(workspaceId, item) {
-      try {
-        const link = await store.linkForWorkspace(workspaceId);
-        if (link === undefined) return;
-        if (link.mode === "urgent" && item.change.urgent !== true) return;
-        // Dedupe first: a restart between send and mark must not spam, so the
-        // marker is written before the network call.
-        const fresh = await store.markSent(workspaceId, item.change.id);
-        if (!fresh) return;
-        const message = formatInboxMessage(item, publicUrl);
-        await safeSend(link, message);
-      } catch (error) {
-        logger.error("Telegram notify failed", error, { workspaceId });
-      }
+      await ordered(workspaceId, async () => {
+        try {
+          const link = await store.linkForWorkspace(workspaceId);
+          if (link === undefined) return;
+          if (link.mode === "urgent" && item.change.urgent !== true) return;
+          // Dedupe first: a restart between send and mark must not spam, so the
+          // marker is written before the network call.
+          const fresh = await store.markSent(workspaceId, item.change.id);
+          if (!fresh) return;
+          const message = formatInboxMessage(item, publicUrl);
+          await safeSend(link, message);
+        } catch (error) {
+          logger.error("Telegram notify failed", error, { workspaceId });
+        }
+      });
     },
     async notifySuggestion(_workspaceId, _suggestion) {
       // Suggestions are answered in the console. Already delivered messages
@@ -519,24 +548,40 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
             const label = DECIDE_LABEL[kind as SpecialistTriageKindValue];
             const link = await store.linkByChat(chatId);
             const cabinet = link === undefined ? undefined : await options.openCabinet?.(link.userId);
-            const result =
+            const outcome =
               cabinet?.decide === undefined || label === undefined
-                ? "unavailable"
+                ? { status: "unavailable" as const }
                 : await cabinet.decide(cardId, kind as SpecialistTriageKindValue);
-            await bot.answerCallbackQuery(
-              id,
-              result === "ok"
+            // The mark the card actually carries after this tap — on a stale
+            // message that is the console's decision, not the tapped one.
+            const effective = outcome.triage ?? (kind as SpecialistTriageKindValue);
+            const answer =
+              outcome.status === "applied"
                 ? `Принято: «${label}»`
-                : result === "not_found"
-                  ? "Закупка не найдена — возможно, уже удалена"
-                  : "Решение сейчас недоступно",
-            );
-            if (result === "ok" && messageId !== undefined && messageText !== undefined) {
+                : outcome.status === "already"
+                  ? `Уже отмечено: «${label}»`
+                  : outcome.status === "conflict"
+                    ? `В консоли уже решено: «${DECIDE_LABEL[effective]}» — меняется в консоли`
+                    : outcome.status === "not_found"
+                      ? "Закупка не найдена — возможно, уже удалена"
+                      : "Решение сейчас недоступно";
+            await bot.answerCallbackQuery(id, answer);
+            // A reachable card gets its message rewritten to the real mark and
+            // loses the buttons — stale messages heal on first tap instead of
+            // pretending the decision is still open.
+            if (
+              outcome.status !== "unavailable" &&
+              messageId !== undefined &&
+              messageText !== undefined
+            ) {
               try {
                 await bot.editMessageText({
                   chatId,
                   messageId,
-                  text: `${messageText}\n\nРешение: «${label}»`,
+                  text:
+                    outcome.status === "not_found"
+                      ? `${escapeHtml(messageText)}\n\nЗакупка не найдена в кабинете.`
+                      : `${escapeHtml(messageText)}\n\nРешение: «${DECIDE_LABEL[effective]}»`,
                   buttons: [[{ text: "Открыть в консоли", url: publicUrl }]],
                 });
               } catch (error) {

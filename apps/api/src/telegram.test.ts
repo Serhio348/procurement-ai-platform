@@ -105,7 +105,14 @@ function setup(
             },
             async decide(cardId, kind) {
               decisions.push({ cardId, kind });
-              return cardId === "missing" ? "not_found" : "ok";
+              if (cardId === "missing") return { status: "not_found" as const };
+              if (cardId === "decided-other") {
+                return { status: "conflict" as const, triage: "participate" as const };
+              }
+              if (cardId === "decided-same") {
+                return { status: "already" as const, triage: kind };
+              }
+              return { status: "applied" as const, triage: kind };
             },
             async resolveSuggestion(suggestionId, action) {
               rules.push({ suggestionId, action });
@@ -246,6 +253,71 @@ describe("telegram notifier", () => {
     expect(bot.edited[0]?.text).toContain("Решение: «Участвовать»");
     expect(flatButtons(bot.edited[0] as SentMessage).map((button) => button.text)).toEqual([
       "Открыть в консоли",
+    ]);
+  });
+
+  it("reports the standing mark on a stale button instead of overwriting it", async () => {
+    const { bot, notifier, decisions } = setup();
+    const { code } = await notifier.createLinkCode(userId);
+    await notifier.handleUpdate({ updateId: 1, message: { chatId: "777", text: `/start ${code}` } });
+
+    // The console decided «Участвовать» after this message shipped — a «Не
+    // нужно» tap must not flip it, but the message still heals to the mark.
+    await notifier.handleUpdate({
+      updateId: 2,
+      callbackQuery: {
+        id: "cb-conflict",
+        chatId: "777",
+        data: "t:decided-other:reject",
+        messageId: 57,
+        messageText: "Новая закупка\nПодстанция <6 кВ>",
+      },
+    });
+    expect(bot.answered.at(-1)?.text).toBe(
+      "В консоли уже решено: «Участвовать» — меняется в консоли",
+    );
+    expect(bot.edited.at(-1)?.text).toContain("Решение: «Участвовать»");
+    // The old text goes back HTML-escaped — a «<6 кВ>» title must not break
+    // the edit and leave dead buttons behind.
+    expect(bot.edited.at(-1)?.text).toContain("&lt;6 кВ&gt;");
+    expect(flatButtons(bot.edited.at(-1) as SentMessage).map((button) => button.text)).toEqual([
+      "Открыть в консоли",
+    ]);
+
+    // Same mark again — honest idempotent answer, buttons still dropped.
+    await notifier.handleUpdate({
+      updateId: 3,
+      callbackQuery: {
+        id: "cb-already",
+        chatId: "777",
+        data: "t:decided-same:monitor",
+        messageId: 58,
+        messageText: "Новая закупка",
+      },
+    });
+    expect(bot.answered.at(-1)?.text).toBe("Уже отмечено: «Следить»");
+    expect(decisions).toEqual([
+      { cardId: "decided-other", kind: "reject" },
+      { cardId: "decided-same", kind: "monitor" },
+    ]);
+  });
+
+  it("delivers inbox notifications in event order, not network race order", async () => {
+    const { bot, notifier } = setup();
+    const { code } = await notifier.createLinkCode(userId);
+    await notifier.handleUpdate({ updateId: 1, message: { chatId: "777", text: `/start ${code}` } });
+    bot.sent.length = 0;
+
+    const first = inboxItem();
+    first.procurement.title = "Первая по времени";
+    const second = inboxItem();
+    second.change.id = "evt-second" as InboxFixtureItem["change"]["id"];
+    second.procurement.title = "Вторая по времени";
+    await Promise.all([notifier.notifyInbox(workspaceId, first), notifier.notifyInbox(workspaceId, second)]);
+
+    expect(bot.sent.map((m) => m.text)).toEqual([
+      expect.stringContaining("Первая по времени"),
+      expect.stringContaining("Вторая по времени"),
     ]);
   });
 

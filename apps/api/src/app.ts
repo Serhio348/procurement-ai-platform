@@ -225,13 +225,19 @@ export interface SpecialistApi extends FastifyInstance {
   /**
    * Applies «Следить»/«Участвовать»/«Не нужно» inside a named cabinet — the
    * Telegram callback path has no HTTP request, so it opens the workspace and
-   * runs the same decision the console endpoint performs.
+   * runs the same decision the console endpoint performs. A card that already
+   * carries a decision is reported, not silently overwritten: the console
+   * keeps ownership of changing a made decision.
    */
   decideForWorkspace: (
     workspaceId: string,
     cardId: string,
     kind: SpecialistTriageKindValue,
-  ) => Promise<SpecialistProcurementCardValue | undefined>;
+  ) => Promise<{
+    status: "applied" | "already" | "conflict" | "not_found";
+    triage?: SpecialistTriageKindValue;
+    card?: SpecialistProcurementCardValue;
+  }>;
   /** «Принять» / «Отклонить» on an assistant rule from the Telegram callback. */
   resolveSuggestionForWorkspace: (
     workspaceId: string,
@@ -3586,7 +3592,18 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     kind,
   ) => {
     const cabinet = await cabinets.open(workspaceId);
-    return cabinetAls.run(cabinet, () => applyTriageDecision(cardId, kind));
+    return cabinetAls.run(cabinet, async () => {
+      const card = await resolveCase(cardId);
+      if (card === undefined) return { status: "not_found" as const };
+      // A Telegram button rides on a possibly stale message: an in-app
+      // decision made after the bot sent it must not be silently flipped.
+      const current = withTriage(card, workspace()).triage;
+      if (current === kind) return { status: "already" as const, triage: current };
+      if (current !== undefined) return { status: "conflict" as const, triage: current };
+      const next = await applyTriageDecision(cardId, kind);
+      if (next === undefined) return { status: "not_found" as const };
+      return { status: "applied" as const, triage: kind, card: next };
+    });
   };
 
   const resolveSuggestionForWorkspace: SpecialistApi["resolveSuggestionForWorkspace"] = async (

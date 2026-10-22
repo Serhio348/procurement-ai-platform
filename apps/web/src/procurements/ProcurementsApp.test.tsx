@@ -175,6 +175,35 @@ describe("ProcurementsApp", () => {
     expect(detail?.className).not.toContain("is-triage-");
   });
 
+  it("shows the plain list on /procurements — the auto-picked first card is not 'open'", async () => {
+    // items[0] is auto-selected for the desktop two-pane view. On a phone
+    // that phantom selection rendered its detail above the list; the tap on
+    // that same row then changed nothing — no scroll, no visible open.
+    const items = [
+      SpecialistProcurementCard.parse({
+        id: "00000000-0000-4000-8000-000000000303",
+        title: "Первая в списке",
+        status: "accepting_bids",
+        statusLabel: "приём заявок",
+        url: "https://example.test/auction/888",
+        sourceProcurementId: "auction/888",
+      }),
+    ];
+    render(
+      <MemoryRouter initialEntries={["/procurements"]}>
+        <Routes>
+          <Route path="/procurements" element={<ProcurementsApp items={items} />} />
+          <Route path="/procurements/:id" element={<ProcurementsApp items={items} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const detail = screen
+      .getByRole("heading", { level: 2, name: "Первая в списке" })
+      .closest("section");
+    expect(detail?.className).toBe("detail");
+  });
+
   it("opens a hashed PDF from the local API copy instead of goszakupki.by", async () => {
     const user = userEvent.setup();
     const hash = "a".repeat(64);

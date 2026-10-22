@@ -346,7 +346,7 @@ export function ProcurementsApp({
       return;
     }
     detailRef.current?.scrollIntoView({ block: "start" });
-  }, [selectedId]);
+  }, [selectedId, requestedId]);
   const selectedKindLabel =
     selected === undefined ? undefined : cardProcedureKindLabel(selected);
   const ingestForSelected =
@@ -675,6 +675,18 @@ export function ProcurementsApp({
                       className={procurementRowClass(isSelected, item.triage)}
                       aria-current={isSelected ? "true" : undefined}
                       onClick={() => {
+                        // Тап — это «покажи карточку»: на телефоне деталь живёт
+                        // над списком, и если выбранная карточка уже та же самая,
+                        // эффект скролла на selectedId не сработает — прокручиваем
+                        // по самому тапу.
+                        if (
+                          typeof window.matchMedia === "function" &&
+                          window.matchMedia("(max-width: 768px)").matches
+                        ) {
+                          setTimeout(() => {
+                            detailRef.current?.scrollIntoView({ block: "start" });
+                          }, 0);
+                        }
                         void navigate(`/procurements/${item.id}`);
                       }}
                     >
@@ -709,7 +721,7 @@ export function ProcurementsApp({
         <section
           ref={detailRef}
           className={
-            selected === undefined
+            selected === undefined || requestedId === undefined
               ? "detail"
               : `detail is-open${
                   selected.triage === undefined ? "" : ` is-triage-${selected.triage}`

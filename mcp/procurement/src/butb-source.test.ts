@@ -847,8 +847,9 @@ describe("ButbSource native subject search", () => {
     ]);
 
     // Resume on the same instance: «готово» is skipped entirely, «хвост»
-    // finishes its two pages, and the returned-count slice (40) drops the
-    // candidates the first call already served.
+    // continues at page 2 — its page 1 rows are already in the cached
+    // candidates, and re-reading them each call is exactly what kept fat
+    // terms (a several-hundred-row model) from ever finishing.
     tick = 0;
     const second = await source.search(
       query({
@@ -858,10 +859,14 @@ describe("ButbSource native subject search", () => {
         scanCursor: first.scanCursor,
       }),
     );
-    // «готово» was submitted exactly once — by the first call.
+    // «готово» was submitted exactly once — by the first call; «хвост»
+    // resumed below its already-read page, never at page 1 again.
     expect(
       client.calls.filtered.filter((call) => call.subject === "готово"),
     ).toHaveLength(1);
+    expect(
+      client.calls.filtered.filter((call) => call.subject === "хвост").map((call) => call.page),
+    ).toEqual([1, 2]);
     expect(second.hits.map((hit) => hit.sourceProcurementId)).toEqual([
       "butb/AU20261019000041",
     ]);

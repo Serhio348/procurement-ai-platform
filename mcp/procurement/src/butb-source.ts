@@ -70,11 +70,17 @@ interface CacheEntry {
 /**
  * Progress of a native per-term window: the candidates collected so far and
  * how many leading terms were fully read. Held between calls so a resumed
- * search does not re-submit finished terms.
+ * search does not re-submit finished terms. `termIndex`/`nextPage` mark
+ * the one term that is mid-way: a fat filtered model (one term can run
+ * hundreds of rows — «ТП» alone is more than a call's postback budget)
+ * must resume at its next page, not restart at page 1 — otherwise that
+ * single term holds hasMore up forever and the window never converges.
  */
 interface ButbNativeWindow {
   readonly candidates: Map<string, { row: ButbRegistryRow; terms: string[] }>;
   doneTerms: number;
+  termIndex?: number;
+  nextPage?: number;
 }
 
 /** Rows per registry page — verified live and in fixtures. */
@@ -414,10 +420,28 @@ export class ButbSource implements ProcurementSourcePort {
     const cached = this.#windows.get(fingerprint);
     const candidates =
       cached?.candidates ?? new Map<string, { row: ButbRegistryRow; terms: string[] }>();
-    let termsDone = cached?.doneTerms ?? 0;
+    // ti/pg are meaningful only against the cached candidates they were
+    // read into: a fresh instance that skips the open term's head pages
+    // would merge a window missing the served prefix — the ret/anchor
+    // slice then sits on shifted positions and drops the tail. Without
+    // the window the honest resume is a full re-read; the caller's dedup
+    // absorbs the re-served rows.
+    let termsDone = 0;
+    let termStartPage = 1;
+    if (cached !== undefined) {
+      termsDone = resume?.ti ?? cached.doneTerms;
+      termStartPage = (resume?.ti !== undefined ? resume.pg : cached.nextPage) ?? 1;
+    }
     let hasMore = false;
     let scannedRows = 0;
+    // The term/page the scan is currently inside — written into the window
+    // and the cursor whenever the pass stops mid-term.
+    let openTerm: number | undefined;
+    let openPage = 1;
 
+    // The term the resume points inside — termsDone advances in the loop,
+    // so comparing against it would re-apply the mid-page start wrongly.
+    const resumeTermIndex = termsDone;
     for (let i = termsDone; i < terms.length; i += 1) {
       const term = terms[i];
       if (term === undefined) break;
@@ -427,7 +451,10 @@ export class ButbSource implements ProcurementSourcePort {
         break;
       }
       let termDone = false;
-      for (let page = 1; page <= this.#maxSearchPages && !termDone; page += 1) {
+      const firstPage = i === resumeTermIndex ? termStartPage : 1;
+      for (let page = firstPage; page <= this.#maxSearchPages && !termDone; page += 1) {
+        openTerm = i;
+        openPage = page; // not yet read if the scan dies right here
         throwIfAborted(this.sourceId, ctx?.signal);
         if (this.#now().getTime() >= deadline) {
           hasMore = true;
@@ -499,6 +526,9 @@ export class ButbSource implements ProcurementSourcePort {
         if (pageBelowWatermark || candidates.size >= budget) {
           termDone = pageBelowWatermark;
           if (!pageBelowWatermark) hasMore = true;
+          // The page was read before the budget stopped the term — the
+          // resume point is the next page, not this one again.
+          if (!termDone) openPage = page + 1;
           break;
         }
         const total = butbTotalRecords(rendered.body);
@@ -508,16 +538,24 @@ export class ButbSource implements ProcurementSourcePort {
         if (total !== undefined && page >= Math.max(1, Math.ceil(total / PAGE_SIZE))) {
           termDone = true;
         }
+        openPage = page + 1; // the page just read — the next one is unread
       }
       // An empty page or the advertised end both close the term; running
       // out of pages does not.
       if (!termDone && !hasMore) {
         hasMore = true;
       }
-      if (termDone) termsDone = i + 1;
+      if (termDone) {
+        termsDone = i + 1;
+        openTerm = undefined;
+      }
       if (hasMore) break;
     }
-    this.#rememberWindow(fingerprint, { candidates, doneTerms: termsDone });
+    this.#rememberWindow(fingerprint, {
+      candidates,
+      doneTerms: termsDone,
+      ...(openTerm === undefined ? {} : { termIndex: openTerm, nextPage: openPage }),
+    });
 
     const merged = [...candidates.values()]
       .map(({ row, terms: matched }) => ({ row, terms: matched }))
@@ -543,6 +581,8 @@ export class ButbSource implements ProcurementSourcePort {
           skip + hits.length,
           query,
           merged[skip + hits.length - 1]?.row.registryNumber ?? resume?.n,
+          termsDone,
+          openTerm === undefined ? undefined : openPage,
         )
       : undefined;
     this.#logger.info("butb subject search", {
@@ -970,6 +1010,10 @@ interface ButbScanCursor {
    * `n` below, because head inserts shift every absolute position.
    */
   ret?: number;
+  /** Native search only: how many leading terms were fully read. */
+  ti?: number;
+  /** Native search only: the open term's next unread page (`ti` counts closed terms). */
+  pg?: number;
   /**
    * Scan mode: the registry number of the row the truncated scan stopped
    * at. Native mode (`m: "n"`): the last returned candidate's registry
@@ -1027,6 +1071,8 @@ function encodeButbNativeCursor(
   returned: number,
   query: SearchQuery,
   anchor?: string,
+  termsDone?: number,
+  openTermPage?: number,
 ): string {
   const cursor: ButbScanCursor = {
     v: BUTB_SCAN_CURSOR_VERSION,
@@ -1034,6 +1080,8 @@ function encodeButbNativeCursor(
     m: "n",
     ret: returned,
     ...(anchor === undefined ? {} : { n: anchor }),
+    ...(termsDone === undefined ? {} : { ti: termsDone }),
+    ...(openTermPage === undefined ? {} : { pg: openTermPage }),
   };
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
@@ -1049,6 +1097,12 @@ function parseButbScanCursor(token: string | undefined): ButbScanCursor | undefi
     if (cursor.m === "n") {
       if (typeof cursor.ret !== "number" || cursor.ret < 0) return undefined;
       if (cursor.n !== undefined && typeof cursor.n !== "string") return undefined;
+      if (cursor.ti !== undefined && (typeof cursor.ti !== "number" || cursor.ti < 0)) {
+        return undefined;
+      }
+      if (cursor.pg !== undefined && (typeof cursor.pg !== "number" || cursor.pg < 1)) {
+        return undefined;
+      }
       return cursor;
     }
     if (typeof cursor.n !== "string" || cursor.n.length === 0) return undefined;

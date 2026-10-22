@@ -367,6 +367,7 @@ export function parseButbCard(input: {
   const gias = fields.get("номер закупки в гиас");
   const title =
     emptyToUndefined(fields.get("наименование закупки")) ??
+    fields.get("наименование процедуры") ??
     fields.get("предмет закупки") ??
     registryNumber;
   const sourceStatus = fields.get("состояние");
@@ -468,6 +469,9 @@ function cardFields($: CheerioAPI): Map<string, string> {
   const fields = new Map<string, string>();
   const spans = $("span[id]")
     .toArray()
+    // Table header cells (<th>) also carry span[id] — «Предмет закупки»
+    // followed by «Количество (объем)» reads as a field pair otherwise.
+    .filter((element) => $(element).parents("th").length === 0)
     .map((element) => $(element).text().replace(/\s+/g, " ").trim());
   for (let index = 0; index + 1 < spans.length; index += 1) {
     const label = normalizeLabel(spans[index] ?? "");

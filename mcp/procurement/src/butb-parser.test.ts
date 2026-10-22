@@ -146,6 +146,28 @@ describe("parseButbCard", () => {
     expect(parsed.documents[0]!.sourceUrl).toContain("/auctions/download?id=");
     expect(parsed.card.listedDocuments.length).toBe(parsed.documents.length);
   });
+
+  it("reads the MR title from «Наименование процедуры», not the lots header", () => {
+    // MR cards have no «Наименование закупки» field; their only
+    // «Предмет закупки» span is the lots-table column header, whose next
+    // span is «Количество (объем)» — it must not become the title.
+    const mrCard = `<html><body>
+      <span id="f1">Регистрационный номер</span><span id="f2">MR20261022397617</span>
+      <span id="f3">Состояние</span><span id="f4">Подача предложений / документов</span>
+      <span id="f5">Наименование процедуры</span><span id="f6">Изучение конъюнктуры рынка при разработке проектной документации (дооснащение шкафа УУТЗ)</span>
+      <table><thead><tr>
+        <th><span id="h1">Предмет закупки</span></th>
+        <th><span id="h2">Количество (объем)</span></th>
+      </tr></thead></table>
+    </body></html>`;
+    const mr = parseButbCard({
+      html: mrCard,
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      fetchedAt: "2026-10-22T12:00:00Z",
+    });
+    expect(mr.card.title).toContain("Изучение конъюнктуры рынка");
+    expect(mr.card.title).not.toBe("Количество (объем)");
+  });
 });
 
 describe("kind and status mapping", () => {

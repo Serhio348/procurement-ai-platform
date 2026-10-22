@@ -58,8 +58,20 @@ if (root === null) {
 // API responses are never cached — the console must not show stale
 // procurements or inbox rows.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  // A new worker takes over via skipWaiting — reload once so the user actually
+  // runs the fresh bundle instead of a stale shell kept alive by the PWA.
+  let swReloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (swReloaded) return;
+    swReloaded = true;
+    window.location.reload();
+  });
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js");
+    void navigator.serviceWorker.register("/sw.js").then((registration) => {
+      // Chrome only re-checks sw.js on navigation — an installed PWA may not
+      // navigate for days. Ask for the update on every launch.
+      void registration.update();
+    });
   });
 }
 

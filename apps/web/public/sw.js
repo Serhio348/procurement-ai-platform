@@ -1,10 +1,13 @@
 // App-shell service worker: fast startup and an honest offline screen.
 // API calls are never cached — a procurement console must not serve stale
 // cards, inbox rows or decisions.
-const SHELL_CACHE = "pza-shell-v1";
+const SHELL_CACHE = "pza-shell-v2";
 const SHELL_URLS = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png"];
 
 self.addEventListener("install", (event) => {
+  // A phone PWA client can stay alive for days — without skipWaiting the new
+  // worker waits forever and users keep running the stale shell.
+  self.skipWaiting();
   event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS)));
 });
 

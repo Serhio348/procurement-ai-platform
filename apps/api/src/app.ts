@@ -2279,6 +2279,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       stale: "данные опроса устарели",
       pending: "опрос ещё не выполнялся",
     };
+    // "stale" is honest aging, not a fault: the lane is busy with a real
+    // call and the cached verdict is simply getting old. Showing it as a
+    // degraded-service alert made every long BUTB window look broken.
+    const laneStatusesQuiet = new Set(["stale"]);
     const requiredOk = new Set(snapshot?.servingSources ?? []);
     let requiredSourcesServed = true;
     if (snapshot !== undefined) {
@@ -2290,6 +2294,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             }
             continue;
           }
+          if (laneStatusesQuiet.has(cell.status)) continue;
           degraded.push(
             `Источник ${sourceId}: ${laneStatusLabel[cell.status] ?? cell.status} (${lane})`,
           );

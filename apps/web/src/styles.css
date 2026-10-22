@@ -1914,6 +1914,8 @@ h3 {
   font-size: 13px;
   line-height: 1.4;
   box-shadow: 0 6px 24px rgb(20 30 45 / 25%);
+  /* Инфо-плашка: тапы должны уходить в список под ней, а не в неё. */
+  pointer-events: none;
 }
 
 .my-procurements-lead {

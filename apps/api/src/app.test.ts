@@ -5779,6 +5779,48 @@ describe("service health (R42)", () => {
     await app.close();
   });
 
+  it("keeps a stale lane out of the user-facing degraded list — busy is not broken", async () => {
+    // A lane mid-call ages its cached verdict to "stale": honest aging,
+    // not a fault. Raising the service-degraded banner for it made every
+    // long search look like an outage on the console.
+    const app = await buildSpecialistApi({
+      catalog: new SpecialistCatalog(),
+      postgres: true,
+      serviceHealth: {
+        mode: "live",
+        objectStore: "minio",
+        source: { background: true, interactive: true },
+        sources: ["goszakupki_by", "butb"],
+        requiredSources: ["goszakupki_by", "butb"],
+        sourcesSnapshot: () => ({
+          lanes: {
+            background: {
+              goszakupki_by: { status: "stale", alive: true, lastOkAt: "2026-10-22T06:00:00Z" },
+              butb: { status: "stale", alive: true, lastOkAt: "2026-10-22T06:00:00Z" },
+            },
+            interactive: {
+              goszakupki_by: { status: "ok", alive: true, registered: ["goszakupki_by"] },
+              butb: { status: "ok", alive: true, registered: ["butb"] },
+            },
+          },
+          sources: ["goszakupki_by", "butb"],
+          servingSources: ["goszakupki_by", "butb"],
+        }),
+        models: { searchIntent: true, classifier: true, commercialReader: true },
+        mail: true,
+        postgresConfigured: true,
+        postgresPing: async () => true,
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const body = JSON.parse(response.body) as { ready: boolean; degraded: string[] };
+    expect(body.ready).toBe(true);
+    expect(body.degraded).toEqual([]);
+
+    await app.close();
+  });
+
   it("reports a real missing registration only when a lane actually answered", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),

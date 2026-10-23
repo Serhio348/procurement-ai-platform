@@ -298,7 +298,7 @@ async function main(): Promise<void> {
   const telegramBot = createTelegramBotFromEnv(process.env);
   // Extracted so a failed boot-time getMe can be retried later: one network
   // blip at startup must not leave the bot dead until the next restart.
-  const configureTelegram = async (): Promise<boolean> => {
+  const configureTelegram = async (retry = false): Promise<boolean> => {
     if (telegramBot === undefined || persistence.db === undefined) return false;
     try {
       const me = await telegramBot.getMe();
@@ -350,7 +350,10 @@ async function main(): Promise<void> {
       logger.info("Telegram bot configured", { bot: me.username });
       return true;
     } catch (error) {
-      logger.error("Telegram bot unavailable", error);
+      // Boot failure is journal-worthy; the once-a-minute retry loop only
+      // warns — a long Telegram outage must not spam error logs.
+      if (retry) logger.warn("Telegram bot still unavailable", { error: String(error) });
+      else logger.error("Telegram bot unavailable", error);
       return false;
     }
   };
@@ -544,7 +547,9 @@ async function main(): Promise<void> {
       try {
         offset = await notifier.pollOnce(offset);
       } catch (error) {
-        logger.error("Telegram polling failed", error);
+        // Transient network flaps to api.telegram.org — the loop retries in
+        // 5s and recovers on its own, so this is a warning, not an outage.
+        logger.warn("Telegram polling failed", { error: String(error) });
         await new Promise((resolve) => {
           setTimeout(resolve, 5_000);
         });
@@ -562,7 +567,7 @@ async function main(): Promise<void> {
     // The bot missed its first getMe (network blips at boot). Keep retrying:
     // once it answers, wire routes/health/polling without a restart.
     telegramRetryTimer = setInterval(() => {
-      void configureTelegram().then(async (ok) => {
+      void configureTelegram(true).then(async (ok) => {
         if (!ok || telegram === undefined || telegramRetryTimer === undefined) return;
         clearInterval(telegramRetryTimer);
         telegramRetryTimer = undefined;

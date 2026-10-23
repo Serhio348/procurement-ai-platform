@@ -263,7 +263,8 @@ export async function callValidatedTool<Input extends Record<string, unknown>, O
       mapped.kind === "timeout" &&
       mapped.message.includes("waiting in the queue");
     if (queueWait) {
-      logger.warn("MCP tool call expired in queue", mapped, {
+      logger.warn("MCP tool call expired in queue", {
+        err: mapped.message,
         durationMs: Date.now() - startedAt,
       });
     } else {

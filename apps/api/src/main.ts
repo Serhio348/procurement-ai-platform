@@ -7,7 +7,7 @@ import {
   type McpToolCaller,
 } from "@procurement/mcp-client";
 import { createLogger, type Logger } from "@procurement/observability";
-import { buildSpecialistApi, type SpecialistApi } from "./app.js";
+import { buildSpecialistApi, type BuildApiOptions, type SpecialistApi } from "./app.js";
 import { createSmtpMailPort } from "./auth/mail.js";
 import { resolveBlobDirectory } from "./blobs.js";
 import { removeDiscoveryRepeat, startDiscoveryRepeat } from "./discovery-queue.js";
@@ -296,7 +296,10 @@ async function main(): Promise<void> {
     suggestion?: SpecialistApi["resolveSuggestionForWorkspace"];
   } = {};
   const telegramBot = createTelegramBotFromEnv(process.env);
-  if (telegramBot !== undefined && persistence.db !== undefined) {
+  // Extracted so a failed boot-time getMe can be retried later: one network
+  // blip at startup must not leave the bot dead until the next restart.
+  const configureTelegram = async (): Promise<boolean> => {
+    if (telegramBot === undefined || persistence.db === undefined) return false;
     try {
       const me = await telegramBot.getMe();
       telegram = createTelegramNotifier({
@@ -345,8 +348,14 @@ async function main(): Promise<void> {
       });
       telegramOk = true;
       logger.info("Telegram bot configured", { bot: me.username });
+      return true;
     } catch (error) {
       logger.error("Telegram bot unavailable", error);
+      return false;
+    }
+  };
+  if (telegramBot !== undefined && persistence.db !== undefined) {
+    if (!(await configureTelegram())) {
       await recordJournal(persistence.journal, {
         kind: "platform",
         level: "error",
@@ -373,7 +382,38 @@ async function main(): Promise<void> {
       Number.parseInt(process.env["SPECIALIST_DISCOVERY_COOLDOWN_MS"] ?? "1800000", 10) || 1_800_000,
     ),
   });
-  const app = await buildSpecialistApi({
+  // Kept as named objects: a late-recovered Telegram bot mutates them after
+  // build — routes read options.telegram per request and the health
+  // endpoint re-reads serviceHealth each call.
+  const serviceHealth: NonNullable<BuildApiOptions["serviceHealth"]> = {
+    sha: resolveBuildSha(repoRoot),
+    mode,
+    objectStore: objectStoreKind(process.env),
+    source: {
+      background: mcp !== undefined,
+      interactive: mcpInteractive !== undefined,
+    },
+    sources: enabledSourceIds.map(String),
+    // The first configured source is required at boot — it is also the one
+    // whose failure must fail readiness; extra sources degrade only.
+    requiredSources: enabledSourceIds.slice(0, 1).map(String),
+    // Cached lifecycle+probe snapshot — the endpoint stays synchronous and
+    // never enqueues probe calls itself.
+    ...(sourceHealth === undefined
+      ? {}
+      : { sourcesSnapshot: () => sourceHealth.snapshot() }),
+    models: {
+      searchIntent: searchIntent !== undefined,
+      classifier: classifier !== undefined,
+      commercialReader: commercialReader !== undefined,
+    },
+    mail: authMail !== undefined,
+    telegram: telegramOk,
+    telegramFailed: telegramBot !== undefined && !telegramOk,
+    postgresConfigured: persistence.postgresConfigured,
+    postgresPing: persistence.ping,
+  };
+  const appOptions: BuildApiOptions = {
     logger,
     blobDirectory,
     blobStore,
@@ -426,35 +466,9 @@ async function main(): Promise<void> {
         }),
     ...(mode === "live" ? { liveProcurementsOnly: true } : {}),
     searchBudgetMs,
-    serviceHealth: {
-      sha: resolveBuildSha(repoRoot),
-      mode,
-      objectStore: objectStoreKind(process.env),
-      source: {
-        background: mcp !== undefined,
-        interactive: mcpInteractive !== undefined,
-      },
-      sources: enabledSourceIds.map(String),
-      // The first configured source is required at boot — it is also the one
-      // whose failure must fail readiness; extra sources degrade only.
-      requiredSources: enabledSourceIds.slice(0, 1).map(String),
-      // Cached lifecycle+probe snapshot — the endpoint stays synchronous and
-      // never enqueues probe calls itself.
-      ...(sourceHealth === undefined
-        ? {}
-        : { sourcesSnapshot: () => sourceHealth.snapshot() }),
-      models: {
-        searchIntent: searchIntent !== undefined,
-        classifier: classifier !== undefined,
-        commercialReader: commercialReader !== undefined,
-      },
-      mail: authMail !== undefined,
-      telegram: telegramOk,
-      telegramFailed: telegramBot !== undefined && !telegramOk,
-      postgresConfigured: persistence.postgresConfigured,
-      postgresPing: persistence.ping,
-    },
-  });
+    serviceHealth,
+  };
+  const app = await buildSpecialistApi(appOptions);
   appRef.current = app;
   decideBridge.fn = app.decideForWorkspace;
   decideBridge.suggestion = app.resolveSuggestionForWorkspace;
@@ -524,11 +538,11 @@ async function main(): Promise<void> {
   // Telegram long polling: without a public HTTPS endpoint a webhook is
   // impossible, so the bot pulls updates itself — works from any server.
   let telegramTimer: ReturnType<typeof setTimeout> | undefined;
-  if (telegram !== undefined) {
+  const startTelegramPolling = (notifier: TelegramNotifier): void => {
     let offset = 0;
     const poll = async (): Promise<void> => {
       try {
-        offset = await telegram.pollOnce(offset);
+        offset = await notifier.pollOnce(offset);
       } catch (error) {
         logger.error("Telegram polling failed", error);
         await new Promise((resolve) => {
@@ -540,11 +554,36 @@ async function main(): Promise<void> {
       }, 1_000);
     };
     void poll();
+  };
+  let telegramRetryTimer: ReturnType<typeof setInterval> | undefined;
+  if (telegram !== undefined) {
+    startTelegramPolling(telegram);
+  } else if (telegramBot !== undefined && persistence.db !== undefined) {
+    // The bot missed its first getMe (network blips at boot). Keep retrying:
+    // once it answers, wire routes/health/polling without a restart.
+    telegramRetryTimer = setInterval(() => {
+      void configureTelegram().then(async (ok) => {
+        if (!ok || telegram === undefined || telegramRetryTimer === undefined) return;
+        clearInterval(telegramRetryTimer);
+        telegramRetryTimer = undefined;
+        appOptions.telegram = telegram;
+        serviceHealth.telegram = true;
+        serviceHealth.telegramFailed = false;
+        startTelegramPolling(telegram);
+        await recordJournal(persistence.journal, {
+          kind: "platform",
+          level: "info",
+          message: "Telegram-бот восстановлен: уведомления в Telegram снова включены.",
+        });
+      });
+    }, 60_000);
+    telegramRetryTimer.unref();
   }
 
   const shutdown = async (): Promise<void> => {
     if (timer !== undefined) clearInterval(timer);
     if (telegramTimer !== undefined) clearTimeout(telegramTimer);
+    if (telegramRetryTimer !== undefined) clearInterval(telegramRetryTimer);
     sourceHealth?.stop();
     if (redisRepeat !== undefined) await redisRepeat.close();
     await app.close();

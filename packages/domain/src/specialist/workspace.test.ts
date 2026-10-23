@@ -18,8 +18,11 @@ const write = {
 };
 
 describe("discovery watermark", () => {
-  it("asks the source from the day before the last pass, and for everything on the first pass", () => {
-    expect(discoveryPublishedFrom({ lastDiscoveryAt: undefined })).toBeUndefined();
+  it("asks the source from the day before the last pass, with a bounded bootstrap on the first pass", () => {
+    const now = () => Date.parse("2026-10-23T12:00:00.000Z");
+    // A profile that never completed a pass gets the 45-day bootstrap
+    // window — an unbounded first scan can never converge.
+    expect(discoveryPublishedFrom({ lastDiscoveryAt: undefined }, now)).toBe("2026-09-08");
     expect(discoveryPublishedFrom({ lastDiscoveryAt: "2026-09-09T10:00:00.000Z" })).toBe("2026-09-08");
     // The margin crosses midnight: a pass just after 00:00 still covers yesterday.
     expect(discoveryPublishedFrom({ lastDiscoveryAt: "2026-09-09T00:30:00.000Z" })).toBe("2026-09-08");

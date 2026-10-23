@@ -2301,7 +2301,8 @@ describe("specialist API", () => {
     expect(search).toHaveBeenCalledTimes(2);
     expect(search.mock.calls[0]?.[0].keywords).toEqual(["НКУ"]);
     expect(search.mock.calls[1]?.[0].keywords).toEqual(["шкаф управления"]);
-    expect(search.mock.calls.map((call) => call[0].publishedFrom)).toEqual([undefined, undefined]);
+    const bootstrap = `${new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T00:00:00+03:00`;
+    expect(search.mock.calls.map((call) => call[0].publishedFrom)).toEqual([bootstrap, bootstrap]);
     expect(body.addedCount).toBe(2);
     expect(body.items.map((item) => item.title).sort()).toEqual(
       ["Поставка НКУ для насосов", "Поставка шкафа управления насосами"].sort(),
@@ -2544,11 +2545,14 @@ describe("specialist API", () => {
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
 
     const froms = search.mock.calls.map((call) => call[0].publishedFrom);
+    // First pass and reset passes use the 45-day bootstrap window
+    // (2026-09-09 − 45d = 2026-07-26); a completed pass narrows to the
+    // day before lastDiscoveryAt; manual search stays unbounded.
     expect(froms).toEqual([
-      undefined,
+      "2026-07-26T00:00:00+03:00",
       "2026-09-08T00:00:00+03:00",
-      undefined,
-      undefined,
+      "2026-07-26T00:00:00+03:00",
+      "2026-07-26T00:00:00+03:00",
       undefined,
     ]);
     const profile = JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as {

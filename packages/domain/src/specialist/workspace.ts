@@ -22,14 +22,30 @@ export const REVIEW_ALGORITHM_VERSION = "search-review-v8";
  */
 export const DISCOVERY_WATERMARK_MARGIN_MS = 24 * 60 * 60 * 1000;
 
-/** Calendar day (YYYY-MM-DD) the next discovery pass should ask the source from, or undefined for a full pass. */
+/**
+ * First-pass lookback for a profile that never finished a pass. An
+ * unbounded first window can never complete on a substring-matching
+ * source (one short term reads the entire registry), so the watermark
+ * never starts — a bootstrap bound makes the first pass converge, and
+ * afterwards the usual lastDiscoveryAt margin takes over. 45 days covers
+ * nearly every procedure still accepting bids.
+ */
+export const DISCOVERY_BOOTSTRAP_LOOKBACK_MS = 45 * 24 * 60 * 60 * 1000;
+
+/**
+ * Calendar day (YYYY-MM-DD) the next discovery pass should ask the source
+ * from, or undefined when no sane bound can be derived.
+ */
 export function discoveryPublishedFrom(
   profile: Pick<SpecialistWorkingProfileValue, "lastDiscoveryAt">,
+  now: () => number = Date.now,
 ): string | undefined {
-  if (profile.lastDiscoveryAt === undefined) return undefined;
-  const since = Date.parse(profile.lastDiscoveryAt) - DISCOVERY_WATERMARK_MARGIN_MS;
-  if (!Number.isFinite(since)) return undefined;
-  return new Date(since).toISOString().slice(0, 10);
+  const anchor =
+    profile.lastDiscoveryAt === undefined
+      ? now() - DISCOVERY_BOOTSTRAP_LOOKBACK_MS
+      : Date.parse(profile.lastDiscoveryAt) - DISCOVERY_WATERMARK_MARGIN_MS;
+  if (!Number.isFinite(anchor)) return undefined;
+  return new Date(anchor).toISOString().slice(0, 10);
 }
 
 export function emptySpecialistWorkingProfile(

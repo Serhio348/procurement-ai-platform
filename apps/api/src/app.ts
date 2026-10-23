@@ -1986,7 +1986,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         const startedAt = clock();
         try {
           await discoveryController.beforeRequest(new Date());
-          const publishedFrom = discoveryPublishedFrom(profile);
+          const publishedFrom = discoveryPublishedFrom(profile, () => Date.parse(clock()));
           const fetched = await fetchProfileHits(
             profile,
             limit,

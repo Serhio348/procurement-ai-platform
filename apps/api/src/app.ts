@@ -1967,7 +1967,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       const failed: Array<{ profile: SpecialistWorkingProfile; error: unknown }> = [];
       // Profiles whose window was only partially read: their hits still get
       // processed, but the watermark stays — the interval is not covered.
-      const degraded: Array<{ profile: SpecialistWorkingProfile; reason: string }> = [];
+      const degraded: Array<{
+        profile: SpecialistWorkingProfile;
+        reason: string;
+        level: "error" | "info";
+      }> = [];
       const succeeded: SpecialistWorkingProfile[] = [];
       for (const profile of ready) {
         // One profile's failure must not cost the others their pass, nor lose
@@ -1975,6 +1979,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         let hits: readonly SearchHit[];
         let plan: SearchIntentPlan;
         let degradedReason: string | undefined;
+        let degradedIsError = false;
         // Resume tokens a truncated pass persisted — the next scan continues
         // below them instead of re-reading the registry head every pass.
         let scanCursors: Record<string, string> = { ...(profile.discoveryScanCursors ?? {}) };
@@ -2052,6 +2057,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
             reasons.push("следующая страница выдачи не ответила");
           }
           degradedReason = reasons.length === 0 ? undefined : reasons.join("; ");
+          // Truncation alone is an expected, self-recovering state (the
+          // cursor resumes next pass) — an info note, not an error. A failed
+          // source or a dead continuation page stays error-level: that is a
+          // real outage, not scheduled retry.
+          degradedIsError = failedSources.size > 0 || pageError !== undefined;
         } catch (error) {
           logger.error("Specialist discovery search failed", error, {
             profileName: profileDisplayName(profile),
@@ -2105,7 +2115,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           // recorded positions instead of re-reading the registry head —
           // a window deeper than one scan budget still reaches its tail.
           workspace().setDiscoveryScanCursors(profile.id, scanCursors);
-          degraded.push({ profile, reason: degradedReason });
+          degraded.push({
+            profile,
+            reason: degradedReason,
+            level: degradedIsError ? "error" : "info",
+          });
           logger.warn("Specialist discovery pass incomplete — watermark held", {
             profileName: profileDisplayName(profile),
             reason: degradedReason,
@@ -2132,7 +2146,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       for (const item of degraded) {
         await recordJournal(journal, {
           kind: "discovery",
-          level: "error",
+          level: item.level,
           message: `Фоновый поиск по «${profileDisplayName(item.profile)}» неполный: ${item.reason}. Интервал будет перечитан.`,
         });
       }

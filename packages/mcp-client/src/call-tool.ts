@@ -255,7 +255,20 @@ export async function callValidatedTool<Input extends Record<string, unknown>, O
     return parsed.data;
   } catch (error) {
     const mapped = mapToolError(options.toolName, error);
-    logger.error("MCP tool call failed", mapped, { durationMs: Date.now() - startedAt });
+    // A queue-wait timeout means the lane was busy inside a longer call —
+    // congestion, not a tool failure. Health probes expire this way on
+    // purpose; error-level logging turns expected load into alert noise.
+    const queueWait =
+      mapped instanceof McpToolCallError &&
+      mapped.kind === "timeout" &&
+      mapped.message.includes("waiting in the queue");
+    if (queueWait) {
+      logger.warn("MCP tool call expired in queue", mapped, {
+        durationMs: Date.now() - startedAt,
+      });
+    } else {
+      logger.error("MCP tool call failed", mapped, { durationMs: Date.now() - startedAt });
+    }
     throw mapped;
   }
 }

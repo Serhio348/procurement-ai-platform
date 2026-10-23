@@ -2682,7 +2682,9 @@ describe("specialist API", () => {
     };
     expect(profile.lastDiscoveryAt).toBeUndefined();
     const log = await journal.list();
-    expect(log.some((item) => item.level === "error" && item.message.includes("усечена"))).toBe(true);
+    // Truncation alone is scheduled retry, not an outage — info, not error.
+    expect(log.some((item) => item.level === "info" && item.message.includes("усечена"))).toBe(true);
+    expect(log.some((item) => item.level === "error" && item.message.includes("усечена"))).toBe(false);
 
     await app.close();
   });

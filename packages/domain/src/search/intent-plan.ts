@@ -106,15 +106,16 @@ export function inferSearchIntentPlan(profile: IntentProfileSlice): SearchIntent
       pushUnique(excluded, action);
     }
   }
-  // A profile may hold up to 50 saved phrases while every plan axis is
-  // capped at 20 — a wide profile must degrade to a clipped plan instead of
-  // crashing the whole search on a ZodError (R65).
+  // A profile may hold up to 50 saved phrases. Query-generating axes stay
+  // capped at 20 (every object is a site query); the veto axes cost no
+  // queries and may hold the whole exclusion list — a wide profile degrades
+  // to a clipped plan instead of crashing on a ZodError (R65).
   return SearchIntentPlan.parse({
     objects: objects.slice(0, 20),
     required_context: context.slice(0, 20),
     excluded_context: [],
     desired_actions: desired.slice(0, 20),
-    excluded_actions: excluded.slice(0, 20),
+    excluded_actions: excluded.slice(0, 50),
     intent: lookingForWorks ? "works" : "equipment_purchase",
   });
 }
@@ -177,8 +178,8 @@ export function mergeSearchIntentPlans(
   const desired = union(inferred.desired_actions, fromModel.desired_actions).filter(
     (item) => !matchesAny(item, excluded),
   );
-  // Two full plans union to up to 40 items while every axis stays capped at
-  // 20 — clip instead of crashing the whole merge on a ZodError (R65). The
+  // Two full plans union to up to 40/100 items while each axis stays capped
+  // — clip instead of crashing the whole merge on a ZodError (R65). The
   // inferred plan comes first, so clipping drops model extras before the
   // profile's own entries.
   return SearchIntentPlan.parse({
@@ -187,9 +188,9 @@ export function mergeSearchIntentPlans(
     // the one the profile stated. A conflict with excluded_context is resolved
     // by the scorer, which checks exclusions first.
     required_context: union(inferred.required_context, fromModel.required_context).slice(0, 20),
-    excluded_context: union(inferred.excluded_context, fromModel.excluded_context).slice(0, 20),
+    excluded_context: union(inferred.excluded_context, fromModel.excluded_context).slice(0, 50),
     desired_actions: desired.slice(0, 20),
-    excluded_actions: excluded.slice(0, 20),
+    excluded_actions: excluded.slice(0, 50),
     intent,
   });
 }
@@ -223,15 +224,16 @@ function coercePlan(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const row = raw as Record<string, unknown>;
   // Clip overlong axes instead of dropping the whole model plan to fallback:
-  // the 20-item cap is a budget guard, not a validity property (R65).
-  const clip = (value: unknown): unknown =>
-    Array.isArray(value) ? value.slice(0, 20) : value;
+  // the caps are a budget guard, not a validity property (R65). Veto axes
+  // allow 50 — they cost no site queries.
+  const clip = (value: unknown, cap = 20): unknown =>
+    Array.isArray(value) ? value.slice(0, cap) : value;
   return {
     objects: clip(row["objects"] ?? row["equipment"]),
     required_context: clip(row["required_context"] ?? row["requiredContext"] ?? row["context"]),
-    excluded_context: clip(row["excluded_context"] ?? row["excludedContext"]),
+    excluded_context: clip(row["excluded_context"] ?? row["excludedContext"], 50),
     desired_actions: clip(row["desired_actions"] ?? row["desiredActions"]),
-    excluded_actions: clip(row["excluded_actions"] ?? row["excludedActions"]),
+    excluded_actions: clip(row["excluded_actions"] ?? row["excludedActions"], 50),
     intent: row["intent"] ?? "equipment_purchase",
   };
 }

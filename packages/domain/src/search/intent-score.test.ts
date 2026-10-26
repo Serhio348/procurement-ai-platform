@@ -368,7 +368,8 @@ describe("scoreSearchIntent", () => {
     });
     const merged = mergeSearchIntentPlans(inferred, model);
     expect(merged.objects).toHaveLength(20);
-    expect(merged.excluded_actions).toHaveLength(20);
+    // Veto axes cost no site queries — 40 merged exclusions all fit.
+    expect(merged.excluded_actions).toHaveLength(40);
     // The profile's own entries survive the clip; model extras go first.
     expect(merged.objects[0]).toBe("объект0");
     expect(merged.excluded_actions[0]).toBe("искл0");

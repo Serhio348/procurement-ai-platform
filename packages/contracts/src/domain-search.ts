@@ -109,13 +109,14 @@ export const SearchIntentPlan = z.object({
   required_context: z.array(z.string().min(1).max(120)).max(20).default([]),
   /**
    * Purposes the profile explicitly does not want. Empty means none were
-   * stated. Scoring must not invent a domain list here.
+   * stated. Scoring must not invent a domain list here. Veto axes cost no
+   * site queries, so they may hold the whole profile's exclusion list.
    */
-  excluded_context: z.array(z.string().min(1).max(120)).max(20).default([]),
+  excluded_context: z.array(z.string().min(1).max(120)).max(50).default([]),
   /** Supply-side verbs: поставка, изготовление. */
   desired_actions: z.array(z.string().min(1).max(80)).max(20).default([]),
   /** Work verbs that should not win on their own: монтаж, ремонт, … */
-  excluded_actions: z.array(z.string().min(1).max(80)).max(20).default([]),
+  excluded_actions: z.array(z.string().min(1).max(80)).max(50).default([]),
   /** Free label for logs; scoring keys off the arrays, not this string. */
   intent: z.string().min(1).max(64).default("equipment_purchase"),
 });

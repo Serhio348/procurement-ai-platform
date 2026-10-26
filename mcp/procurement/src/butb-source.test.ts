@@ -1159,6 +1159,34 @@ describe("ButbSource.get", () => {
   });
 });
 
+describe("ButbSource.getCardHtml", () => {
+  const cardId = () => SourceProcurementId.parse(`butb/${firstRow.registryNumber}`);
+
+  it("returns the raw page from the same session-opened card", async () => {
+    const client = fakeClient(new Map([[1, registryHtml]]));
+    const source = new ButbSource({ client });
+
+    const page = await source.getCardHtml(cardId());
+
+    expect(page.html).toBe(cardHtml);
+    expect(page.url).toContain("zakupki.butb.by");
+    expect(page.fetchedAt).toBeDefined();
+    expect(client.calls.links).toEqual([firstRow.cardLinkId]);
+  });
+
+  it("serves the cached page instead of re-opening the card", async () => {
+    const client = fakeClient(new Map([[1, registryHtml]]));
+    const source = new ButbSource({ client });
+
+    await source.get(cardId());
+    client.calls.links = [];
+    const page = await source.getCardHtml(cardId());
+
+    expect(page.html).toBe(cardHtml);
+    expect(client.calls.links).toEqual([]);
+  });
+});
+
 describe("ButbSource documents", () => {
   const cardId = () => SourceProcurementId.parse(`butb/${firstRow.registryNumber}`);
 

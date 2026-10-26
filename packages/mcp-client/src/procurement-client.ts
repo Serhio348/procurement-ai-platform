@@ -1,6 +1,7 @@
 import {
   ProcurementDownloadRequest,
   ProcurementDownloadResponse,
+  ProcurementGetCardHtmlResponse,
   ProcurementGetChangesRequest,
   ProcurementGetChangesResponse,
   ProcurementGetDocumentsResponse,
@@ -16,6 +17,7 @@ import {
   type RequestId,
   type ProcurementDownloadRequest as ProcurementDownloadRequestValue,
   type ProcurementDownloadResponse as ProcurementDownloadResponseValue,
+  type ProcurementGetCardHtmlResponse as ProcurementGetCardHtmlResponseValue,
   type ProcurementGetChangesRequest as ProcurementGetChangesRequestValue,
   type ProcurementGetChangesResponse as ProcurementGetChangesResponseValue,
   type ProcurementGetDocumentsResponse as ProcurementGetDocumentsResponseValue,
@@ -135,6 +137,19 @@ export class ProcurementMcpClient {
     );
   }
 
+  getCardHtml(
+    input: ProcurementGetRequestValue,
+    requestId: RequestId,
+  ): Promise<ProcurementGetCardHtmlResponseValue> {
+    return this.#call(
+      "procurement.get_card_html",
+      input,
+      ProcurementGetRequest,
+      ProcurementGetCardHtmlResponse,
+      requestId,
+    );
+  }
+
   getChanges(
     input: ProcurementGetChangesRequestValue,
     requestId: RequestId,
@@ -180,6 +195,7 @@ export class ProcurementMcpClient {
       | "procurement.get_lots"
       | "procurement.get_documents"
       | "procurement.get_history"
+      | "procurement.get_card_html"
       | "procurement.get_changes"
       | "procurement.download"
       | "procurement.sources",

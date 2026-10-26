@@ -750,8 +750,20 @@ export function ProcurementsApp({
                 <div>
                   <dt>Площадка</dt>
                   <dd>
-                    <a href={selected.url} target="_blank" rel="noreferrer">
-                      {selected.url}
+                    <a
+                      // BUTB cards are session-bound — the console serves a
+                      // live snapshot of the real page instead of the URL.
+                      href={
+                        selected.sourceProcurementId.startsWith("butb/")
+                          ? `/api/procurements/${selected.id}/source-page`
+                          : selected.url
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {selected.sourceProcurementId.startsWith("butb/")
+                        ? "zakupki.butb.by — открыть карточку"
+                        : selected.url}
                     </a>
                   </dd>
                 </div>

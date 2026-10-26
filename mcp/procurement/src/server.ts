@@ -1,6 +1,7 @@
 import {
   ProcurementDownloadRequest,
   ProcurementDownloadResponse,
+  ProcurementGetCardHtmlResponse,
   ProcurementGetChangesRequest,
   ProcurementGetChangesResponse,
   ProcurementGetDocumentsResponse,
@@ -144,6 +145,32 @@ export function createProcurementMcpServer(options: ProcurementMcpServerOptions)
           .get(request.sourceId)
           .getHistory(request.sourceProcurementId, { signal: extra.signal });
         return ProcurementGetHistoryResponse.parse(output);
+      }),
+  );
+
+  server.registerTool(
+    "procurement.get_card_html",
+    {
+      description:
+        "Fetch the raw card page HTML for session-bound sources that have no public card URL.",
+      inputSchema: ProcurementGetRequest,
+      outputSchema: ProcurementGetCardHtmlResponse,
+      annotations: readOnlyOpenWorld,
+    },
+    async (input, extra) =>
+      executeTool("procurement.get_card_html", logger, correlationId(extra), async () => {
+        const request = ProcurementGetRequest.parse(input);
+        const source = registry.get(request.sourceId);
+        if (source.getCardHtml === undefined) {
+          throw new SourceAccessError(
+            request.sourceId,
+            "source cards have a public URL — raw page fetch is not implemented",
+          );
+        }
+        const output = await source.getCardHtml(request.sourceProcurementId, {
+          signal: extra.signal,
+        });
+        return ProcurementGetCardHtmlResponse.parse(output);
       }),
   );
 

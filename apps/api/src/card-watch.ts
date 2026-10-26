@@ -15,6 +15,14 @@ import { silentLogger, type Logger } from "@procurement/observability";
 export interface SpecialistCardWatchPort {
   read: (sourceProcurementId: string) => Promise<ProcedureCard | undefined>;
   /**
+   * The raw card page for session-bound sources (BUTB): the console serves
+   * it as a snapshot because the platform exposes no public card URL.
+   * Returns undefined for sources with public URLs or a failed read.
+   */
+  readPage?: (
+    sourceProcurementId: string,
+  ) => Promise<{ html: string; url: string } | undefined>;
+  /**
    * Downloads one listed document and returns its content hash — the only
    * way to notice a file replaced under an unchanged URL (R24). Budgeted:
    * the watch pass probes at most one document per case. Returns undefined
@@ -58,7 +66,11 @@ export function createProcurementCardWatch(
   const client = new ProcurementMcpClient({
     caller: options.caller,
     policyGate: new ToolPolicyGate({
-      agentAllowedTools: ["procurement.get", "procurement.download"],
+      agentAllowedTools: [
+        "procurement.get",
+        "procurement.download",
+        "procurement.get_card_html",
+      ],
     }),
     // A BUTB card read is a locate+open session sequence bounded by
     // maxGetPages (~60 page postbacks on a throttled pipe ≈ 300 s worst
@@ -82,6 +94,24 @@ export function createProcurementCardWatch(
         );
       } catch (error) {
         logger.warn("Card watch skipped a case", {
+          sourceProcurementId,
+          err: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      }
+    },
+    async readPage(sourceProcurementId) {
+      try {
+        const page = await client.getCardHtml(
+          {
+            sourceId: sourceIdForCard(sourceProcurementId, sourceId),
+            sourceProcurementId: SourceProcurementId.parse(sourceProcurementId),
+          },
+          RequestId.parse(randomUUID()),
+        );
+        return { html: page.html, url: page.url };
+      } catch (error) {
+        logger.warn("Source page read failed", {
           sourceProcurementId,
           err: error instanceof Error ? error.message : String(error),
         });

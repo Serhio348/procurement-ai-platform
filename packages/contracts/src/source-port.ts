@@ -110,6 +110,19 @@ export const ProcurementDownloadResponse = z.object({
 export type ProcurementDownloadResponse = z.infer<typeof ProcurementDownloadResponse>;
 
 /**
+ * The raw card page as the source renders it in-session. Only sources whose
+ * cards are session-bound (no public URL) implement `getCardHtml`; callers
+ * serve the snapshot with the source's base URL so assets and document
+ * links keep working.
+ */
+export const ProcurementGetCardHtmlResponse = z.object({
+  html: z.string().min(1),
+  url: z.string().url(),
+  fetchedAt: IsoDateTime,
+});
+export type ProcurementGetCardHtmlResponse = z.infer<typeof ProcurementGetCardHtmlResponse>;
+
+/**
  * Introspection: which sources the MCP child actually registered. Health
  * uses it so a flag reaching the API but not the child cannot fake health.
  */
@@ -165,5 +178,9 @@ export interface ProcurementSourcePort {
     since?: IsoDateTime,
     ctx?: ProcurementCallContext,
   ): Promise<ProcurementGetChangesResponse>;
+  getCardHtml?(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetCardHtmlResponse>;
   download(downloadUrl: string, ctx?: ProcurementCallContext): Promise<ProcurementFileBytes>;
 }

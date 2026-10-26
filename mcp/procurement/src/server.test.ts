@@ -48,6 +48,7 @@ describe("Procurement MCP", () => {
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([
       "procurement.download",
       "procurement.get",
+      "procurement.get_card_html",
       "procurement.get_changes",
       "procurement.get_documents",
       "procurement.get_history",
@@ -168,6 +169,16 @@ describe("Procurement MCP", () => {
       expect.objectContaining({ type: "text", text: expect.stringContaining("not found") }),
     ]);
     expect(result._meta).toMatchObject({ errorKind: "not_found" });
+  });
+
+  it("reports a clean tool error when the source has no session-bound page", async () => {
+    const result = await client.callTool({
+      name: "procurement.get_card_html",
+      arguments: { sourceId: "goszakupki_by", sourceProcurementId: "auction/1" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result._meta).toMatchObject({ errorKind: "source_unavailable" });
   });
 
   it("maps an unavailable live source to the public MCP error taxonomy", async () => {

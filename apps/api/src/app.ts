@@ -132,6 +132,7 @@ import {
 import type { SpecialistDocumentIngestPort } from "./document-ingest.js";
 import { createIngestProgressHub } from "./ingest-progress.js";
 import { createSearchProgressHub } from "./search-progress.js";
+import { renderSourcePageSnapshot } from "./source-page.js";
 import { loadFixtureSearchHits } from "./load-fixture.js";
 import type { BlobStore } from "./object-store.js";
 import type { SourcesHealthSnapshot } from "./source-health.js";
@@ -3535,6 +3536,38 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       });
     }
     return ProcedureCard.parse(live);
+  });
+
+  /**
+   * Session-bound sources (BUTB) have no public card URL: the adapter
+   * fetches the live page in its own session and the console serves it as
+   * a static snapshot. Assets and document links resolve on the source
+   * origin; scripts never run here.
+   */
+  app.get("/api/procurements/:id/source-page", async (request, reply) => {
+    const params = request.params as { id: string };
+    const card = await resolveCase(params.id);
+    if (card === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    if (cardWatch?.readPage === undefined) {
+      return reply.code(503).send({ error: "card_read_unavailable" });
+    }
+    const page = await cardWatch.readPage(card.sourceProcurementId);
+    if (page === undefined) {
+      logger.warn("Specialist source page unavailable", {
+        sourceProcurementId: card.sourceProcurementId,
+      });
+      return reply.code(404).send({ error: "card_unavailable" });
+    }
+    const snapshot = renderSourcePageSnapshot(page.html, new URL(page.url).origin);
+    return reply
+      .header("content-type", "text/html; charset=utf-8")
+      .header(
+        "content-security-policy",
+        "default-src 'none'; img-src https: data:; style-src 'unsafe-inline' https:; font-src https:",
+      )
+      .send(snapshot);
   });
 
   /**

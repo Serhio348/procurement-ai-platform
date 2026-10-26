@@ -1,4 +1,5 @@
 import {
+  ProcurementGetCardHtmlResponse,
   ProcurementGetChangesResponse,
   ProcurementGetDocumentsResponse,
   ProcurementGetHistoryResponse,
@@ -65,6 +66,9 @@ export interface ButbSourceOptions {
 interface CacheEntry {
   expiresAt: number;
   parsed: ParsedButbCard;
+  /** Raw page body — the card has no public URL, so the console serves it. */
+  html: string;
+  url: string;
 }
 
 /**
@@ -669,6 +673,27 @@ export class ButbSource implements ProcurementSourcePort {
     });
   }
 
+  /**
+   * The card page exists only inside the opened session — there is no
+   * shareable URL. The console serves this snapshot with the site's base
+   * so styles, images and the public download links keep working.
+   */
+  async getCardHtml(
+    id: SourceProcurementId,
+    ctx?: ProcurementCallContext,
+  ): Promise<ProcurementGetCardHtmlResponse> {
+    const loaded = await this.#load(id, ctx);
+    const cached = this.#cache.get(registryNumberOf(id));
+    if (cached === undefined) {
+      throw new SourceAccessError(this.sourceId, "card page is not in the session cache");
+    }
+    return ProcurementGetCardHtmlResponse.parse({
+      html: cached.html,
+      url: cached.url,
+      fetchedAt: loaded.card.fetchedAt,
+    });
+  }
+
   async getHistory(
     id: SourceProcurementId,
     ctx?: ProcurementCallContext,
@@ -784,6 +809,8 @@ export class ButbSource implements ProcurementSourcePort {
     this.#cache.set(registryNumber, {
       expiresAt: now.getTime() + this.#cardCacheTtlMs,
       parsed,
+      html: cardPage.body,
+      url: cardPage.url,
     });
     return parsed;
   }

@@ -402,12 +402,20 @@ export function ProcurementDetailApp({
 
         <div className="procurement-detail-toolbar">
           <a
-            href={stored.url}
+            // BUTB cards are session-bound — no public URL exists, so the
+            // console serves a live snapshot of the real page instead.
+            href={
+              stored.sourceProcurementId.startsWith("butb/")
+                ? `/api/procurements/${stored.id}/source-page`
+                : stored.url
+            }
             target="_blank"
             rel="noopener noreferrer"
             className="procurement-detail-link"
           >
-            Открыть на goszakupki.by
+            {stored.sourceProcurementId.startsWith("butb/")
+              ? "Открыть на zakupki.butb.by"
+              : "Открыть на goszakupki.by"}
           </a>
           <ExportToFolderButton procurementId={stored.id} />
           {loading ? (

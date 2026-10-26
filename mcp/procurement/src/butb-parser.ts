@@ -366,11 +366,8 @@ export function parseButbCard(input: {
     input.registryNumber ??
     "unknown";
   const gias = fields.get("номер закупки в гиас");
-  const title =
-    emptyToUndefined(fields.get("наименование закупки")) ??
-    fields.get("наименование процедуры") ??
-    fields.get("предмет закупки") ??
-    registryNumber;
+  const lots = parseLots($);
+  const title = cardTitle(fields, lots) ?? registryNumber;
   const sourceStatus = fields.get("состояние");
   const customer = fields.get("полное наименование");
   const price = parseAmount(
@@ -379,7 +376,6 @@ export function parseButbCard(input: {
       .join(" "),
   );
 
-  const lots = parseLots($);
   const documents = parseDocuments($, input.url, input.fetchedAt);
 
   const rawFields: Record<string, string> = {};
@@ -463,6 +459,41 @@ export function parseButbCard(input: {
     }),
     documents,
   };
+}
+
+/**
+ * Organizers of MR/PR procedures often enter the procedure type as the
+ * name — «Запрос ценовых предложений» is a kind, not a subject. The real
+ * subject then lives in the lots table's «Предмет закупки» column.
+ */
+const GENERIC_PROCEDURE_TITLES = new Set([
+  "электронный аукцион",
+  "аукцион",
+  "конкурс",
+  "открытый конкурс",
+  "запрос ценовых предложений",
+  "закупка из одного источника",
+  "запрос на изучение конъюнктуры рынка",
+  "изучение конъюнктуры рынка",
+  "зои на этп",
+]);
+
+function cardTitle(fields: Map<string, string>, lots: readonly SourceLot[]): string | undefined {
+  const printed =
+    emptyToUndefined(fields.get("наименование закупки")) ??
+    emptyToUndefined(fields.get("наименование процедуры")) ??
+    emptyToUndefined(fields.get("предмет закупки"));
+  const kindLabel = fields.get("вид процедуры закупки") ?? fields.get("вид закупки");
+  const generic =
+    printed === undefined ||
+    GENERIC_PROCEDURE_TITLES.has(normalizeLabel(printed)) ||
+    (kindLabel !== undefined && normalizeLabel(printed) === normalizeLabel(kindLabel));
+  if (!generic) return printed;
+  const subjects = [
+    ...new Set(lots.map((lot) => lot.title.trim()).filter((item) => item.length > 0)),
+  ];
+  if (subjects.length === 0) return printed;
+  return subjects.length <= 3 ? subjects.join("; ") : `${subjects.slice(0, 3).join("; ")}; …`;
 }
 
 /** Label→value pairs of the card — consecutive `<span>` siblings. */

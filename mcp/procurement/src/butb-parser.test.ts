@@ -169,6 +169,46 @@ describe("parseButbCard", () => {
     expect(mr.card.title).not.toBe("Количество (объем)");
   });
 
+  it("takes the subject from the lot when the name is just the procedure type", () => {
+    // Live MR20261022397660: the organizer entered «Запрос ценовых
+    // предложений» as «Наименование процедуры» — the real subject sits in
+    // the lots table's «Предмет закупки» column.
+    const genericCard = `<html><body>
+      <span id="f1">Регистрационный номер</span><span id="f2">MR20261022397660</span>
+      <span id="f3">Состояние</span><span id="f4">Подача предложений / документов</span>
+      <span id="f5">Вид процедуры</span><span id="f6">запрос на изучение конъюнктуры рынка за счет собственных средств</span>
+      <span id="f7">Наименование процедуры</span><span id="f8">Запрос ценовых предложений</span>
+      <table id="j:lotsList"><thead><tr><th><span>№</span></th><th><span>ОКРБ</span></th><th><span>Предмет закупки</span></th></tr></thead>
+      <tbody><tr>
+        <td><span>1</span></td><td><span>-</span></td>
+        <td><span>Внедрение автоматизированной системы контроля и учёта энергоресурсов (АСКУЭ)</span></td>
+      </tr></tbody></table>
+    </body></html>`;
+    const result = parseButbCard({
+      html: genericCard,
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      fetchedAt: "2026-10-22T12:00:00Z",
+    });
+    expect(result.card.title).toContain("АСКУЭ");
+    expect(result.card.title).not.toBe("Запрос ценовых предложений");
+  });
+
+  it("keeps a real abbreviation as title when it is not a procedure type", () => {
+    const sguCard = `<html><body>
+      <span id="f1">Регистрационный номер</span><span id="f2">PR20261022397710</span>
+      <span id="f3">Наименование процедуры</span><span id="f4">СГУ</span>
+      <table id="j:lotsList"><tbody><tr>
+        <td><span>1</span></td><td><span>-</span></td><td><span>СГУ</span></td>
+      </tr></tbody></table>
+    </body></html>`;
+    const result = parseButbCard({
+      html: sguCard,
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      fetchedAt: "2026-10-22T12:00:00Z",
+    });
+    expect(result.card.title).toBe("СГУ");
+  });
+
   it("has no history on a card without FAQ/protocol tables", () => {
     expect(parsed.card.history).toEqual([]);
   });

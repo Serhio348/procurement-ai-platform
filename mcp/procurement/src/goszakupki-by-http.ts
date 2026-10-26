@@ -6,6 +6,7 @@ import {
   SourceAbortedError,
   throwIfAborted,
 } from "./source-registry.js";
+import { retryTransientTransport } from "./transient-retry.js";
 
 export interface GoszakupkiPageResponse {
   status: number;
@@ -177,26 +178,35 @@ export class GoszakupkiHttpClient implements GoszakupkiPageClient {
     body?: string;
     contentType: string | undefined;
   }> {
-    await this.#reserveRequestSlot(signal);
-    const cookie = this.#cookieHeader();
-    // Pages stay on the clock. A file may be a large archive on a slow link.
-    // The caller's cancellation joins either way.
-    const requestSignal =
-      mode === "html" || signal !== undefined
-        ? this.#requestSignal(mode === "html" ? this.#timeoutMs : 0, signal)
-        : undefined;
-    const response = await this.#fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      ...(requestSignal === undefined ? {} : { signal: requestSignal }),
-      headers: {
-        accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
-        "user-agent": this.#userAgent,
-        ...(cookie.length === 0 ? {} : { cookie }),
+    return retryTransientTransport(
+      "goszakupki_by",
+      async () => {
+        await this.#reserveRequestSlot(signal);
+        const cookie = this.#cookieHeader();
+        // Pages stay on the clock. A file may be a large archive on a slow
+        // link. The caller's cancellation joins either way. The own-timeout
+        // signal must be created per attempt — an aborted signal cannot be
+        // re-armed for a retry.
+        const requestSignal =
+          mode === "html" || signal !== undefined
+            ? this.#requestSignal(mode === "html" ? this.#timeoutMs : 0, signal)
+            : undefined;
+        const response = await this.#fetch(url, {
+          method: "GET",
+          redirect: "follow",
+          ...(requestSignal === undefined ? {} : { signal: requestSignal }),
+          headers: {
+            accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
+            "user-agent": this.#userAgent,
+            ...(cookie.length === 0 ? {} : { cookie }),
+          },
+        });
+        this.#captureCookies(response.headers);
+        return this.#readResponse(response, mode);
       },
-    });
-    this.#captureCookies(response.headers);
-    return this.#readResponse(response, mode);
+      signal,
+      { sleep: this.#sleep },
+    );
   }
 
   async #ensureSession(signal?: AbortSignal): Promise<void> {

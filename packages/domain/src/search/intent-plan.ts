@@ -177,15 +177,19 @@ export function mergeSearchIntentPlans(
   const desired = union(inferred.desired_actions, fromModel.desired_actions).filter(
     (item) => !matchesAny(item, excluded),
   );
+  // Two full plans union to up to 40 items while every axis stays capped at
+  // 20 — clip instead of crashing the whole merge on a ZodError (R65). The
+  // inferred plan comes first, so clipping drops model extras before the
+  // profile's own entries.
   return SearchIntentPlan.parse({
-    objects: union(inferred.objects, fromModel.objects),
+    objects: union(inferred.objects, fromModel.objects).slice(0, 20),
     // Union, not replacement: the model widens the purpose, it must not drop
     // the one the profile stated. A conflict with excluded_context is resolved
     // by the scorer, which checks exclusions first.
-    required_context: union(inferred.required_context, fromModel.required_context),
-    excluded_context: union(inferred.excluded_context, fromModel.excluded_context),
-    desired_actions: desired,
-    excluded_actions: excluded,
+    required_context: union(inferred.required_context, fromModel.required_context).slice(0, 20),
+    excluded_context: union(inferred.excluded_context, fromModel.excluded_context).slice(0, 20),
+    desired_actions: desired.slice(0, 20),
+    excluded_actions: excluded.slice(0, 20),
     intent,
   });
 }

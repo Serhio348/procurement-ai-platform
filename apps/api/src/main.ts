@@ -362,7 +362,8 @@ async function main(): Promise<void> {
       await recordJournal(persistence.journal, {
         kind: "platform",
         level: "error",
-        message: "Telegram-бот не ответил на запуске. Уведомления в Telegram выключены.",
+        message:
+          "Telegram-бот не ответил на запуске. Подключение повторяется каждую минуту, уведомления возобновятся после ответа.",
       });
     }
   } else if (telegramBot !== undefined) {

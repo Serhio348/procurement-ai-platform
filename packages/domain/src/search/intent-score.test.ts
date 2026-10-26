@@ -353,6 +353,27 @@ describe("scoreSearchIntent", () => {
     expect(merged.excluded_actions).toContain("поставка");
   });
 
+  it("clips a union of two full plans instead of crashing (R65)", () => {
+    const fill = (prefix: string): string[] =>
+      Array.from({ length: 20 }, (_, index) => `${prefix}${index}`);
+    const inferred = SearchIntentPlan.parse({
+      objects: fill("объект"),
+      excluded_actions: fill("искл"),
+      intent: "equipment_purchase",
+    });
+    const model = SearchIntentPlan.parse({
+      objects: fill("модель-объект"),
+      excluded_actions: fill("модель-искл"),
+      intent: "equipment_purchase",
+    });
+    const merged = mergeSearchIntentPlans(inferred, model);
+    expect(merged.objects).toHaveLength(20);
+    expect(merged.excluded_actions).toHaveLength(20);
+    // The profile's own entries survive the clip; model extras go first.
+    expect(merged.objects[0]).toBe("объект0");
+    expect(merged.excluded_actions[0]).toBe("искл0");
+  });
+
   it("keeps the object of a supply phrase and short work objects (R10)", () => {
     const supply = inferSearchIntentPlan({
       name: "Насосы",

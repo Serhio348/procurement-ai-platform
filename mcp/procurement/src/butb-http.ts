@@ -15,6 +15,7 @@ import {
   type ButbViewState,
 } from "./butb-parser.js";
 import { SourceAccessError, SourceAbortedError, throwIfAborted } from "./source-registry.js";
+import { retryTransientTransport } from "./transient-retry.js";
 
 export interface ButbPage {
   status: number;
@@ -631,22 +632,34 @@ export class ButbHttpClient implements ButbPageClient {
 
     const url = new URL(action, this.#baseUrl);
     const cookie = this.#cookieHeader();
-    const response = await this.#fetch(url, {
-      method: "POST",
-      redirect: "manual",
-      signal: this.#requestSignal(signal),
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        "user-agent": this.#userAgent,
-        referer: this.#registryUrl(),
-        ...(options.ajax
-          ? { "faces-request": "partial/ajax", "x-requested-with": "XMLHttpRequest" }
-          : {}),
-        ...(cookie.length === 0 ? {} : { cookie }),
+    // JSF postbacks name their target explicitly (page number, card link),
+    // so a retried transport attempt is idempotent — a request that died
+    // mid-flight cannot duplicate an action.
+    const response = await retryTransientTransport(
+      "butb",
+      async () => {
+        const response = await this.#fetch(url, {
+          method: "POST",
+          redirect: "manual",
+          // Per-attempt signal: an aborted own-timeout cannot be re-armed.
+          signal: this.#requestSignal(signal),
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "user-agent": this.#userAgent,
+            referer: this.#registryUrl(),
+            ...(options.ajax
+              ? { "faces-request": "partial/ajax", "x-requested-with": "XMLHttpRequest" }
+              : {}),
+            ...(cookie.length === 0 ? {} : { cookie }),
+          },
+          body: params.toString(),
+        });
+        this.#captureCookies(response.headers);
+        return response;
       },
-      body: params.toString(),
-    });
-    this.#captureCookies(response.headers);
+      signal,
+      { sleep: this.#sleep },
+    );
 
     const location = response.headers.get("location");
     if (location !== null && (response.status === 301 || response.status === 302)) {
@@ -694,18 +707,27 @@ export class ButbHttpClient implements ButbPageClient {
     }
     await this.#reserveRequestSlot(signal);
     const cookie = this.#cookieHeader();
-    const response = await this.#fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: this.#requestSignal(signal),
-      headers: {
-        accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
-        "user-agent": this.#userAgent,
-        referer: this.#registryUrl(),
-        ...(cookie.length === 0 ? {} : { cookie }),
+    const response = await retryTransientTransport(
+      "butb",
+      async () => {
+        const response = await this.#fetch(url, {
+          method: "GET",
+          redirect: "follow",
+          // Per-attempt signal: an aborted own-timeout cannot be re-armed.
+          signal: this.#requestSignal(signal),
+          headers: {
+            accept: mode === "html" ? "text/html,application/xhtml+xml" : "*/*",
+            "user-agent": this.#userAgent,
+            referer: this.#registryUrl(),
+            ...(cookie.length === 0 ? {} : { cookie }),
+          },
+        });
+        this.#captureCookies(response.headers);
+        return response;
       },
-    });
-    this.#captureCookies(response.headers);
+      signal,
+      { sleep: this.#sleep },
+    );
 
     const limit = mode === "binary" ? this.#maxDownloadBytes : this.#maxResponseBytes;
     const declared = Number(response.headers.get("content-length"));

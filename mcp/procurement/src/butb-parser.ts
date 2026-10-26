@@ -6,6 +6,7 @@ import {
   type PlatformInstant,
   type ProcedureKind,
   type ProcedureStatus,
+  type SourceClarification,
   type SourceDocument,
   type SourceLot,
 } from "@procurement/contracts";
@@ -456,7 +457,7 @@ export function parseButbCard(input: {
         ? {}
         : { bidsDeadline: parseInstant(fieldByPrefix(fields, "конечная дата")) }),
       lots,
-      history: [],
+      history: parseHistory($, input.url),
       rawFields,
       fetchedAt: input.fetchedAt,
     }),
@@ -535,6 +536,74 @@ function parseDocuments($: CheerioAPI, pageUrl: string, discoveredAt: IsoDateTim
     });
   });
   return documents;
+}
+
+/**
+ * The card's chronology is two separate ICEfaces tables, not one event
+ * list:
+ *  - `…:faqListByText` («Запросы и разъяснения») — request text, request
+ *    file, request date, answer (a JSF command link), answer file.
+ *  - `…:findProtocolListByText` («Протоколы закупки») — protocol title,
+ *    date, downloadable file.
+ * Date-only rows carry no clock time — their `askedAt` stays undefined
+ * rather than inventing midnight; sorting still uses the parsed day.
+ */
+function parseHistory($: CheerioAPI, pageUrl: string): SourceClarification[] {
+  const events: { key: string; entry: SourceClarification }[] = [];
+  const sortKey = (instant: PlatformInstant | undefined): string =>
+    instant === undefined ? "9999" : instant.precision === "date" ? instant.date : instant.at;
+  const cellText = (cells: AnyNode[], index: number): string =>
+    $(cells[index] ?? "")
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+  const downloadUrl = (cells: AnyNode[], index: number): string | undefined => {
+    const href = $(cells[index] ?? "")
+      .find("a[href*='/auctions/download']")
+      .attr("href");
+    return href === undefined ? undefined : new URL(href, pageUrl).href;
+  };
+
+  $("table[id$='faqListByText'] tbody tr, table[id$='faqListByText'] > tr").each((_index, row) => {
+    const cells = $(row).children("td").toArray();
+    if (cells.length < 5) return;
+    const question = cellText(cells, 1);
+    if (question.length === 0) return;
+    const askedAt = parseInstant(cellText(cells, 3));
+    const answer = emptyToUndefined(cellText(cells, 4));
+    const sourceUrl = downloadUrl(cells, 5) ?? downloadUrl(cells, 2);
+    events.push({
+      key: sortKey(askedAt),
+      entry: {
+        question,
+        ...(answer === undefined ? {} : { answer }),
+        ...(askedAt?.precision === "date_time" ? { askedAt: askedAt.at } : {}),
+        ...(sourceUrl === undefined ? {} : { sourceUrl }),
+      },
+    });
+  });
+
+  $(
+    "table[id$='findProtocolListByText'] tbody tr, table[id$='findProtocolListByText'] > tr",
+  ).each((_index, row) => {
+    const cells = $(row).children("td").toArray();
+    if (cells.length < 4) return;
+    const title = cellText(cells, 1);
+    if (title.length === 0) return;
+    const date = parseInstant(cellText(cells, 2));
+    const sourceUrl = downloadUrl(cells, 3);
+    events.push({
+      key: sortKey(date),
+      entry: {
+        question: title,
+        ...(date?.precision === "date_time" ? { askedAt: date.at } : {}),
+        ...(sourceUrl === undefined ? {} : { sourceUrl }),
+      },
+    });
+  });
+
+  events.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
+  return events.map((event) => event.entry);
 }
 
 /** BUTB «Вид закупки» labels → normalized kind. */

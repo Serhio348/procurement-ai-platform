@@ -669,13 +669,13 @@ export class ButbSource implements ProcurementSourcePort {
     });
   }
 
-  /** The public card carries no chronology table — verified on live markup. */
   async getHistory(
     id: SourceProcurementId,
     ctx?: ProcurementCallContext,
   ): Promise<ProcurementGetHistoryResponse> {
-    await this.#load(id, ctx);
-    return ProcurementGetHistoryResponse.parse({ clarifications: [] });
+    return ProcurementGetHistoryResponse.parse({
+      clarifications: (await this.#load(id, ctx)).card.history,
+    });
   }
 
   async getChanges(

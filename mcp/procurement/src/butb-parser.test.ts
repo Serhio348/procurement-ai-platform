@@ -168,6 +168,68 @@ describe("parseButbCard", () => {
     expect(mr.card.title).toContain("Изучение конъюнктуры рынка");
     expect(mr.card.title).not.toBe("Количество (объем)");
   });
+
+  it("has no history on a card without FAQ/protocol tables", () => {
+    expect(parsed.card.history).toEqual([]);
+  });
+
+  it("parses «Запросы и разъяснения» and «Протоколы» into sorted history", () => {
+    // Live markup (AU20261009395855): faqListByText columns are
+    // № | Запрос | Файл запроса | Дата запроса | Ответ | Файл ответа | …
+    // and findProtocolListByText is № | Наименование | Дата | Файл | …
+    const withHistory = `<html><body>
+      <span id="f1">Регистрационный номер</span><span id="f2">AU20261009395855</span>
+      <span id="f3">Наименование закупки</span><span id="f4">Тестовая закупка</span>
+      <table class="iceDatTbl" id="j:faqListByText"><tbody>
+        <tr class="iceDatTblRow">
+          <td><span>1</span></td>
+          <td><span>  Добрый день. Просим увеличить сроки поставки.  </span></td>
+          <td><a class="iceOutLnk" href="/auctions/download?id=6106402&amp;name=AAA/req.htm">req.htm</a></td>
+          <td><span>13.10.2026 11:16</span></td>
+          <td><a class="iceCmdLnk" href="javascript:;">Срок поставки товара изменен.</a></td>
+          <td><a class="iceOutLnk" href="/auctions/download?id=6107170&amp;name=BBB/ans.htm">ans.htm</a></td>
+          <td></td><td></td>
+        </tr>
+        <tr class="iceDatTblRow">
+          <td><span>2</span></td>
+          <td><span>Вопрос без ответа и файлов</span></td>
+          <td></td>
+          <td><span>14.10.2026 09:05</span></td>
+          <td></td><td></td><td></td><td></td>
+        </tr>
+      </tbody></table>
+      <table class="iceDatTbl" id="j:findProtocolListByText"><tbody>
+        <tr class="iceDatTblRow">
+          <td><span>1</span></td>
+          <td><span>Протокол о признании лота несостоявшимся</span></td>
+          <td><span>12.10.2026</span></td>
+          <td><a class="iceOutLnk" href="/auctions/download?id=6131377&amp;name=CCC/protocol.xls">protocol.xls</a></td>
+          <td></td>
+        </tr>
+      </tbody></table>
+    </body></html>`;
+    const result = parseButbCard({
+      html: withHistory,
+      url: "https://zakupki.butb.by/auctions/viewinvitation.html",
+      fetchedAt: "2026-10-22T12:00:00Z",
+    });
+    expect(result.card.history).toHaveLength(3);
+    // Chronological order across both tables: protocol (12.10) first.
+    const [protocol, answered, unanswered] = result.card.history;
+    expect(protocol!.question).toContain("Протокол");
+    expect(protocol!.askedAt).toBeUndefined();
+    expect(protocol!.sourceUrl).toBe(
+      "https://zakupki.butb.by/auctions/download?id=6131377&name=CCC/protocol.xls",
+    );
+    expect(answered!.question).toContain("Добрый день");
+    expect(answered!.answer).toContain("Срок поставки");
+    expect(answered!.askedAt).toBe("2026-10-13T11:16:00+03:00");
+    // The answer file is the more useful link for the row.
+    expect(answered!.sourceUrl).toContain("download?id=6107170");
+    expect(unanswered!.question).toContain("Вопрос без ответа");
+    expect(unanswered!.answer).toBeUndefined();
+    expect(unanswered!.sourceUrl).toBeUndefined();
+  });
 });
 
 describe("kind and status mapping", () => {

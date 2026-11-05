@@ -13,6 +13,78 @@ import { openSpecialistPersistence } from "./persist.js";
 
 const tmpDirs: string[] = [];
 
+describe.each(["disk", "postgres"] as const)("discovery inbox persistence (%s)", (storage) => {
+  it.skipIf(storage === "postgres" && process.env["TEST_DATABASE_URL"] === undefined)(
+    "keeps unopened and dismissed matches across restart without adding them to search",
+    async () => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), "inbox-retention-"));
+      tmpDirs.push(directory);
+      const databaseUrl = storage === "postgres" ? process.env["TEST_DATABASE_URL"] : undefined;
+      if (databaseUrl !== undefined) await migrateDatabase(databaseUrl);
+      const options = {
+        workspacePath: path.join(directory, "workspace.json"), databaseUrl, logger: silentLogger,
+      };
+      let persistence = await openSpecialistPersistence(options);
+      let app: Awaited<ReturnType<typeof buildSpecialistApi>> | undefined;
+      try {
+        const cabinet = await persistence.cabinets.open(TEST_WORKSPACE_ID);
+        const profileId = cabinet.workspace.profile().id;
+        cabinet.workspace.replaceProfile({
+          ...cabinet.workspace.profile(), name: "Кабель", keywords: ["кабель"],
+        });
+        cabinet.workspace.setWatch(true);
+        await persistence.cabinets.persist(cabinet);
+        const hit = SearchHit.parse({
+          sourceId: "goszakupki_by", sourceProcurementId: `auction/inbox-${crypto.randomUUID()}`,
+          url: "https://goszakupki.by/auction/view/inbox-test", title: "Кабель силовой",
+        });
+        const openApi = () =>
+          buildSpecialistApi({
+            cabinets: persistence.cabinets,
+            searchHits: { search: async () => [hit] },
+          });
+        app = await openApi();
+        const discovery = await app.inject({
+          method: "POST", url: "/api/profile/discovery", payload: {},
+        });
+        expect(discovery.statusCode).toBe(200);
+        for (const dismissed of [false, true]) {
+          await app.close();
+          app = undefined;
+          await persistence.close();
+          persistence = await openSpecialistPersistence(options);
+          app = await openApi();
+          // The ordinary list runs pruning: an inbox-only match must survive it.
+          await app.inject({ method: "GET", url: "/api/procurements" });
+          const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+          expect(inbox.json().items).toHaveLength(dismissed ? 0 : 1);
+          const queue = await app.inject({
+            method: "GET", url: `/api/procurements?tab=search&profileId=${profileId}`,
+          });
+          expect(queue.json().items).toEqual([]);
+          const stored = await persistence.cabinets.findCaseBySource(
+            TEST_WORKSPACE_ID, hit.sourceProcurementId,
+          );
+          expect(stored?.foundAs).toBe("match");
+          if (!dismissed) {
+            const row = inbox.json().items[0] as { id: string };
+            const resolved = await app.inject({
+              method: "POST", url: `/api/inbox/${row.id}/resolve`,
+              payload: { action: "dismiss" },
+            });
+            expect(resolved.statusCode).toBe(200);
+          }
+          await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+          expect((await app.inject({ method: "GET", url: "/api/inbox" })).json().items).toEqual([]);
+        }
+      } finally {
+        await app?.close();
+        await persistence.close();
+      }
+    },
+  );
+});
+
 afterEach(async () => {
   for (const dir of tmpDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });

@@ -1084,7 +1084,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("keeps review cases out of the list until opened, and prunes untouched stale cases", async () => {
+  it("keeps manual review candidates in search and prunes replaced search results", async () => {
     const removeCases = vi.fn(async (_ids: readonly string[]) => undefined);
     let now = "2026-09-01T10:00:00.000Z";
     let hits = [
@@ -1125,23 +1125,18 @@ describe("specialist API", () => {
       (JSON.parse(body).items as Array<{ title: string }>).map((item) => item.title);
 
     expect(first.statusCode).toBe(200);
-    expect(titles(first.body)).toEqual(["Поставка НКУ для насосов"]);
+    expect(titles(first.body)).toEqual(["Поставка НКУ для насосов", "Поставка НКУ 0,4 кВ"]);
     // Review is missing purpose, not substring noise. The incubator is discarded.
     expect(titles(listedAfterFirst.body)).toEqual(["Поставка НКУ для насосов"]);
-    expect(titles(inboxAfterFirst.body)).toEqual(["Поставка НКУ 0,4 кВ"]);
-
-    // Opening the review case from the inbox is navigation, not a
-    // decision: it stays a review candidate and waits in the search
-    // queue of the profile that found it, out of the general list.
-    const reviewRow = (JSON.parse(inboxAfterFirst.body).items as Array<{ id: string; title: string }>)
+    expect(titles(inboxAfterFirst.body)).toEqual([]);
+    const reviewCard = (JSON.parse(first.body).items as Array<{ id: string; title: string }>)
       .find((item) => item.title.includes("0,4"));
     const opened = await app.inject({
-      method: "POST",
-      url: `/api/inbox/${reviewRow?.id ?? ""}/resolve`,
-      payload: { action: "open" },
+      method: "GET",
+      url: `/api/procurements/${reviewCard?.id ?? ""}`,
     });
     expect(opened.statusCode).toBe(200);
-    expect(JSON.parse(opened.body).card?.foundAs).toBe("review");
+    expect(JSON.parse(opened.body).foundAs).toBe("review");
     const listedAfterOpen = await app.inject({ method: "GET", url: "/api/procurements" });
     expect(titles(listedAfterOpen.body)).toEqual(["Поставка НКУ для насосов"]);
     const searchAfterOpen = await app.inject({
@@ -1190,7 +1185,8 @@ describe("specialist API", () => {
     const originId = (
       JSON.parse((await app.inject({ method: "GET", url: "/api/profile" })).body) as { id: string }
     ).id;
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
+    await app.inject({ method: "POST", url: `/api/profiles/${originId}/watch`, payload: { watchNewProcurements: true } });
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const row = (JSON.parse(inbox.body).items as Array<{ id: string; title: string }>).find(
       (item) => item.title.includes("0,4"),
@@ -1736,7 +1732,14 @@ describe("specialist API", () => {
         title: string;
         foundAs?: string;
       }>;
-      expect(inboxTitles).toEqual(["Закупка НКУ"]);
+      expect(inboxTitles).toEqual([]);
+      const queue = await app.inject({
+        method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}`,
+      });
+      expect(queue.json().items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ title: "Закупка НКУ", foundAs: "review" }),
+        expect.objectContaining({ title: "Поставка НКУ 0,4 кВ", foundAs: "match" }),
+      ]));
       expect(listedItems.map((item) => item.title)).toContain("Поставка НКУ 0,4 кВ");
       const lotId = listedItems.find((item) => item.title === "Поставка НКУ 0,4 кВ")?.id ?? "";
       const lot = JSON.parse((await app.inject({ method: "GET", url: `/api/procurements/${lotId}` })).body) as {
@@ -2130,7 +2133,7 @@ describe("specialist API", () => {
 
     await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
     await vi.waitFor(async () => {
-      const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+      const inbox = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
       expect(
         (JSON.parse(inbox.body).items as Array<{ title: string }>).map((item) => item.title),
       ).toEqual(["Закупка НКУ"]);
@@ -2149,7 +2152,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("puts a dismissed review hit back in the inbox on the next search", async () => {
+  it("a manual search puts a dismissed discovery candidate in search without resurrecting inbox", async () => {
     const app = await buildSpecialistApi({
       catalog: new SpecialistCatalog(),
       searchHits: {
@@ -2169,7 +2172,8 @@ describe("specialist API", () => {
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
 
-    await app.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(app) } });
+    await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
+    await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     const firstInbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const rowId = (JSON.parse(firstInbox.body).items as Array<{ id: string }>)[0]?.id ?? "";
     expect(rowId.length).toBeGreaterThan(0);
@@ -2180,9 +2184,113 @@ describe("specialist API", () => {
     const restored = (JSON.parse((await app.inject({ method: "GET", url: "/api/inbox" })).body).items as Array<{
       title: string;
     }>).map((item) => item.title);
-    expect(restored).toEqual(["Поставка НКУ 0,4 кВ"]);
+    expect(restored).toEqual([]);
+    const queue = await app.inject({
+      method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}`,
+    });
+    expect(queue.json().items).toEqual([
+      expect.objectContaining({ title: "Поставка НКУ 0,4 кВ", foundAs: "review" }),
+    ]);
 
     await app.close();
+  });
+
+  it.each(["open", "dismiss", "reject"] as const)(
+    "keeps discovery out of manual search until inbox action %s",
+    async (action) => {
+      const makeHit = (id: string, title: string) => SearchHit.parse({
+        sourceId: "goszakupki_by", sourceProcurementId: `auction/${id}`,
+        url: `https://goszakupki.by/auction/view/${id}`, title,
+      });
+      let hits = [makeHit("manual-cable", "Кабель ручного поиска")];
+      const persistCases = vi.fn(async (_cards: readonly SpecialistProcurementCard[]) => undefined);
+      const app = await buildSpecialistApi({
+        catalog: new SpecialistCatalog(),
+        searchHits: { search: async () => hits },
+        persistCases,
+      });
+      try {
+        const profileId = await activeProfileId(app);
+        await app.inject({
+          method: "PUT", url: `/api/profiles/${profileId}`,
+          payload: { name: "Кабель", keywords: ["кабель"] },
+        });
+        const queueUrl = `/api/procurements?tab=search&profileId=${profileId}`;
+        const manual = await app.inject({
+          method: "POST", url: "/api/procurements/search", payload: { profileId },
+        });
+        expect(manual.json().items).toHaveLength(1);
+        expect((await app.inject({ method: "GET", url: "/api/inbox" })).json().items).toEqual([]);
+        hits = [
+          ...hits, makeHit("discovered-cable", "Кабель фонового поиска"),
+          makeHit("discovered-unclear", "Электроматериалы"),
+        ];
+        await app.inject({
+          method: "POST", url: `/api/profiles/${profileId}/watch`,
+          payload: { watchNewProcurements: true },
+        });
+        const pass = await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+        expect(pass.statusCode).toBe(200);
+        const entries = (await app.inject({ method: "GET", url: "/api/inbox" })).json().items as
+          Array<{ id: string; title: string; procurementId: string; topic: string }>;
+        expect(entries).toEqual(expect.arrayContaining([
+          expect.objectContaining({ title: "Кабель фонового поиска", topic: "new_found" }),
+          expect.objectContaining({ title: "Электроматериалы", topic: "review" }),
+        ]));
+        expect((await app.inject({ method: "GET", url: queueUrl })).json().items)
+          .toEqual([expect.objectContaining({ title: "Кабель ручного поиска" })]);
+        expect(persistCases.mock.calls.at(-1)?.[0].map((card) => card.title))
+          .toEqual(expect.arrayContaining(hits.map((hit) => hit.title)));
+        const row = entries.find((entry) => entry.topic === "new_found")!;
+        const resolved = await app.inject({
+          method: "POST", url: `/api/inbox/${row.id}/resolve`, payload: { action },
+        });
+        expect(resolved.statusCode).toBe(200);
+        const queued = (await app.inject({ method: "GET", url: queueUrl })).json().items as
+          Array<{ title: string }>;
+        expect(queued.some((card) => card.title === row.title)).toBe(action === "open");
+        if (action === "reject") {
+          expect((await app.inject({ method: "GET", url: "/api/procurements?tab=trash" })).json().items)
+            .toEqual([expect.objectContaining({ title: row.title, triage: "reject" })]);
+        }
+        await app.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
+        const repeated = (await app.inject({ method: "GET", url: "/api/inbox" })).json().items as
+          Array<{ title: string }>;
+        expect(repeated.map((entry) => entry.title)).toEqual(["Электроматериалы"]);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it("repairs legacy discovery queue membership without losing the inbox or manual results", async () => {
+    const workspace = new SpecialistWorkspace();
+    const profileId = workspace.profile().id;
+    const catalog = new SpecialistCatalog();
+    const cards = ["manual", "discovery"].map((name, index) => SpecialistProcurementCard.parse({
+      id: `00000000-0000-4000-8000-00000000098${index}`,
+      title: `Кабель ${name}`, status: "accepting_bids", statusLabel: "приём",
+      url: `https://goszakupki.by/auction/view/${name}`,
+      sourceProcurementId: `auction/${name}`, foundAs: "match", profileIds: [profileId],
+    }));
+    for (const card of cards) {
+      catalog.upsertCase(card);
+      workspace.appendSearchId(profileId, card.id);
+    }
+    const discovered = cards[1]!;
+    catalog.record(inboxItemFromFoundCard(discovered, "2026-11-05T12:00:00.000Z"));
+    const app = await buildSpecialistApi({ catalog, workspace });
+    try {
+      const queue = await app.inject({
+        method: "GET", url: `/api/procurements?tab=search&profileId=${profileId}`,
+      });
+      expect(queue.json().items).toEqual([expect.objectContaining({ title: "Кабель manual" })]);
+      expect(catalog.procurement(discovered.id)).toBeDefined();
+      const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
+      expect(inbox.json().items).toEqual([expect.objectContaining({ title: discovered.title })]);
+    } finally {
+      await app.close();
+    }
   });
 
   it("reviews background discovery hits too, and counts only the accepted ones as added", async () => {
@@ -2378,7 +2486,7 @@ describe("specialist API", () => {
     await app.close();
   });
 
-  it("puts a shared discovery hit on the second profile without clearing the first queue", async () => {
+  it("discovery on another profile does not populate its manual queue or clear the first", async () => {
     const hits = [
       SearchHit.parse({
         sourceId: "goszakupki_by",
@@ -2425,7 +2533,7 @@ describe("specialist API", () => {
     const secondQueue = JSON.parse(
       (await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` })).body,
     ) as { items: Array<{ title: string }> };
-    expect(secondQueue.items.map((item) => item.title)).toEqual(["Поставка НКУ 0,4 кВ"]);
+    expect(secondQueue.items).toEqual([]);
 
     await app.inject({ method: "POST", url: `/api/profiles/${firstId}/activate` });
     const firstAgain = JSON.parse(
@@ -2982,7 +3090,7 @@ describe("specialist API", () => {
       ).toEqual(["auction/drop-2", "auction/unclear-2"]),
     );
     await vi.waitFor(async () => {
-      const latest = await app.inject({ method: "GET", url: "/api/inbox" });
+      const latest = await app.inject({ method: "GET", url: `/api/procurements?tab=search&profileId=${await activeProfileId(app)}` });
       expect((JSON.parse(latest.body).items as Array<{ title: string }>).map((item) => item.title)).toEqual([
         "Поставка НКУ 0,4 кВ",
       ]);
@@ -3031,7 +3139,8 @@ describe("specialist API", () => {
       url: `/api/profiles/${await activeProfileId(first)}`,
       payload: { name: "НКУ для управления насосами", keywords: ["НКУ"] },
     });
-    await first.inject({ method: "POST", url: "/api/procurements/search", payload: { profileId: await activeProfileId(first) } });
+    await first.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(first)}/watch`, payload: { watchNewProcurements: true } });
+    await first.inject({ method: "POST", url: "/api/profile/discovery", payload: {} });
     const workspaceState = JSON.parse(
       (await first.inject({ method: "GET", url: "/api/profile" })).body,
     ) as { id: string };
@@ -3260,12 +3369,13 @@ describe("specialist API", () => {
     expect(body.discardedCount).toBe(2);
     expect(body.items.map((item) => item.title)).toEqual([
       "Комплектная трансформаторная подстанция",
+      "Кабель силовой",
     ]);
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     const inboxTitles = (JSON.parse(inbox.body).items as Array<{ title: string }>).map(
       (item) => item.title,
     );
-    expect(inboxTitles).toContain("Кабель силовой");
+    expect(inboxTitles).not.toContain("Кабель силовой");
 
     const listed = await app.inject({ method: "GET", url: "/api/procurements" });
     const titles = (JSON.parse(listed.body).items as Array<{ title: string }>).map(
@@ -3302,6 +3412,7 @@ describe("specialist API", () => {
       id: string;
       title: string;
       sourceProcurementId: string;
+      foundAs?: string;
     }>;
     const cable = found.find((item) => item.title === "Кабель силовой");
     const rejected = await app.inject({
@@ -3321,17 +3432,15 @@ describe("specialist API", () => {
     expect(JSON.parse(watchOff.body).keywords).toEqual(["кабель"]);
     expect(JSON.parse(saved.body).keywords).toEqual(["кабель"]);
     expect(searched.statusCode).toBe(200);
-    // A title without the object is not a match. It may wait in review so
-    // procurement.get can read lot subject; it is not listed as found.
-    expect(found.some((item) => item.title === "Комплектная трансформаторная подстанция")).toBe(
-      false,
-    );
+    // An uncertain manual result stays in search without being labelled a match.
+    expect(found.find((item) => item.title === "Комплектная трансформаторная подстанция")?.foundAs)
+      .toBe("review");
     const inbox = await app.inject({ method: "GET", url: "/api/inbox" });
     expect(
       (JSON.parse(inbox.body).items as Array<{ title: string }>).some(
         (item) => item.title === "Комплектная трансформаторная подстанция",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(cable).toBeDefined();
     expect(rejected.statusCode).toBe(200);
     expect(remaining.some((item) => item.title === "Кабель силовой")).toBe(false);

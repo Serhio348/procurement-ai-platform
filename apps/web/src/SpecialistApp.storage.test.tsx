@@ -136,6 +136,27 @@ describe("SpecialistApp search list", () => {
     expect(sectionsNav().getByRole("link", { name: "Закупки" }).className).toContain("nav-current");
   });
 
+  it("deleting an inbox notification does not insert its returned card into Закупки", async () => {
+    window.history.pushState({}, "", "/");
+    const user = userEvent.setup();
+    const catalog = new SpecialistCatalog();
+    catalog.record(inboxItemFromFoundCard(found, "2026-11-05T12:00:00.000Z"));
+    const resolve = vi.fn(async () => ({ items: [], card: found, documents: [] }));
+    render(
+      <SpecialistApp
+        inbox={catalog.urgentInbox()}
+        procurements={[]}
+        profiles={[profile]}
+        activeProfileId={profile.id}
+        resolveInbox={resolve}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    expect(resolve).toHaveBeenCalledWith(catalog.urgentInbox()[0]!.id, "dismiss");
+    await user.click(sectionsNav().getByRole("link", { name: "Закупки" }));
+    expect(screen.queryByRole("button", { name: /Найденная поиском/ })).toBeNull();
+  });
+
   it("opens a watched case from the inbox inside Мои закупки", async () => {
     window.history.pushState({}, "", "/");
     const user = userEvent.setup();

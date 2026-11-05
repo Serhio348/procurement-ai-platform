@@ -38,6 +38,7 @@ import {
   type CabinetRegistry,
   type CabinetSummaryCounts,
   type SpecialistCabinet,
+  retainedCabinetCaseIds,
 } from "./cabinets.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -66,9 +67,7 @@ export interface SpecialistPersistence {
 }
 
 function persistableCabinetCases(cabinet: SpecialistCabinet): SpecialistProcurementCardValue[] {
-  const keep = new Set(
-    cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
-  );
+  const keep = retainedCabinetCaseIds(cabinet);
   return cabinet.catalog
     .storedCases()
     .filter((card) => isPersistableCabinetCase(card, keep));
@@ -778,4 +777,3 @@ function persistInboxErrorMessage(error: unknown): string {
   if (detail.length === 0) return prefix;
   return `${prefix} ${detail}`.slice(0, 2000);
 }
-

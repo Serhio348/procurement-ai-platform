@@ -147,6 +147,7 @@ import {
   createMemoryCabinetRegistry,
   EMPTY_CABINET_COUNTS,
   TEST_WORKSPACE_ID,
+  retainedCabinetCaseIds,
   type CabinetRegistry,
   type SpecialistCabinet,
 } from "./cabinets.js";
@@ -444,9 +445,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
     }
     if (options.persistCases !== undefined) {
-      const keep = new Set(
-        cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
-      );
+      const keep = retainedCabinetCaseIds(cabinet);
       await options.persistCases(
         cabinet.catalog.storedCases().filter((card) => isPersistableCabinetCase(card, keep)),
         cabinet.workspaceId,
@@ -466,9 +465,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       await options.persistWorkspace(cabinet.workspace.snapshot(), cabinet.workspaceId);
     }
     if (options.persistCases !== undefined) {
-      const keep = new Set(
-        cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
-      );
+      const keep = retainedCabinetCaseIds(cabinet);
       const wanted = new Set(caseIds);
       await options.persistCases(
         cabinet.catalog
@@ -494,11 +491,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   // finished-status search may show them, but they are never persisted.
   // Watch / participate / reject stay. Untouched old live rows are removed.
   const pruneStaleCases = async (): Promise<void> => {
-    const keepCaseIds = new Set(
-      workspace()
-        .profiles()
-        .flatMap((profile) => [...workspace().searchIds(profile.id)]),
-    );
+    const keepCaseIds = retainedCabinetCaseIds(currentCabinet());
     const removed = catalog().prune({
       now: clock(),
       maxAgeMs: caseMaxAgeMs,
@@ -786,6 +779,21 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
   const restoredWorkspaces = new Set<string>();
   const restoreDurableWork = (cabinet: SpecialistCabinet): void => {
     let marked = false;
+    // Older discovery runs wrote unread findings into both destinations.
+    // Keep the inbox and the case; only remove the premature queue membership.
+    const pendingFindings = new Set<string>(
+      cabinet.catalog.urgentInbox()
+        .filter((entry) => entry.topic === "new_found" || entry.topic === "review")
+        .map((entry) => entry.procurementId),
+    );
+    for (const profile of cabinet.workspace.profiles()) {
+      const before = cabinet.workspace.searchIds(profile.id);
+      const after = before.filter((id) => !pendingFindings.has(id));
+      if (after.length !== before.length) {
+        cabinet.workspace.replaceSearchIds(profile.id, after);
+        marked = true;
+      }
+    }
     for (const run of cabinet.workspace.searchRuns()) {
       const restored =
         run.status === "retrieving" || run.status === "scoring"
@@ -806,7 +814,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           try {
             await persist(cabinet);
           } catch (error) {
-            logger.error("Specialist interrupted-run mark persist failed", error);
+            logger.error("Specialist restored cabinet state persist failed", error);
           }
         }
         const pending = await cabinets.listIngestingCases(cabinet.workspaceId);
@@ -1006,12 +1014,6 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       void options.telegram.notifyInbox(currentCabinet().workspaceId, recorded.item);
     }
     return recorded;
-  }
-
-  function queueFoundInbox(card: SpecialistProcurementCardValue, now: string): void {
-    const recorded = recordInbox(inboxItemFromFoundCard(card, now));
-    if (recorded.duplicate) catalog().undismiss(recorded.item.change.id);
-    workspace().setDismissedInboxIds(catalog().dismissedIds());
   }
 
   function mergeSearchHits(
@@ -1255,8 +1257,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
 
   /**
    * Scores listing rows after procurement.get (or a title-only stand-in when
-   * the review port is off). Matches stay in the session search queue; SQL
-   * gets a row only after watch / participate / reject (or a review stub).
+   * the review port is off). Manual results enter the profile's search queue;
+   * discovery results wait in the inbox until the specialist opens them.
    * Listing titles never write a match/discard verdict.
    */
   async function scorePendingHits(
@@ -1436,17 +1438,14 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       if (outcome?.verdict === "relevant") {
         matchCount += 1;
         matched.push(remembered.card);
-        workspace().appendSearchId(profile.id, remembered.card.id);
-        catalog().dismissByProcurementId(item.card.id);
-        if (scoring.inboxForMatches && remembered.isNew) {
-          recordInbox(inboxItemFromFoundCard(profileView, now));
-        }
       } else {
         ambiguousCount += 1;
-        // Manual search resurfaces a still-undecided row (incl. a dismissed
-        // one); a discovery pass only announces genuinely new candidates so
-        // it cannot nag the specialist about the same card every hour.
-        if (remembered.isNew || !scoring.inboxForMatches) queueFoundInbox(profileView, now);
+      }
+      if (scoring.inboxForMatches) {
+        if (remembered.isNew) recordInbox(inboxItemFromFoundCard(profileView, now));
+      } else {
+        workspace().appendSearchId(profile.id, remembered.card.id);
+        catalog().dismissByProcurementId(item.card.id);
       }
       searchProgress.scored(profile.id, runId, {
         scoredCount,
@@ -1498,7 +1497,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         await pruneStaleCases();
         await persist(cabinet);
         searchProgress.scored(profile.id, runId, {
-          matchCount: searchQueueCards(profile.id).length,
+          matchCount: searchQueueCards(profile.id).filter(isScoredSearchMatch).length,
         });
         searchProgress.finish(profile.id, runId, "done");
       } catch (error) {
@@ -1534,7 +1533,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     if (card?.triage !== undefined) return true;
     return workspace()
       .profiles()
-      .some((item) => item.id !== profileId && searchQueueHas(item.id, cardId));
+      .some((item) => item.id !== profileId && (
+        searchQueueHas(item.id, cardId) ||
+        (card !== undefined && cardAssessmentVerdictFor(card, item.id) !== undefined)
+      ));
   }
 
   /** Drop a discard from this profile only. Other queues and decisions stay. */
@@ -1559,7 +1561,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       .map((card) => projectCardForProfile(card, profileId))
       .filter(
         (card) =>
-          isScoredSearchMatch(card) &&
+          (isScoredSearchMatch(card) || card.foundAs === "review") &&
           !isDismissedTriage(card.triage) &&
           !isWatchedTriage(card),
       )
@@ -1889,7 +1891,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       discardedCount += scored.discarded;
       ambiguousCount += scored.ambiguousCount;
       searchProgress.scored(profile.id, runId, {
-        matchCount: searchQueueCards(profile.id).length,
+        matchCount: searchQueueCards(profile.id).filter(isScoredSearchMatch).length,
         discardedCount: scored.discarded,
         reviewCount: scored.ambiguousCount,
       });
@@ -1902,16 +1904,17 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       startListingReviewJob(collected.pending, profile, now, plan, runId);
     }
     const items = searchQueueCards(profile.id);
+    const relevantCount = items.filter(isScoredSearchMatch).length;
     logger.info("Specialist profile search recorded", {
       profileName: profile.name,
-      relevantCount: items.length,
+      relevantCount,
       discardedCount,
       ambiguousCount,
     });
     const run = searchProgress.snapshot(profile.id);
     return SpecialistSearchResponse.parse({
       profileName: profileDisplayName(profile),
-      relevantCount: items.length,
+      relevantCount,
       discardedCount,
       ambiguousCount,
       // An empty page ends paging even when the source still claims more:

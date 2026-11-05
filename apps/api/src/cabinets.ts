@@ -23,6 +23,14 @@ export interface SpecialistCabinet {
   catalog: SpecialistCatalog;
 }
 
+/** Inbox cases survive without joining the manual search queue, even after dismissal. */
+export function retainedCabinetCaseIds(cabinet: SpecialistCabinet): Set<string> {
+  return new Set([
+    ...cabinet.workspace.profiles().flatMap((profile) => [...cabinet.workspace.searchIds(profile.id)]),
+    ...cabinet.catalog.inboxItems().map((item) => item.change.procurementId),
+  ]);
+}
+
 export interface SpecialistCaseListQuery {
   tab?: SpecialistProcurementListTab;
   limit?: number;

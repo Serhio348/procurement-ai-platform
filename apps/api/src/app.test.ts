@@ -33,9 +33,18 @@ import {
   type CabinetRegistry,
 } from "./cabinets.js";
 import { loadFixtureCatalog } from "./load-fixture.js";
-import { createProcurementSearchReview } from "./search-review.js";
+import { createProcurementSearchReview, type SpecialistReviewPort } from "./search-review.js";
 
 const tmpDirs: string[] = [];
+const confirmedEquipmentReview: SpecialistReviewPort = {
+  review: async (hits) => hits.map(() => ({
+    verdict: "relevant",
+    decidedBy: "model",
+    reason: "Назначение оборудования подтверждено.",
+    matchedTerms: [],
+    confidence: 0.95,
+  })),
+};
 
 afterEach(async () => {
   await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -482,7 +491,7 @@ describe("specialist API", () => {
             sourceId: "goszakupki_by",
             sourceProcurementId: "auction/page-1",
             url: "https://goszakupki.by/auction/view/page-1",
-            title: "КТПБ из поиска",
+            title: "Поставка кабеля сетевого",
           }),
         ],
       },
@@ -490,7 +499,7 @@ describe("specialist API", () => {
     await app.inject({
       method: "PUT",
       url: `/api/profiles/${await activeProfileId(app)}`,
-      payload: { name: "КТПБ", keywords: ["КТПБ"] },
+      payload: { name: "Кабель", keywords: ["кабель"] },
     });
     const searched = await app.inject({
       method: "POST",
@@ -513,7 +522,7 @@ describe("specialist API", () => {
     expect(JSON.parse(mine.body).items).toEqual([]);
     expect(JSON.parse(mineAfter.body).items[0]?.triage).toBe("monitor");
     expect(JSON.parse(one.body).id).toBe(id);
-    expect(JSON.parse(one.body).title).toBe("КТПБ из поиска");
+    expect(JSON.parse(one.body).title).toBe("Поставка кабеля сетевого");
     expect(badTab.statusCode).toBe(400);
 
     await app.close();
@@ -2692,6 +2701,7 @@ describe("specialist API", () => {
       searchHits: { search },
       journal,
       persistCases,
+      searchReview: confirmedEquipmentReview,
     });
     await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "Кабель", keywords: ["кабель"] } });
     await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
@@ -2843,6 +2853,7 @@ describe("specialist API", () => {
       catalog: new SpecialistCatalog(),
       searchHits: { search: async () => [], searchDetailed },
       journal,
+      searchReview: confirmedEquipmentReview,
     });
     await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
     await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });
@@ -2955,6 +2966,7 @@ describe("specialist API", () => {
       catalog: new SpecialistCatalog(),
       searchHits: { search: async () => [], searchDetailed },
       journal,
+      searchReview: confirmedEquipmentReview,
     });
     await app.inject({ method: "PUT", url: `/api/profiles/${await activeProfileId(app)}`, payload: { name: "КТПБ", keywords: ["КТПБ"] } });
     await app.inject({ method: "POST", url: `/api/profiles/${await activeProfileId(app)}/watch`, payload: { watchNewProcurements: true } });

@@ -30,6 +30,7 @@ const DEFAULT_EXCLUDED_FOR_WORKS = [
 ];
 
 const PURPOSE_FILLER = /^(управления|управление|привода|привод)$/iu;
+const GENERIC_PURPOSE_HEAD = /^(систем|оборудован|устройств|комплекс|установк)/iu;
 
 /**
  * Roots that mark a token as the work itself inside a saved phrase
@@ -261,7 +262,7 @@ function contextTermsFromPurpose(purpose: string): string[] {
   const head = tokens[0];
   if (head !== undefined) {
     const noun = stemWord(head);
-    if (noun.length >= 4) {
+    if (noun.length >= 4 && !GENERIC_PURPOSE_HEAD.test(head)) {
       terms.push(noun);
     }
   }

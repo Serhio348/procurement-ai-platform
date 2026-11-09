@@ -119,7 +119,7 @@ describe("reviewByIntentCard", () => {
     ).toBeUndefined();
   });
 
-  it("leaves an embedded abbreviation for the model and settles an exact token on the card", () => {
+  it("leaves both embedded and standalone abbreviations for semantic review", () => {
     const supplyPlan = SearchIntentPlan.parse({
       objects: ["ТП", "КТП"],
       desired_actions: ["поставка"],
@@ -133,8 +133,8 @@ describe("reviewByIntentCard", () => {
       ),
     ).toBeUndefined();
     expect(
-      reviewByIntentCard(card("Поставка КТП 10/0,4 кВ", [{ title: "КТП" }]), supplyPlan)?.decidedBy,
-    ).toBe("card");
+      reviewByIntentCard(card("Поставка КТП 10/0,4 кВ", [{ title: "КТП" }]), supplyPlan),
+    ).toBeUndefined();
     expect(
       reviewByIntentCard(card("Реагенты Ф-300 ТП", [{ title: "анализатор Ф-300 ТП" }]), supplyPlan),
     ).toBeUndefined();

@@ -44,7 +44,7 @@ describe("scoreSearchIntent", () => {
   it("scores a supply of NCU for a pump station high", () => {
     const result = scoreSearchIntent(
       { title: "Поставка НКУ для насосной станции" },
-      nkuPlan,
+      pumpPlan,
     );
     expect(result.decision).toBe("match");
     expect(result.score).toBeGreaterThanOrEqual(70);
@@ -94,7 +94,7 @@ describe("scoreSearchIntent", () => {
       },
       nkuPlan,
     );
-    expect(result.decision).toBe("match");
+    expect(result.decision).toBe("review");
     expect(result.excludedRole).toBe("mention");
     expect(result.score).toBeGreaterThanOrEqual(SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE);
   });
@@ -116,12 +116,12 @@ describe("scoreSearchIntent", () => {
       ).decision,
     ).toBe("veto");
 
-    // The reverse stays a match: supply is the subject, works are incidental.
+    // The reverse has no work veto; only the abbreviation needs review.
     const incidentalWorks = scoreSearchIntent(
       { title: "Поставка НКУ, включая монтаж" },
       nkuPlan,
     );
-    expect(incidentalWorks.decision).toBe("match");
+    expect(incidentalWorks.decision).toBe("review");
     expect(incidentalWorks.excludedRole).toBe("mention");
 
     // Works done by the customer stay a mention, not a veto.
@@ -129,10 +129,10 @@ describe("scoreSearchIntent", () => {
       { title: "Поставка НКУ, монтаж силами заказчика" },
       nkuPlan,
     );
-    expect(byCustomer.decision).toBe("match");
+    expect(byCustomer.decision).toBe("review");
     expect(byCustomer.excludedRole).toBe("mention");
 
-    // The same title is a legitimate match for a works profile.
+    // A works profile likewise checks the abbreviation instead of vetoing the title.
     const worksPlan = SearchIntentPlan.parse({
       objects: ["НКУ"],
       desired_actions: ["монтаж"],
@@ -142,7 +142,7 @@ describe("scoreSearchIntent", () => {
     expect(
       scoreSearchIntent({ title: "Монтаж НКУ, включая поставку крепежа" }, worksPlan)
         .decision,
-    ).toBe("match");
+    ).toBe("review");
 
     // Card level: the veto survives procedure scoring.
     expect(
@@ -171,8 +171,8 @@ describe("scoreSearchIntent", () => {
         /предмет закупки — (услуги|работы|обслуживание|эксплуатация|проектирование)/,
       );
     }
-    expect(scoreSearchIntent({ title: "Закупка КТП 10/0,4 кВ" }, plan).decision).toBe("match");
-    expect(scoreSearchIntent({ title: "Поставка КТП с услугами шефмонтажа" }, plan).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "Закупка КТП 10/0,4 кВ" }, plan).decision).toBe("review");
+    expect(scoreSearchIntent({ title: "Поставка КТП с услугами шефмонтажа" }, plan).decision).toBe("review");
   });
 
   it("vetoes reconstruction, construction and contractor titles for a supply profile", () => {
@@ -202,11 +202,11 @@ describe("scoreSearchIntent", () => {
     ).toBe("veto");
     expect(
       scoreSearchIntentFromProcedure(
-        procedureCard("Реконструкция котельной", "Поставка НКУ 0,4 кВ"),
+        procedureCard("Реконструкция котельной", "Поставка подстанции НКУ 0,4 кВ"),
         plan,
       ).decision,
     ).toBe("match");
-    expect(scoreSearchIntent({ title: "КТП 400 кВА" }, plan).decision).toBe("match");
+    expect(scoreSearchIntent({ title: "КТП 400 кВА" }, plan).decision).toBe("review");
     expect(
       scoreSearchIntent(
         {
@@ -407,7 +407,7 @@ describe("scoreSearchIntent", () => {
     );
     expect(
       scoreSearchIntent({ title: "Монтаж КТП на объекте" }, works).decision,
-    ).toBe("match");
+    ).toBe("review");
   });
 
   it("leaves supply and works listed as equals for the model instead of a word-order veto", () => {
@@ -431,8 +431,8 @@ describe("scoreSearchIntent", () => {
 
     // Works alone in the leading clause is still a veto — no enumeration with supply.
     expect(scoreSearchIntent({ title: "Монтаж КТП на объекте" }, supplyPlan).decision).toBe("veto");
-    // Supply first, works after: still a plain match, as before.
-    expect(scoreSearchIntent({ title: "Поставка КТП, монтаж и пусконаладка" }, supplyPlan).decision).toBe("match");
+    // Supply first does not veto; the abbreviation still needs its meaning checked.
+    expect(scoreSearchIntent({ title: "Поставка КТП, монтаж и пусконаладка" }, supplyPlan).decision).toBe("review");
     // Works in one lot, supply of something else in another lot: not peers.
     const twoLots = ProcedureCard.parse({
       sourceId: "goszakupki_by",
@@ -786,7 +786,7 @@ describe("scoreSearchIntent", () => {
     expect(split.decision).not.toBe("match");
 
     const supplyLot = scoreSearchIntentFromProcedure(
-      procedureCard("Открытый конкурс", "Поставка НКУ 0,4 кВ"),
+      procedureCard("Открытый конкурс", "Поставка шкафа управления НКУ 0,4 кВ"),
       nkuPlan,
     );
     expect(supplyLot.decision).toBe("match");
@@ -873,18 +873,18 @@ describe("embedded equipment codes", () => {
     ).toBe("match");
   });
 
-  it("still matches an exact token and a code the term itself leads", () => {
-    expect(scoreSearchIntent({ title: "Поставка КТП 10/0,4 кВ" }, supply).decision).toBe("match");
-    expect(scoreSearchIntent({ title: "КТПБ-250" }, supply).decision).toBe("match");
+  it("checks the meaning of exact short designations as well as embedded ones", () => {
+    expect(scoreSearchIntent({ title: "Поставка КТП 10/0,4 кВ" }, supply).decision).toBe("review");
+    expect(scoreSearchIntent({ title: "КТПБ-250" }, supply).decision).toBe("review");
     expect(
       scoreSearchIntent({ title: "Поставка КТП и сертификат ЭТП" }, supply).decision,
-    ).toBe("match");
+    ).toBe("review");
     expect(
       scoreSearchIntentFromProcedure(
         procedureCard("Открытый конкурс", "Поставка КТП 10/0,4 кВ"),
         supply,
       ).decision,
-    ).toBe("match");
+    ).toBe("review");
   });
 
   it("does not let an embedded object satisfy a works verb by itself", () => {
@@ -895,6 +895,81 @@ describe("embedded equipment codes", () => {
 
   it("still vetoes a work-headed title when the equipment is only embedded", () => {
     expect(scoreSearchIntent({ title: "Монтаж БКТПБ-746" }, supply).decision).toBe("veto");
+  });
+});
+
+describe("subject evidence from live inbox findings", () => {
+  it("does not invent electrical works from a medical compound fragment", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Монтаж электрооборудования",
+      keywords: ["монтаж электрооборудования", "электромонтажные работы", "электроснабжение"],
+      excludeKeywords: [],
+    });
+    const result = scoreSearchIntentFromProcedure(
+      procedureCard("Аппарат электро(нейро)миографии", "Аппарат электро(нейро)миографии"),
+      plan,
+    );
+    expect(result.decision).toBe("discard");
+    expect(result.matchedObjects).toEqual([]);
+    expect(result.matchedDesired).toEqual([]);
+    expect(result.score).toBe(0);
+  });
+
+  it("requires meaning for an isolated abbreviation, including a plough part code", () => {
+    const plan = SearchIntentPlan.parse({
+      objects: ["КСО", "камеры сборные одностороннего обслуживания"],
+      desired_actions: ["поставка"],
+    });
+    const part = scoreSearchIntentFromProcedure(
+      procedureCard("Запчасти для плуга ППО 9-45К", "Боковина КСО 40.00.00.002"),
+      plan,
+    );
+    expect(part.decision).toBe("review");
+    expect(part.reason).toContain("обозначения");
+    expect(scoreSearchIntent({ title: "Поставка КСО" }, plan).decision).toBe("review");
+    expect(
+      scoreSearchIntent({ title: "Камеры сборные одностороннего обслуживания КСО" }, plan).decision,
+    ).toBe("match");
+  });
+
+  it("treats the equipment in a consumable's purpose as a mention, not the subject", () => {
+    const plan = SearchIntentPlan.parse({
+      objects: ["водоочистка", "система водоочистки"],
+      required_context: ["систем"],
+      desired_actions: ["поставка"],
+    });
+    const salt = scoreSearchIntent({
+      title: "Поставка соли таблетированной в мешках для систем водоочистки",
+    }, plan);
+    expect(salt.objectRole).toBe("mention");
+    expect(salt.decision).toBe("review");
+    expect(salt.reason).toContain("не подтверждает");
+    expect(scoreSearchIntent({ title: "Поставка системы водоочистки" }, plan).decision).toBe("match");
+  });
+
+  it("keeps bundled accessories for review but accepts an independent accessory lot", () => {
+    const plan = inferSearchIntentPlan({ name: "Кабель", keywords: ["кабель"], excludeKeywords: [] });
+    const title = "Проектор для школы (в комплекте с креплением и кабелем)";
+    expect(scoreSearchIntent({ title }, plan)).toMatchObject({
+      decision: "review", objectRole: "mention",
+    });
+    expect(scoreSearchIntentFromProcedure(procedureCard(title, "Кабель сетевой"), plan).decision)
+      .toBe("match");
+  });
+
+  it("keeps consumables explicitly requested by the profile and meaningful purpose phrases", () => {
+    const plan = inferSearchIntentPlan({
+      name: "Водоподготовка",
+      keywords: ["водоподготовка", "картриджи для системы очистки воды"],
+      excludeKeywords: [],
+    });
+    expect(plan.required_context).toEqual(["системы очистки воды"]);
+    expect(scoreSearchIntent({
+      title: "Картриджи для системы очистки воды",
+    }, plan).decision).toBe("match");
+    expect(scoreSearchIntent({
+      title: "Картриджи для системы печати",
+    }, plan).decision).toBe("review");
   });
 });
 

@@ -48,6 +48,16 @@ describe("stemWord", () => {
     // The real compound still matches its own inflections.
     expect(termOccurs("Поставка электрооборудования", "электрооборудование")).toBe(true);
   });
+
+  it("does not expand a fragment before parentheses into unrelated compound words", () => {
+    for (const term of ["электрооборудования", "электроснабжение", "электромонтажные"]) {
+      expect(termOccurs("Аппарат электро(нейро)миографии", term), term).toBe(false);
+    }
+    expect(termOccurs("Термо(гигро)метр", "термостат")).toBe(false);
+    expect(termOccurs("Монтаж электрооборудования", "электрооборудование")).toBe(true);
+    expect(termOccurs("пусконаладочные работы", "пусконаладка")).toBe(true);
+    expect(termOccurs("сети электроснабжения", "сеть электроснабжения")).toBe(true);
+  });
 });
 
 describe("поставка vs поставщик", () => {

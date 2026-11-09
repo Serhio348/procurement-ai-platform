@@ -20,6 +20,8 @@ const ENDINGS = [
   "его",
   "ыми",
   "ими",
+  "ых",
+  "их",
   "ией",
   "иею",
   "ою",
@@ -72,6 +74,12 @@ const FILLER = new Set(["для", "по", "и", "с", "на", "в", "во", "о�
 
 /** Agent-noun tails that must not share a root with the verb/action. */
 const AGENT_TAILS = ["льщик", "щик", "чиц", "чик", "ниц", "тель"];
+
+// Stemming can leave a derivational tail, but an arbitrary continuation
+// introduces another root (e.g. электро(нейро)миография vs электромонтаж).
+const STEM_EXTENSIONS = new Set([
+  "н", "ск", "ов", "ев", "оч", "очн", "ическ", "ичес", "енн", "ени", "ле", "ова", "ирова",
+]);
 
 /**
  * Verb/reflexive tails, longest first. Applied only when the remainder stays
@@ -210,7 +218,7 @@ export function stemsShareRoot(left: string, right: string): boolean {
   if (shorter.length < 4) return false;
   if (!longer.startsWith(shorter)) return false;
   const remainder = longer.slice(shorter.length);
-  return !AGENT_TAILS.some((tail) => remainder.startsWith(tail) || tail.startsWith(remainder));
+  return STEM_EXTENSIONS.has(remainder);
 }
 
 function hasAgentTail(stem: string): boolean {

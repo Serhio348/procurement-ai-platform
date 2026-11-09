@@ -58,6 +58,7 @@ export interface SearchIntentScore {
 
 const SIDE_CLAUSE = /включая|в\s+том\s+числе|с\s+последующ/iu;
 const CUSTOMER_WORKS = /силами\s+заказчика/iu;
+const OBJECT_MENTION = /(?<![\p{L}\p{N}])(?:для|в\s+комплекте\s+с|включая|в\s+том\s+числе|с|со)\s+/giu;
 
 const HEAD_FILLER = /^(по|на|для|к|ко|о|об|с|со|от|до|из|и|или|при)$/iu;
 
@@ -72,21 +73,26 @@ export function scoreSearchIntent(
   const title = hit.title;
   const extra = hit.extraText ?? "";
   const titleObjects = objectsIn(title, plan.objects);
+  const subjectObjects = objectsIn(primaryObjectText(title), plan.objects);
   const extraObjects =
     titleObjects.found.length === 0
       ? objectsIn(extra, plan.objects)
-      : { found: [], exact: false, twoLetterOnly: false };
+      : { found: [], exact: false, twoLetterOnly: false, abbreviationOnly: false };
   const objectRole: IntentMatchRole =
-    titleObjects.found.length > 0 ? "subject" : extraObjects.found.length > 0 ? "mention" : "none";
-  const objects = objectRole === "mention" ? extraObjects.found : titleObjects.found;
-  const objectSource = objectRole === "mention" ? extraObjects : titleObjects;
+    subjectObjects.found.length > 0
+      ? "subject"
+      : titleObjects.found.length > 0 || extraObjects.found.length > 0 ? "mention" : "none";
+  const objectSource = subjectObjects.found.length > 0
+    ? subjectObjects
+    : titleObjects.found.length > 0 ? titleObjects : extraObjects;
+  const objects = objectSource.found;
   // Every found object is only inside a foreign code. The number can still
   // clear the match line; the decision must not, or "ТП" in "ЭТП" settles
   // a supply profile before the model sees the card.
   const objectEmbeddedOnly = objectRole !== "none" && !objectSource.exact;
   // A two-letter keyword is never proof by itself, in any domain: "ТП" in
   // "Ф-300 ТП" and "ЖБ" in "ЖБ-1" both need the model. A longer object on
-  // the same text can still settle the match.
+  // the same text can still settle the match when its meaning is supported.
   const objectTwoLetterOnly = objectRole !== "none" && objectSource.twoLetterOnly;
 
   const matchedDesired = plan.desired_actions.filter((item) => termOccurs(title, item));
@@ -111,6 +117,8 @@ export function scoreSearchIntent(
       : excludedActionRole(title, plan, matchedDesired);
   const context = contextRoleFor(title, extra, plan);
   const matchedContext = context.matched;
+  const objectAbbreviationOnly =
+    objectRole !== "none" && objectSource.abbreviationOnly && context.role !== "match";
 
   let score = 0;
   if (objectRole === "subject") score += SEARCH_INTENT_WEIGHTS.OBJECT_MATCH_WEIGHT;
@@ -153,6 +161,7 @@ export function scoreSearchIntent(
     objectEmbeddedOnly,
     objectTwoLetterOnly,
     genericWorkHead,
+    objectAbbreviationOnly,
   );
   return {
     score,
@@ -166,6 +175,7 @@ export function scoreSearchIntent(
       objectEmbeddedOnly,
       objectTwoLetterOnly,
       genericWorkHead,
+      objectAbbreviationOnly,
       contextRole: context.role,
       matchedContext,
       decision,
@@ -463,15 +473,36 @@ function isTwoLetterTerm(term: string): boolean {
   return [...compact].length === 2;
 }
 
+function isAbbreviationTerm(term: string): boolean {
+  const compact = term.normalize("NFKC").trim();
+  return /^\p{L}{2,3}$/u.test(compact) || /^\p{Lu}{4,5}$/u.test(compact);
+}
+
+function primaryObjectText(title: string): string {
+  for (const match of title.matchAll(OBJECT_MENTION)) {
+    const prefix = title.slice(0, match.index);
+    // The contractor is a grammatical carrier of the work, not the item
+    // being bought. Its "для выполнения" still introduces the subject.
+    if (
+      /^(?:выбор|привлечение|определение|поиск)\s/iu.test(prefix) &&
+      /подряд/iu.test(prefix) &&
+      /^для\s+(?:выполнения|оказания)\s/iu.test(title.slice(match.index))
+    ) continue;
+    return prefix;
+  }
+  return title;
+}
+
 function objectsIn(
   text: string,
   objects: readonly string[],
-): { found: string[]; exact: boolean; twoLetterOnly: boolean } {
+): { found: string[]; exact: boolean; twoLetterOnly: boolean; abbreviationOnly: boolean } {
   const found = objects.filter((item) => termOccurs(text, item));
   return {
     found,
     exact: found.some((item) => termEvidence(text, item) === "exact"),
     twoLetterOnly: found.length > 0 && found.every(isTwoLetterTerm),
+    abbreviationOnly: found.length > 0 && found.every(isAbbreviationTerm),
   };
 }
 
@@ -485,6 +516,7 @@ function decisionFor(
   objectEmbeddedOnly: boolean,
   objectTwoLetterOnly: boolean,
   genericWorkHead: boolean,
+  objectAbbreviationOnly: boolean,
 ): IntentScoreDecision {
   if (excludedRole === "subject") return "veto";
   if (contextRole === "mismatch") return "discard";
@@ -500,6 +532,7 @@ function decisionFor(
   }
   if (contextRole === "missing") return "review";
   if (objectEmbeddedOnly || objectTwoLetterOnly) return "review";
+  if (objectAbbreviationOnly || objectRole === "mention") return "review";
   if (score >= SEARCH_INTENT_WEIGHTS.MIN_MATCH_SCORE) return "match";
   return "review";
 }
@@ -519,6 +552,7 @@ function relevanceReason(input: {
   objectEmbeddedOnly: boolean;
   objectTwoLetterOnly: boolean;
   genericWorkHead: boolean;
+  objectAbbreviationOnly: boolean;
   contextRole: IntentContextRole;
   matchedContext: readonly string[];
   decision: IntentScoreDecision;
@@ -557,7 +591,10 @@ function relevanceReason(input: {
     return `Оборудование ${equipment} найдено, а в названии только общие работы — нужна проверка по смыслу.`;
   }
   if (input.objectRole === "mention" && equipment !== undefined) {
-    return `Слово «${equipment}» есть только в дополнительном тексте, этого недостаточно.`;
+    return `Объект «${equipment}» упомянут в назначении, комплектации или дополнительном тексте — это не подтверждает закупку самого объекта.`;
+  }
+  if (input.objectAbbreviationOnly && input.decision === "review" && equipment !== undefined) {
+    return `Найдены только короткие обозначения: ${equipment}. Их значение в предмете закупки должна проверить модель.`;
   }
   if (input.contextRole === "missing" && equipment !== undefined) {
     return `Оборудование ${equipment} найдено, назначение в названии не указано — нужна проверка.`;

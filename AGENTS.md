@@ -136,6 +136,7 @@
 - [`docs/architecture/STAGE-127.md`](docs/architecture/STAGE-127.md) — модель группирует разнословые отказы в направление и называет фразы; код валидирует каждую по памяти решений (≥2 отказов, 0 взятых, не в словах профиля) — «Принять» пишет `phrases` в исключения
 - [`docs/architecture/STAGE-128.md`](docs/architecture/STAGE-128.md) — источник БУТБ (JSF-сессии): нативный поиск по «Предмет закупки» по каждому терму (expand→submit→restore колонок) + fallback на скан реестра с локальным фильтром, `BUTB_ENABLED` + пилот `BUTB_WORKSPACE_IDS`, фан-аут с пустой страницей упавшего источника, `butb/`-префикс id
 - [`docs/architecture/STAGE-129.md`](docs/architecture/STAGE-129.md) — БУТБ не кладёт соседей: нативное окно ограничено водяной меткой и бюджетом кандидатов, кэш окна делает resume конвергентным, health-пробы `priority: "high"` не сгорают за фоновой работой
+- [`docs/architecture/STAGE-131.md`](docs/architecture/STAGE-131.md) — ручной поиск (match/review) идёт в «Закупки», discovery — только во входящие; dismiss не переносит карточку, inbox-кейсы сохраняются без поисковой очереди
 
 ---
 

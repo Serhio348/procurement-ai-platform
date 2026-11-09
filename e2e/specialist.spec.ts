@@ -14,13 +14,12 @@ async function signIn(page: Page): Promise<void> {
 /**
  * Full specialist round-trip against the real API + persistence (R41):
  * sign in → name the profile and give it a keyword → run the profile search
- * → a review candidate lands in the inbox → open its card → decide →
+ * → a review candidate stays in the search list → open its card → decide →
  * reload the browser — the decision must survive, because it lives in the
  * server-side store, not the page (regression coverage for R01/R03/R27).
  *
  * The fixture source scores through the cheap scorer, so uncertain hits
- * arrive as inbox review rows — the same path a live run takes when the
- * classifier is unsure.
+ * remain in the manual search list with a review label.
  */
 test("specialist flow: login → profile → search → review → decide → survives reload", async ({
   page,
@@ -36,11 +35,9 @@ test("specialist flow: login → profile → search → review → decide → su
   await page.getByRole("button", { name: "Сохранить профиль" }).click();
   await expect(page.locator(".profile-list-link")).toContainText("КТП e2e");
 
-  // Run the profile search on the fixture source; unscored candidates land
-  // in the inbox as review rows.
+  // Manual search keeps both matches and uncertain candidates in «Закупки».
   await page.getByRole("link", { name: "Закупки", exact: true }).click();
   await page.getByRole("button", { name: "Искать по профилю" }).click();
-  await page.getByRole("link", { name: "Входящие" }).click();
   const candidate = page
     .locator(".inbox-list .inbox-title")
     .filter({ hasText: /КТП|подстанц|трансформатор|кабель/i });
@@ -48,7 +45,6 @@ test("specialist flow: login → profile → search → review → decide → su
 
   // Open the candidate's card and mark it watched.
   await candidate.first().click();
-  await page.getByRole("button", { name: "Открыть карточку" }).click();
   await page.getByRole("button", { name: "Отслеживать" }).click();
 
   // The decision lands in «Мои закупки» and survives a browser reload —

@@ -43,6 +43,91 @@ function cardCaller(cards: Record<string, unknown>): McpToolCaller {
 }
 
 describe("createProcurementSearchReview", () => {
+  it("sends misleading subject evidence to the model and preserves a real independent lot", async () => {
+    const cases = [
+      {
+        id: "butb/PR20261105399751",
+        title: "Аппарат электро(нейро)миографии",
+        lot: "Аппарат электро(нейро)миографии",
+        keywords: ["монтаж электрооборудования", "электромонтажные работы", "электроснабжение"],
+      },
+      {
+        id: "request/3817933",
+        title: "Запчасти для плуга ППО 9-45К",
+        lot: "Боковина КСО 40.00.00.002",
+        keywords: ["КСО"],
+      },
+      {
+        id: "marketing/3822785",
+        title: "Соль таблетированная в мешках для систем водоочистки",
+        lot: "Соль таблетированная в мешках для систем водоочистки",
+        keywords: ["водоочистка", "система водоочистки"],
+      },
+      {
+        id: "single-source/3822859",
+        title: "Проектор (в комплекте с креплением и кабелем)",
+        lot: "Проектор с кабелем",
+        keywords: ["кабель"],
+      },
+    ];
+    for (const item of cases) {
+      const currentProfile = { name: item.keywords.join(", "), keywords: item.keywords, excludeKeywords: [] };
+      const classify = vi.fn(async (_input: SearchClassifierInput) => ({
+        verdict: "irrelevant",
+        confidence: 0.95,
+        reason: "Предмет закупки не соответствует профилю.",
+        needDeeper: false,
+        matchedTerms: [],
+      }));
+      const review = createProcurementSearchReview({
+        caller: cardCaller({ [item.id]: cardWithLots(item.id, item.title, [item.lot]) }),
+        classifier: { classify },
+      });
+      const [outcome] = await review.review([hit(item.id, item.title)], {
+        ...currentProfile,
+        intent: inferSearchIntentPlan(currentProfile),
+      });
+      expect(outcome?.verdict, item.title).toBe("irrelevant");
+      expect(outcome?.decidedBy, item.title).toBe("model");
+      expect(classify, item.title).toHaveBeenCalledTimes(1);
+      expect(classify.mock.calls[0]?.[0].card?.lotTitles).toContain(item.lot);
+    }
+
+    const classify = vi.fn(async () => ({}));
+    const cable = { name: "Кабель", keywords: ["кабель"], excludeKeywords: [] };
+    const review = createProcurementSearchReview({
+      caller: cardCaller({
+        "auction/separate": cardWithLots("auction/separate", "Проектор с кабелем", [
+          "Проектор с кабелем", "Поставка кабеля сетевого",
+        ]),
+      }),
+      classifier: { classify },
+    });
+    const [outcome] = await review.review([hit("auction/separate", "Проектор с кабелем")], {
+      ...cable, intent: inferSearchIntentPlan(cable),
+    });
+    expect(outcome?.verdict).toBe("relevant");
+    expect(outcome?.decidedBy).toBe("card");
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-accept an ambiguous abbreviation when the classifier is unavailable or out of budget", async () => {
+    const profile = { name: "КСО", keywords: ["КСО"], excludeKeywords: [] };
+    const caller = cardCaller({
+      "auction/part": cardWithLots("auction/part", "Запчасти для плуга", ["Боковина КСО"]),
+    });
+    for (const options of [
+      { caller },
+      { caller, maxModelCalls: 0, classifier: { classify: vi.fn(async () => ({})) } },
+    ]) {
+      const [outcome] = await createProcurementSearchReview(options).review(
+        [hit("auction/part", "Запчасти для плуга")],
+        { ...profile, intent: inferSearchIntentPlan(profile) },
+      );
+      expect(outcome?.verdict).toBe("needs_human");
+    }
+  });
+
   it("accepts a hit whose lot names the equipment, without spending a model call", async () => {
     const classify = vi.fn(async (_input: SearchClassifierInput) => ({}));
     const review = createProcurementSearchReview({

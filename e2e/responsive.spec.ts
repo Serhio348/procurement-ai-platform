@@ -105,7 +105,6 @@ test("responsive workspace at 390px: opened card renders above the list", async 
 
   await page.locator(".mobile-tabs").getByRole("link", { name: /Закупки/ }).click();
   await page.getByRole("button", { name: "Искать по профилю" }).click();
-  await page.locator(".mobile-tabs").getByRole("link", { name: /Входящие/ }).click();
   const candidate = page
     .locator(".inbox-list .inbox-title")
     .filter({ hasText: /КТП|подстанц|трансформатор|кабель/i });

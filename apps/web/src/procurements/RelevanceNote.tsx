@@ -1,9 +1,10 @@
 import type { SpecialistProcurementCard } from "@procurement/contracts";
 
 export function RelevanceNote({ card }: { card: SpecialistProcurementCard }) {
-  if (card.relevanceScore === undefined && card.relevanceReason === undefined) return null;
+  if (card.foundAs !== "review" && card.relevanceScore === undefined && card.relevanceReason === undefined) return null;
   return (
     <p className="relevance-note">
+      {card.foundAs === "review" ? <strong>Требует проверки · </strong> : null}
       {card.relevanceScore === undefined ? null : <strong>Оценка {String(card.relevanceScore)}</strong>}
       {card.relevanceReason === undefined ? null : (
         <span>

@@ -666,7 +666,7 @@ export function SpecialistApp(props: SpecialistAppProps): ReactElement {
                         );
                         pushNotice("Корзина", `«${rejected.title}» — перемещена в корзину.`);
                         refreshSuggestions();
-                      } else if (result.card !== undefined) {
+                      } else if (action !== "dismiss" && result.card !== undefined) {
                         showInSearchPane(result.card);
                       }
                       if (action === "documents" && result.card !== undefined) {

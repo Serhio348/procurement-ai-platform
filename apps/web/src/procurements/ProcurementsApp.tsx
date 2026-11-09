@@ -280,7 +280,7 @@ export function ProcurementsApp({
         ? ` В выдаче площадки не открывали ${String(searchRun.listingDiscardedCount)}.`
         : "";
     setNotice(
-      `По профилю «${searchRun.profileName}»: найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}, сомнительных во входящих ${String(searchRun.reviewCount)}.${listing}`,
+      `По профилю «${searchRun.profileName}»: найдено ${String(searchRun.matchCount)}, отброшено ${String(searchRun.discardedCount)}, требуют проверки ${String(searchRun.reviewCount)}.${listing}`,
     );
   }, [searchRun]);
   const [progress, setProgress] = useState<SpecialistIngestProgress | undefined>();
@@ -398,7 +398,7 @@ export function ProcurementsApp({
       setNotice(
         run !== undefined && (run.status === "scoring" || run.status === "retrieving")
           ? `По профилю «${result.profileName}»: читаем карточки${scored === undefined ? "" : ` (${scored})`}. Список пополняется по мере оценки.`
-          : `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}, сомнительных во входящих ${String(result.ambiguousCount)}.`,
+          : `По профилю «${result.profileName}»: найдено ${String(result.relevantCount)}, отброшено ${String(result.discardedCount)}, требуют проверки ${String(result.ambiguousCount)}.`,
       );
     } catch (error) {
       if (searchGeneration.current !== generation) return;

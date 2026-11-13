@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type {
   AdminCabinetSummary,
   SpecialistProcurementCard,
   SpecialistProcurementListTab,
 } from "@procurement/contracts";
-import { fetchAdminCabinets, fetchAdminUserProcurements } from "../api/auth.js";
+import {
+  deleteAdminCabinet,
+  fetchAdminCabinets,
+  fetchAdminUserProcurements,
+} from "../api/auth.js";
 import { accessMessage, roleLabel } from "../auth/labels.js";
 import { adminPanePath } from "./panes.js";
 
@@ -24,9 +28,31 @@ export function CabinetsPane({
   userId?: string;
   onError: (message: string | undefined) => void;
 }) {
+  const navigate = useNavigate();
   const [listed, setListed] = useState<readonly AdminCabinetSummary[] | undefined>();
   const [tab, setTab] = useState<SpecialistProcurementListTab>("all");
   const [cards, setCards] = useState<readonly SpecialistProcurementCard[] | undefined>();
+
+  async function removeCabinet(item: AdminCabinetSummary): Promise<void> {
+    if (item.workspaceId === undefined) return;
+    if (
+      !window.confirm(
+        `Удалить кабинет ${item.name} (${item.email})?\nВсе закупки, профили и решения будут стёрты. У пользователя останется пустой кабинет.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const next = await deleteAdminCabinet(item.workspaceId);
+      setListed(next.items);
+      if (userId === item.userId) {
+        navigate(adminPanePath("cabinets"), { replace: true });
+      }
+      onError(undefined);
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "Не удалось удалить кабинет");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +119,17 @@ export function CabinetsPane({
             {" · "}
             {cabinetPresenceLine(selected.lastActiveAt)}
           </p>
+        ) : null}
+        {selected !== undefined && selected.workspaceId !== undefined ? (
+          <div className="admin-actions">
+            <button
+              type="button"
+              className="admin-danger"
+              onClick={() => void removeCabinet(selected)}
+            >
+              Удалить кабинет
+            </button>
+          </div>
         ) : null}
         <nav className="admin-panes" aria-label="Разделы кабинета">
           {CABINET_TABS.map((item) => (
@@ -167,6 +204,15 @@ export function CabinetsPane({
                 <Link to={adminPanePath("cabinets", item.userId)} className="profile-fill">
                   Открыть
                 </Link>
+                {item.workspaceId !== undefined ? (
+                  <button
+                    type="button"
+                    className="admin-danger"
+                    onClick={() => void removeCabinet(item)}
+                  >
+                    Удалить
+                  </button>
+                ) : null}
               </div>
             </li>
           ))}

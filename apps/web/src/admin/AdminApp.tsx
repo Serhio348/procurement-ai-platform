@@ -12,6 +12,7 @@ import {
   acknowledgeAdminErrors,
   approveUser,
   changeUserRole,
+  deleteUser,
   fetchAdminJournal,
   fetchAdminUsers,
   rejectUser,
@@ -37,7 +38,7 @@ const ROLES: SpecialistRole[] = ["specialist", "viewer", "admin"];
 export function AdminApp() {
   const { pane: rawPane, userId } = useParams();
   const pane = parseAdminPane(rawPane);
-  const { refresh } = useAuthSession();
+  const { refresh, user: sessionUser } = useAuthSession();
   const [listed, setListed] = useState<AdminUserListResponse | undefined>();
   const [journal, setJournal] = useState<AdminJournalListResponse | undefined>();
   const [profiles, setProfiles] = useState<SpecialistProfileListResponse | undefined>();
@@ -182,6 +183,21 @@ export function AdminApp() {
                       setListed(await rejectUser(user.id));
                       await load();
                     }}
+                    {...(sessionUser?.id === user.id
+                      ? {}
+                      : {
+                          onDelete: async () => {
+                            if (
+                              !window.confirm(
+                                `Удалить пользователя ${user.name} (${user.email})?\nАккаунт и его кабинет будут стёрты безвозвратно.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            setListed(await deleteUser(user.id));
+                            await load();
+                          },
+                        })}
                   />
                 ))}
               </ul>
@@ -207,6 +223,21 @@ export function AdminApp() {
                           },
                         }
                       : {})}
+                    {...(sessionUser?.id === user.id
+                      ? {}
+                      : {
+                          onDelete: async () => {
+                            if (
+                              !window.confirm(
+                                `Удалить пользователя ${user.name} (${user.email})?\nАккаунт и его кабинет будут стёрты безвозвратно.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            setListed(await deleteUser(user.id));
+                            await load();
+                          },
+                        })}
                   />
                 ))}
               </ul>
@@ -284,6 +315,7 @@ function AdminUserRow({
   onReject,
   onChangeRole,
   onRevoke,
+  onDelete,
 }: {
   user: AdminUser;
   role: SpecialistRole;
@@ -292,6 +324,7 @@ function AdminUserRow({
   onReject?: () => Promise<void>;
   onChangeRole?: () => Promise<void>;
   onRevoke?: () => Promise<void>;
+  onDelete?: () => Promise<void>;
 }) {
   return (
     <li className="admin-row">
@@ -332,6 +365,11 @@ function AdminUserRow({
         {onRevoke !== undefined ? (
           <button type="button" className="admin-danger" onClick={() => void onRevoke()}>
             Отозвать
+          </button>
+        ) : null}
+        {onDelete !== undefined ? (
+          <button type="button" className="admin-danger" onClick={() => void onDelete()}>
+            Удалить
           </button>
         ) : null}
       </div>

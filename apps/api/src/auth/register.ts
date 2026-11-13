@@ -47,6 +47,12 @@ export interface RegisterAuthOptions {
   journal?: AdminJournalPort;
   provisionWorkspace?: (user: AuthRecord) => Promise<string>;
   workspaceIdFor?: (userId: string) => Promise<string | undefined>;
+  /**
+   * Wipes the user's personal cabinet before the account row goes away —
+   * membership cascades with the user, so the workspace must be found while
+   * it still exists.
+   */
+  purgeUserWorkspace?: (userId: string) => Promise<void>;
   rateLimiter?: RateLimiter;
 }
 
@@ -389,6 +395,33 @@ export function registerAuth(app: FastifyInstance, options: RegisterAuthOptions 
       return store.changeRole(id, parsed.data.role);
     }, (actor, target) =>
       `${actorName(actor)} сменил роль: ${target.name} (${target.email}) → ${specialistRoleLabel(target.role)}`,
+    );
+  });
+
+  app.delete("/api/admin/users/:id", async (request, reply) => {
+    const params = request.params as { id: string };
+    const actor = await resolveUser(request);
+    if (actor !== undefined && actor.id === params.id) {
+      return reply.code(409).send({ error: "cannot_delete_self" });
+    }
+    return mutateAdminUser(request, reply, directory, journal, resolveUser, async (store, id) => {
+      // Purge first: the membership row that locates the personal workspace
+      // cascades away with the user, so the cabinet must go while it is
+      // still reachable. A missing user simply has no workspace to purge.
+      if (options.purgeUserWorkspace !== undefined) {
+        try {
+          await options.purgeUserWorkspace(id);
+        } catch (error) {
+          await recordJournal(journal, {
+            kind: "platform",
+            level: "error",
+            message: `Не удалось удалить кабинет пользователя ${id}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 2000),
+          });
+        }
+      }
+      return store.remove(id);
+    }, (actor, target) =>
+      `${actorName(actor)} удалил пользователя: ${target.name} (${target.email})`,
     );
   });
 }

@@ -64,4 +64,32 @@ integration("postgres auth directory", () => {
       .where(sql`role = 'admin' and access_status = 'active'`);
     expect(remaining).toHaveLength(1);
   });
+
+  it("removes a user and cascades sessions and resets, but keeps the last admin", async () => {
+    const suffix = Date.now().toString(36);
+    const adminEmail = `root-${suffix}@test.local`;
+    const userEmail = `gone-${suffix}@test.local`;
+    await db.execute(sql`
+      insert into auth_users (id, email, name, password_hash, role, access_status)
+      values
+        (gen_random_uuid(), ${adminEmail}, 'Root', 'x', 'admin', 'active'),
+        (gen_random_uuid(), ${userEmail}, 'Gone', 'x', 'specialist', 'active')
+    `);
+    const directory = createPostgresAuthDirectory(db);
+    const users = await directory.listUsers();
+    const admin = users.find((user) => user.email === adminEmail);
+    const target = users.find((user) => user.email === userEmail);
+    expect(admin).toBeDefined();
+    expect(target).toBeDefined();
+
+    const session = await directory.createSession(target!.id);
+    await directory.createPasswordReset(userEmail);
+
+    await expect(directory.remove(admin!.id)).rejects.toBeInstanceOf(AuthConflictError);
+    const removed = await directory.remove(target!.id);
+    expect(removed?.id).toBe(target!.id);
+    expect((await directory.listUsers()).some((user) => user.id === target!.id)).toBe(false);
+    await expect(directory.getBySessionToken(session)).resolves.toBeUndefined();
+    await expect(directory.remove(target!.id)).resolves.toBeUndefined();
+  });
 });

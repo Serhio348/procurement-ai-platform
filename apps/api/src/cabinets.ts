@@ -68,6 +68,13 @@ export interface CabinetRegistry {
   persist: (cabinet: SpecialistCabinet) => Promise<void>;
   persistWorkspaceOnly: (cabinet: SpecialistCabinet) => Promise<void>;
   deleteProfile: (cabinet: SpecialistCabinet, profileId: string) => Promise<void>;
+  /**
+   * Permanently wipes a whole cabinet: profiles, cases, inbox, decisions,
+   * verdicts and assistant memory. The user account is untouched — the next
+   * request provisions a fresh empty workspace. Returns false when the
+   * workspace does not exist.
+   */
+  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
   persistProgress: (
     cabinet: SpecialistCabinet,
     caseIds: readonly string[],
@@ -171,6 +178,13 @@ export function createMemoryCabinetRegistry(options: {
     },
     async deleteProfile() {
       // Memory is the store.
+    },
+    async deleteWorkspace(workspaceId) {
+      const existed = byId.delete(workspaceId);
+      for (const [userId, id] of byUser) {
+        if (id === workspaceId) byUser.delete(userId);
+      }
+      return existed;
     },
     async persistProgress() {
       // Memory is the store.

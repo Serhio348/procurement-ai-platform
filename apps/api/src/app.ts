@@ -770,6 +770,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     journal,
     provisionWorkspace: (user) => cabinets.ensurePersonalWorkspace(user.id, user.name),
     workspaceIdFor: (userId) => cabinets.workspaceIdFor(userId),
+    purgeUserWorkspace: async (userId) => {
+      const workspaceId = await cabinets.findWorkspaceId(userId);
+      if (workspaceId !== undefined) await cabinets.deleteWorkspace(workspaceId);
+    },
   });
   /**
    * First open of a cabinet in this process: a stored run that died
@@ -2373,12 +2377,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }),
   );
 
-  app.get("/api/admin/cabinets", async (_request, reply) => {
-    if (options.authDirectory === undefined) {
-      return reply.code(503).send({ error: "auth_unavailable" });
-    }
-    const users = await options.authDirectory.listUsers();
-    const seen = await options.authDirectory.listLatestSeen();
+  const listAdminCabinets = async () => {
+    if (options.authDirectory === undefined) return undefined;
+    const directory = options.authDirectory;
+    const users = await directory.listUsers();
+    const seen = await directory.listLatestSeen();
     const workspaceByUser = new Map<string, string>();
     const workspaceIds: string[] = [];
     for (const user of users) {
@@ -2409,6 +2412,38 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         };
       }),
     });
+  };
+
+  app.get("/api/admin/cabinets", async (_request, reply) => {
+    const listed = await listAdminCabinets();
+    if (listed === undefined) {
+      return reply.code(503).send({ error: "auth_unavailable" });
+    }
+    return listed;
+  });
+
+  app.delete("/api/admin/cabinets/:workspaceId", async (request, reply) => {
+    const listed = await listAdminCabinets();
+    if (listed === undefined) {
+      return reply.code(503).send({ error: "auth_unavailable" });
+    }
+    const params = request.params as { workspaceId: string };
+    const target = listed.items.find((item) => item.workspaceId === params.workspaceId);
+    if (target === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const removed = await cabinets.deleteWorkspace(params.workspaceId);
+    if (!removed) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const actor = listed.items.find((item) => item.userId === request.principal?.userId);
+    await recordJournal(journal, {
+      kind: "access",
+      level: "info",
+      message: `${actor?.name ?? "Администратор"} удалил кабинет: ${target.name} (${target.email})`,
+      ...(actor === undefined ? {} : { actorName: actor.name, actorEmail: actor.email }),
+    });
+    return listAdminCabinets();
   });
 
   app.get("/api/admin/users/:id/procurements", async (request, reply) => {

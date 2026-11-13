@@ -1,4 +1,5 @@
 import { DecisionMemoryEntry, SpecialistProcurementCard } from "@procurement/contracts";
+import { inboxItemFromFoundCard } from "@procurement/domain";
 import { describe, expect, it } from "vitest";
 import { buildSpecialistApi } from "./app.js";
 import { createMemoryAuthDirectory } from "./auth/memory-directory.js";
@@ -174,6 +175,7 @@ async function twoCabinets(
   };
   return {
     app,
+    cabinets,
     memory,
     telegram,
     admin,
@@ -380,7 +382,7 @@ describe("cabinet assistant decision memory", () => {
 
 describe("assistant rule suggestions", () => {
   it("offers one rule after repeated rejects and «Принять» adds it to the profile's exclusions", async () => {
-    const { app, telegram, admin, decide, suggestions, answer, profileOf } = await twoCabinets();
+    const { app, cabinets, telegram, admin, decide, suggestions, answer, profileOf } = await twoCabinets();
     await closing(app, async () => {
       for (const title of TAKEN) await decide(admin, title, "monitor");
       for (const title of LIGHTING.slice(0, 4)) await decide(admin, title, "reject");
@@ -392,8 +394,16 @@ describe("assistant rule suggestions", () => {
       expect(offered).toEqual([
         expect.objectContaining({ label: "наружного освещения", profileName: "Сети", rejectCount: 5 }),
       ]);
-      expect(telegram.suggestions).toEqual([]);
+      expect(telegram.suggestions).toEqual(["наружного освещения"]);
       expect((await profileOf(admin)).excludeKeywords).toEqual([]);
+
+      const cabinet = await cabinets.open(admin.workspaceId);
+      const matching = card("Ремонт наружного освещения парка", admin.profileId);
+      const unrelated = card("Поставка кабеля АВВГ", admin.profileId);
+      cabinet.catalog.upsertCase(matching);
+      cabinet.catalog.upsertCase(unrelated);
+      cabinet.catalog.record(inboxItemFromFoundCard(matching, "2026-10-20T10:00:00.000Z"));
+      cabinet.catalog.record(inboxItemFromFoundCard(unrelated, "2026-10-20T10:01:00.000Z"));
 
       const accepted = await answer(admin, offered[0]!.id, "accept");
       expect(accepted.statusCode).toBe(200);
@@ -403,6 +413,14 @@ describe("assistant rule suggestions", () => {
       ).toEqual(["наружного освещения"]);
       expect((await profileOf(admin)).excludeKeywords).toEqual(["наружного освещения"]);
       expect(await suggestions(admin)).toEqual([]);
+      const inbox = await app.inject({
+        method: "GET",
+        url: "/api/inbox",
+        headers: { cookie: admin.cookie },
+      });
+      expect(
+        (JSON.parse(inbox.body) as { items: Array<{ title: string }> }).items.map((item) => item.title),
+      ).toEqual(["Поставка кабеля АВВГ"]);
       expect((await answer(admin, offered[0]!.id, "accept")).statusCode).toBe(404);
     });
   });
@@ -419,7 +437,7 @@ describe("assistant rule suggestions", () => {
         await decide(admin, `Обслуживание наружного освещения, участок ${index + 1}`, "reject");
       }
       expect(await suggestions(admin)).toEqual([]);
-      expect(telegram.suggestions).toEqual([]);
+      expect(telegram.suggestions).toEqual(["наружного освещения"]);
       expect((await profileOf(admin)).excludeKeywords).toEqual([]);
     });
   });

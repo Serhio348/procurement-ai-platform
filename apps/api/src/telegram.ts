@@ -4,7 +4,11 @@ import type {
   InboxFixtureItem as InboxFixtureItemValue,
   SpecialistTriageKind as SpecialistTriageKindValue,
 } from "@procurement/contracts";
-import { compileChangeAlert, compileTelegramText } from "@procurement/domain";
+import {
+  assistantSuggestionText,
+  compileChangeAlert,
+  compileTelegramText,
+} from "@procurement/domain";
 import type { Logger } from "@procurement/observability";
 import type { TelegramLink, TelegramStore } from "@procurement/db";
 
@@ -528,9 +532,31 @@ export function createTelegramNotifier(options: TelegramNotifierOptions): Telegr
         }
       });
     },
-    async notifySuggestion(_workspaceId, _suggestion) {
-      // Suggestions are answered in the console. Already delivered messages
-      // still accept their buttons below.
+    async notifySuggestion(workspaceId, suggestion) {
+      await ordered(workspaceId, async () => {
+        try {
+          const link = await store.linkForWorkspace(workspaceId);
+          if (link === undefined || link.mode === "urgent") return;
+          const fresh = await store.markSent(workspaceId, `suggestion:${suggestion.id}`);
+          if (!fresh) return;
+          const copy = assistantSuggestionText(suggestion);
+          await safeSend(link, {
+            text: compileTelegramText(
+              `<b>${escapeHtml(copy.title)}</b>`,
+              `${escapeHtml(copy.body)}\n${escapeHtml(copy.question)}\n${escapeHtml(copy.acceptEffect)}`,
+            ),
+            buttons: [
+              [
+                { text: copy.acceptLabel, callbackData: `s:${suggestion.id}:a` },
+                { text: copy.dismissLabel, callbackData: `s:${suggestion.id}:d` },
+              ],
+              [{ text: "Открыть в консоли", url: publicUrl }],
+            ],
+          });
+        } catch (error) {
+          logger.error("Telegram suggestion notify failed", error, { workspaceId });
+        }
+      });
     },
     async handleUpdate(update) {
       try {

@@ -213,4 +213,28 @@ describe("profile term table", () => {
     expect(table.rejectCount).toBe(0);
     expect(rejectSignals(table)).toEqual([]);
   });
+
+  it("does not learn buyer or organization names as a direction", () => {
+    const rejects = Array.from({ length: 6 }, (_, index) =>
+      decision(
+        "reject",
+        `Закупка для филиала "Радио, телевидение и связь" РУП "Белтелеком", объект ${index + 1}`,
+      ),
+    );
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], profile));
+    expect(signals.some((term) => /радио|белтелеком/iu.test(term.label))).toBe(false);
+  });
+
+  it("does not offer the profile's own trade words as an exclusion", () => {
+    const networkProfile = {
+      id: PROFILE,
+      keywords: ["сети электроснабжения"],
+      excludeKeywords: [] as string[],
+    };
+    const rejects = Array.from({ length: 6 }, (_, index) =>
+      decision("reject", `Строительство электрических сетей, объект ${index + 1}`),
+    );
+    const signals = rejectSignals(profileTermTable([...taken, ...rejects], networkProfile));
+    expect(signals.some((term) => /электрическ|сет/iu.test(term.label))).toBe(false);
+  });
 });

@@ -37,6 +37,12 @@ export interface AuthDirectory {
   approve: (id: string, role: SpecialistRole) => Promise<AuthRecord | undefined>;
   reject: (id: string) => Promise<AuthRecord | undefined>;
   revoke: (id: string) => Promise<AuthRecord | undefined>;
+  /**
+   * Permanently deletes the account. Sessions, password resets, workspace
+   * memberships and Telegram links cascade with the row. Returns the removed
+   * record so the caller can journal who was deleted.
+   */
+  remove: (id: string) => Promise<AuthRecord | undefined>;
   changeRole: (id: string, role: SpecialistRole) => Promise<AuthRecord | undefined>;
   createPasswordReset: (email: string) => Promise<string | undefined>;
   resetPassword: (token: string, password: string) => Promise<boolean>;

@@ -388,6 +388,203 @@ describe("specialist auth API", () => {
     await app.close();
   });
 
+  it("lets an admin delete a user: sessions die, the cabinet is purged, the journal records it", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const cabinets = createMemoryCabinetRegistry();
+    const app = await buildSpecialistApi({ authDirectory: directory, cabinets });
+
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const adminCookie = cookieHeader(adminIn);
+
+    const signedUp = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up",
+      payload: { email: "user@example.com", name: "Иван", password: "secret-password" },
+    });
+    const userId = JSON.parse(signedUp.body).user.id as string;
+    await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${userId}/approve`,
+      headers: { cookie: adminCookie },
+      payload: { role: "specialist" },
+    });
+    const userIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "user@example.com", password: "secret-password" },
+    });
+    const userCookie = cookieHeader(userIn);
+    const before = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { cookie: userCookie },
+    });
+    expect(JSON.parse(before.body).user?.email).toBe("user@example.com");
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/admin/users/${userId}`,
+      headers: { cookie: adminCookie },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(
+      (JSON.parse(deleted.body).items as Array<{ id: string }>).some((item) => item.id === userId),
+    ).toBe(false);
+
+    const after = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: { cookie: userCookie },
+    });
+    expect(JSON.parse(after.body).user).toBeNull();
+    await expect(cabinets.findWorkspaceId(userId)).resolves.toBeUndefined();
+
+    const journal = await app.inject({
+      method: "GET",
+      url: "/api/admin/journal",
+      headers: { cookie: adminCookie },
+    });
+    expect(
+      (JSON.parse(journal.body).items as Array<{ message: string }>).some((item) =>
+        item.message.includes("удалил пользователя"),
+      ),
+    ).toBe(true);
+    await app.close();
+  });
+
+  it("refuses self-delete and non-admin deletes", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const cabinets = createMemoryCabinetRegistry();
+    const app = await buildSpecialistApi({ authDirectory: directory, cabinets });
+
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const adminCookie = cookieHeader(adminIn);
+    const adminId = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/auth/session", headers: { cookie: adminCookie } }))
+        .body,
+    ).user.id as string;
+
+    const selfDelete = await app.inject({
+      method: "DELETE",
+      url: `/api/admin/users/${adminId}`,
+      headers: { cookie: adminCookie },
+    });
+    expect(selfDelete.statusCode).toBe(409);
+    expect(JSON.parse(selfDelete.body).error).toBe("cannot_delete_self");
+
+    const signedUp = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up",
+      payload: { email: "user@example.com", name: "Иван", password: "secret-password" },
+    });
+    const userId = JSON.parse(signedUp.body).user.id as string;
+    await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${userId}/approve`,
+      headers: { cookie: adminCookie },
+      payload: { role: "specialist" },
+    });
+    const userIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "user@example.com", password: "secret-password" },
+    });
+
+    const forbidden = await app.inject({
+      method: "DELETE",
+      url: `/api/admin/users/${adminId}`,
+      headers: { cookie: cookieHeader(userIn) },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("lets an admin wipe a cabinet and keeps the account", async () => {
+    const directory = createMemoryAuthDirectory();
+    await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");
+    const cabinets = createMemoryCabinetRegistry();
+    const app = await buildSpecialistApi({ authDirectory: directory, cabinets });
+
+    const adminIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "admin@example.com", password: "admin-password" },
+    });
+    const adminCookie = cookieHeader(adminIn);
+    await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up",
+      payload: { email: "user@example.com", name: "Иван", password: "secret-password" },
+    });
+    const users = JSON.parse(
+      (await app.inject({ method: "GET", url: "/api/admin/users", headers: { cookie: adminCookie } }))
+        .body,
+    ) as { items: Array<{ id: string; email: string }> };
+    const userId = users.items.find((item) => item.email === "user@example.com")?.id ?? "";
+    await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${userId}/approve`,
+      headers: { cookie: adminCookie },
+      payload: { role: "specialist" },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in",
+      payload: { email: "user@example.com", password: "secret-password" },
+    });
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/admin/cabinets",
+      headers: { cookie: adminCookie },
+    });
+    const item = (
+      JSON.parse(listed.body).items as Array<{ userId: string; workspaceId?: string }>
+    ).find((entry) => entry.userId === userId);
+    expect(item?.workspaceId).toBeDefined();
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/admin/cabinets/${item?.workspaceId ?? ""}`,
+      headers: { cookie: adminCookie },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(
+      (JSON.parse(deleted.body).items as Array<{ userId: string; workspaceId?: string }>).find(
+        (entry) => entry.userId === userId,
+      )?.workspaceId,
+    ).toBeUndefined();
+
+    const again = await app.inject({
+      method: "DELETE",
+      url: `/api/admin/cabinets/${item?.workspaceId ?? ""}`,
+      headers: { cookie: adminCookie },
+    });
+    expect(again.statusCode).toBe(404);
+
+    const journal = await app.inject({
+      method: "GET",
+      url: "/api/admin/journal",
+      headers: { cookie: adminCookie },
+    });
+    expect(
+      (JSON.parse(journal.body).items as Array<{ message: string }>).some((entry) =>
+        entry.message.includes("удалил кабинет"),
+      ),
+    ).toBe(true);
+    await app.close();
+  });
+
   it("keeps the first session alive when the same account signs in elsewhere", async () => {
     const directory = createMemoryAuthDirectory();
     await directory.bootstrapAdmin("admin@example.com", "admin-password", "Администратор");

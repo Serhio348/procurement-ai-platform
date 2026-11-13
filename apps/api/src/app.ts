@@ -87,6 +87,7 @@ import {
   rejectSignals,
   directionTermKey,
   procurementContexts,
+  termOccurs,
   validateAssistantDirections,
   REJECT_SIGNAL_THRESHOLDS,
   scoreIntentCard,
@@ -769,6 +770,10 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     journal,
     provisionWorkspace: (user) => cabinets.ensurePersonalWorkspace(user.id, user.name),
     workspaceIdFor: (userId) => cabinets.workspaceIdFor(userId),
+    purgeUserWorkspace: async (userId) => {
+      const workspaceId = await cabinets.findWorkspaceId(userId);
+      if (workspaceId !== undefined) await cabinets.deleteWorkspace(workspaceId);
+    },
   });
   /**
    * First open of a cabinet in this process: a stored run that died
@@ -2372,12 +2377,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
     }),
   );
 
-  app.get("/api/admin/cabinets", async (_request, reply) => {
-    if (options.authDirectory === undefined) {
-      return reply.code(503).send({ error: "auth_unavailable" });
-    }
-    const users = await options.authDirectory.listUsers();
-    const seen = await options.authDirectory.listLatestSeen();
+  const listAdminCabinets = async () => {
+    if (options.authDirectory === undefined) return undefined;
+    const directory = options.authDirectory;
+    const users = await directory.listUsers();
+    const seen = await directory.listLatestSeen();
     const workspaceByUser = new Map<string, string>();
     const workspaceIds: string[] = [];
     for (const user of users) {
@@ -2408,6 +2412,38 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         };
       }),
     });
+  };
+
+  app.get("/api/admin/cabinets", async (_request, reply) => {
+    const listed = await listAdminCabinets();
+    if (listed === undefined) {
+      return reply.code(503).send({ error: "auth_unavailable" });
+    }
+    return listed;
+  });
+
+  app.delete("/api/admin/cabinets/:workspaceId", async (request, reply) => {
+    const listed = await listAdminCabinets();
+    if (listed === undefined) {
+      return reply.code(503).send({ error: "auth_unavailable" });
+    }
+    const params = request.params as { workspaceId: string };
+    const target = listed.items.find((item) => item.workspaceId === params.workspaceId);
+    if (target === undefined) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const removed = await cabinets.deleteWorkspace(params.workspaceId);
+    if (!removed) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const actor = listed.items.find((item) => item.userId === request.principal?.userId);
+    await recordJournal(journal, {
+      kind: "access",
+      level: "info",
+      message: `${actor?.name ?? "Администратор"} удалил кабинет: ${target.name} (${target.email})`,
+      ...(actor === undefined ? {} : { actorName: actor.name, actorEmail: actor.email }),
+    });
+    return listAdminCabinets();
   });
 
   app.get("/api/admin/users/:id/procurements", async (request, reply) => {
@@ -3041,6 +3077,13 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       : AssistantSuggestionEntry.parse({ ...suggestion, profileName: profileDisplayName(profile) });
   };
 
+  const notifyAssistantSuggestion = (suggestion: AssistantSuggestionValue): void => {
+    const entry = suggestionEntry(suggestion);
+    if (entry !== undefined) {
+      void options.telegram?.notifySuggestion(currentCabinet().workspaceId, entry);
+    }
+  };
+
   /**
    * At most one open rule per profile: the next one is offered only after
    * the specialist answers the current one.
@@ -3079,9 +3122,8 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       createdAt: clock(),
     });
     if (!(await assistant.suggestions.offer(workspaceId, suggestion))) return;
+    notifyAssistantSuggestion(suggestion);
     logger.info("Assistant rule offered", { profileId, rejectCount: term.rejectCount });
-    // The choice lives in the console inbox. A Telegram copy stays after the
-    // specialist has already answered, so it is not sent.
   };
 
   /**
@@ -3174,6 +3216,7 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
         createdAt: clock(),
       });
       if (!(await assistant.suggestions.offer(workspaceId, suggestion))) return;
+      notifyAssistantSuggestion(suggestion);
       logger.info("Assistant direction offered", {
         profileId,
         direction: direction.name,
@@ -3196,6 +3239,27 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
       .filter((item) => item.state === "open")
       .map(suggestionEntry)
       .filter((item) => item !== undefined);
+  };
+
+  /** Accepted rules also clean rows that already reached this profile's inbox. */
+  const dismissInboxByExclusions = (
+    profileId: string,
+    exclusions: readonly string[],
+  ): number => {
+    let dismissed = 0;
+    for (const item of catalog().inboxItems()) {
+      if (catalog().inboxItem(item.change.id) === undefined) continue;
+      const card = catalog().procurement(item.change.procurementId);
+      if (card === undefined || !card.profileIds.includes(profileId)) continue;
+      const lotTitles = (card.sourceCard?.lots ?? []).map((lot) => lot.title);
+      const contexts = [
+        ...procurementContexts({ title: item.procurement.title, lotTitles }),
+        ...procurementContexts({ title: card.title, lotTitles }),
+      ];
+      if (!exclusions.some((term) => contexts.some((text) => termOccurs(text, term)))) continue;
+      if (catalog().dismiss(item.change.id)) dismissed += 1;
+    }
+    return dismissed;
   };
 
   /**
@@ -3235,6 +3299,11 @@ export async function buildSpecialistApi(options: BuildApiOptions = {}): Promise
           }),
         );
         await persistWorkspaceOnly();
+      }
+      const dismissed = dismissInboxByExclusions(profile.id, exclusions);
+      if (dismissed > 0) {
+        workspace().setDismissedInboxIds(catalog().dismissedIds());
+        await persistProgress([]);
       }
     }
     const closed = await assistant.suggestions.resolve(

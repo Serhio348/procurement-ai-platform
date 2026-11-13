@@ -214,6 +214,31 @@ export function createMemoryAuthDirectory(now: () => Date = () => new Date()): A
       return updated;
     },
 
+    async remove(id) {
+      const current = users.get(id);
+      if (current === undefined) return undefined;
+      const remaining = listRecords().filter((user) => user.id !== id);
+      // Only an active admin can shrink the admin count — removing a pending
+      // or specialist account is always safe, even before the first admin
+      // exists.
+      if (
+        current.role === "admin" &&
+        current.accessStatus === "active" &&
+        !hasActiveAdmin(remaining)
+      ) {
+        throw new AuthConflictError("last_admin");
+      }
+      users.delete(id);
+      byEmail.delete(current.email);
+      for (const [key, session] of sessions) {
+        if (session.userId === id) sessions.delete(key);
+      }
+      for (const [key, reset] of resets) {
+        if (reset.userId === id) resets.delete(key);
+      }
+      return publicAuthRecord(current);
+    },
+
     async changeRole(id, role) {
       const current = users.get(id);
       if (current === undefined || current.accessStatus !== "active") return undefined;

@@ -43,6 +43,16 @@ const ADDRESS_MARK =
   /(?:^|[\s,(])(?:по\s+адресу|расположен\p{L}*|(?:\p{L}+\s+)?област\p{L}*|(?:\p{L}+\s+)?район\p{L}*|ул\.?|улиц\p{L}*|пр-т|проспект\p{L}*|пер\.?|переул\p{L}*|г\.|город\p{L}*|д\.|дер\.?|деревн\p{L}*|аг\.?|агрогород\p{L}*|обл\.?|р-н)/iu;
 /** Grammar of a procurement title, not the thing being bought. */
 const FRAME_PREFIXES = ["объект", "закуп", "выбор", "выполн", "проведен", "оказан"];
+/** Customer/beneficiary wording locates who buys, not what is bought. */
+const CUSTOMER_MARK =
+  /(?:для\s+(?:филиал\p{L}*|нужд\p{L}*|организац\p{L}*|учрежден\p{L}*|предприят\p{L}*)|заказчик\p{L}*|покупател\p{L}*|потребител\p{L}*|(?<![\p{L}\d])(?:РУП|ГУП|ГУО|ГУДО|ОАО|ЗАО|ЧУП|ИП)(?![\p{L}\d]))/iu;
+/** Shared vocabulary that describes the trade itself, not one refused direction. */
+const GENERIC_DIRECTION_STEMS = new Set([
+  "возведе", "дом", "здан", "здани", "капиталь", "модернизац", "монтаж",
+  "оборудова", "объект", "организац", "помеще", "пусконалад", "работ",
+  "реконструкц", "ремонт", "сет", "систем", "строитель", "строительств",
+  "текущ", "услуг", "устройств", "электрическ", "электромонтаж", "электроснабж",
+]);
 
 export interface DecisionTerm {
   key: string;
@@ -58,7 +68,7 @@ export interface DecisionTerm {
 export function procurementContexts(
   entry: Pick<DecisionMemoryEntry, "title" | "lotTitles">,
 ): string[] {
-  const texts = [entry.title, ...entry.lotTitles];
+  const texts = [entry.title, ...entry.lotTitles].map(stripCustomerClause);
   const quoted = texts.flatMap(quotedParts);
   if (quoted.length > 0) return contextsOf(quoted);
   const objects = texts.flatMap(clauseAfterObject);
@@ -107,6 +117,12 @@ function clauseAfterObject(text: string): string[] {
   if (match === null) return [];
   const clause = text.slice(match.index + match[0].length);
   return clause.trim().length > 0 ? [clause] : [];
+}
+
+function stripCustomerClause(text: string): string {
+  const match = CUSTOMER_MARK.exec(text);
+  if (match === null) return text;
+  return text.slice(0, match.index);
 }
 
 function stripAddress(text: string): string {
@@ -202,7 +218,8 @@ export function rejectSignals(
     (term) =>
       term.acceptCount === 0 &&
       term.rejectCount >= thresholds.minRejects &&
-      isDirectionTerm(term),
+      isDirectionTerm(term) &&
+      !isGenericTerm(term.key),
   );
   const pairs = candidates.filter((term) => term.key.includes(" "));
   return candidates.filter((term) => {
@@ -239,6 +256,15 @@ export function nextSuggestionTerm(
  */
 function isDirectionTerm(term: AssistantTermStat): boolean {
   return term.key.includes(" ") || !ADJECTIVE_STEM.test(term.key);
+}
+
+/**
+ * Trade vocabulary («строительство», «электроснабжение») is shared by most
+ * of a cabinet's purchases, so it never explains why one direction was
+ * refused. Only a term carrying a non-generic stem is a signal.
+ */
+function isGenericTerm(key: string): boolean {
+  return key.split(" ").every((stem) => GENERIC_DIRECTION_STEMS.has(stem));
 }
 
 function isUnigramTerm(word: TokenizedWord): boolean {

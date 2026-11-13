@@ -267,6 +267,28 @@ export function createPostgresAuthDirectory(
       return updated;
     },
 
+    async remove(id) {
+      // Same lock discipline as replaceStatus: the last-admin check and the
+      // delete must not race a concurrent demote (R39).
+      return db.transaction(async (tx) => {
+        const locked = await tx.select().from(authUsers).for("update");
+        const current = locked.find((row) => row.id === id);
+        if (current === undefined) return undefined;
+        const remaining = sortUsers(
+          locked.filter((row) => row.id !== id).map(toRecord),
+        );
+        if (
+          current.role === "admin" &&
+          current.accessStatus === "active" &&
+          !hasActiveAdmin(remaining)
+        ) {
+          throw new AuthConflictError("last_admin");
+        }
+        await tx.delete(authUsers).where(eq(authUsers.id, id));
+        return toRecord(current);
+      });
+    },
+
     async changeRole(id, role) {
       const rows = await db.select().from(authUsers).where(eq(authUsers.id, id)).limit(1);
       const row = rows[0];

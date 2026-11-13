@@ -40,7 +40,7 @@ import {
   type SpecialistCabinet,
   retainedCabinetCaseIds,
 } from "./cabinets.js";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export interface SpecialistPersistence {
@@ -524,6 +524,36 @@ export async function openSpecialistPersistence(options: {
         inboxFilePath(options.workspacePath, cabinet.workspaceId),
         cabinet.catalog.inboxItems(),
       );
+    },
+    async deleteWorkspace(workspaceId) {
+      // The shared default cabinet is test/fixture infrastructure, never a
+      // purge target — same rule the disk-mirror cleanup below follows.
+      if (workspaceId === TEST_WORKSPACE_ID) return false;
+      return enqueueWorkspaceWrite(workspaceId, async () => {
+        cache.delete(workspaceId);
+        deletedProfileIds.delete(workspaceId);
+        const removed =
+          store !== undefined
+            ? await store.deleteWorkspace(workspaceId)
+            : await memoryCabinets.deleteWorkspace(workspaceId);
+        // A cabinet opened while the wipe ran must not stay cached — the
+        // next request would keep writing into a deleted workspace.
+        cache.delete(workspaceId);
+        workspaceWriteTail.delete(workspaceId);
+        // Disk files are a per-workspace mirror; drop them so a deleted
+        // cabinet cannot resurrect through the file fallback. The shared
+        // default cabinet (TEST_WORKSPACE_ID) is never wiped this way.
+        if (workspaceId !== TEST_WORKSPACE_ID) {
+          await Promise.all(
+            [
+              workspaceFilePath(options.workspacePath, workspaceId),
+              casesFilePath(options.workspacePath, workspaceId),
+              inboxFilePath(options.workspacePath, workspaceId),
+            ].map((file) => rm(file, { force: true })),
+          );
+        }
+        return removed;
+      });
     },
     async removeCases(workspaceId, ids) {
       await removeCases(ids, workspaceId);

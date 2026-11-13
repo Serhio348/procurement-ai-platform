@@ -218,6 +218,40 @@ export async function revokeUser(
   return AdminUserListResponse.parse(await response.json());
 }
 
+export async function deleteUser(
+  id: string,
+  fetcher: typeof fetch = fetch,
+): Promise<AdminUserListResponseValue> {
+  const response = await fetcher(
+    `/api/admin/users/${id}`,
+    withCredentials({ method: "DELETE" }),
+  );
+  if (response.status === 409) {
+    throw new Error("Нельзя удалить самого себя или последнего администратора");
+  }
+  if (!response.ok) {
+    throw new Error("Не удалось удалить пользователя");
+  }
+  return AdminUserListResponse.parse(await response.json());
+}
+
+export async function deleteAdminCabinet(
+  workspaceId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<AdminCabinetListResponseValue> {
+  const response = await fetcher(
+    `/api/admin/cabinets/${workspaceId}`,
+    withCredentials({ method: "DELETE" }),
+  );
+  if (response.status === 404) {
+    throw new Error("Кабинет не найден");
+  }
+  if (!response.ok) {
+    throw new Error("Не удалось удалить кабинет");
+  }
+  return AdminCabinetListResponse.parse(await response.json());
+}
+
 export async function changeUserRole(
   id: string,
   role: SpecialistRole,

@@ -20,6 +20,9 @@ import {
   documentVersions,
   documents,
   procurements,
+  specialistTelegramSent,
+  workspaceAssistantSuggestions,
+  workspaceDecisionMemory,
   workspaceDecisions,
   workspaceInbox,
   workspaceMembers,
@@ -189,6 +192,53 @@ export function createSpecialistStore(db: Database) {
       return withRlsBypass(db, async (tx) => {
         const rows = await tx.select({ id: workspaces.id }).from(workspaces);
         return rows.map((row) => row.id);
+      });
+    },
+
+    /**
+     * Wipes one cabinet end to end. Children go first, in dependency order —
+     * the same RLS+cascade trap documented in removeCases applies here: a
+     * cascade fired after its parent row is gone fails the child policy and
+     * rolls the whole delete back. Canonical procurements/documents are
+     * shared catalog data and stay; only this workspace's rows go.
+     */
+    async deleteWorkspace(workspaceId: string): Promise<boolean> {
+      return withRlsBypass(db, async (tx) => {
+        const caseRows = await tx
+          .select({ id: workspaceProcurements.id })
+          .from(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        const caseIds = caseRows.map((row) => row.id);
+        if (caseIds.length > 0) {
+          await tx
+            .delete(workspaceProcurementProfiles)
+            .where(inArray(workspaceProcurementProfiles.workspaceProcurementId, caseIds));
+        }
+        await tx.delete(workspaceInbox).where(eq(workspaceInbox.workspaceId, workspaceId));
+        await tx.delete(workspaceDecisions).where(eq(workspaceDecisions.workspaceId, workspaceId));
+        await tx
+          .delete(workspaceReviewVerdicts)
+          .where(eq(workspaceReviewVerdicts.workspaceId, workspaceId));
+        await tx
+          .delete(workspaceDecisionMemory)
+          .where(eq(workspaceDecisionMemory.workspaceId, workspaceId));
+        await tx
+          .delete(workspaceAssistantSuggestions)
+          .where(eq(workspaceAssistantSuggestions.workspaceId, workspaceId));
+        await tx
+          .delete(specialistTelegramSent)
+          .where(eq(specialistTelegramSent.workspaceId, workspaceId));
+        await tx
+          .delete(workspaceProcurements)
+          .where(eq(workspaceProcurements.workspaceId, workspaceId));
+        await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
+        await tx.delete(workspaceProfiles).where(eq(workspaceProfiles.workspaceId, workspaceId));
+        await tx.delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId));
+        const removed = await tx
+          .delete(workspaces)
+          .where(eq(workspaces.id, workspaceId))
+          .returning({ id: workspaces.id });
+        return removed.length > 0;
       });
     },
 
